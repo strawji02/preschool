@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ContactFormData, ContactFormErrors } from '@/types/form';
 import { validateContactForm, isFormValid } from '@/lib/validation';
 import Button from '@/components/ui/Button';
@@ -13,10 +13,23 @@ export default function ContactForm() {
     privacyAgreed: false,
   });
 
+  const [adSource, setAdSource] = useState<string>('direct');
+
   const [errors, setErrors] = useState<ContactFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+
+  // 유입경로 추적
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const source =
+      urlParams.get('ad') ||
+      urlParams.get('source') ||
+      urlParams.get('utm_source') ||
+      'direct';
+    setAdSource(source);
+  }, []);
 
   // 전화번호 자동 포맷팅 함수
   const formatPhoneNumber = (value: string) => {
@@ -56,12 +69,28 @@ export default function ContactForm() {
 
     setIsSubmitting(true);
 
-    // 서버 연동 없이 클라이언트 사이드 처리
     try {
-      // 시뮬레이션: 1초 대기
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Google Sheets로 데이터 전송
+      const response = await fetch(
+        'https://script.google.com/macros/s/AKfycbxIRP7vUsVjLpg5KA457Qu_wEZC6hDvaIQuBT1XJrxvvMN0hPsmN28iZMK8xvs7dnOmTg/exec',
+        {
+          method: 'POST',
+          mode: 'no-cors', // Google Apps Script CORS 우회
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'contact',
+            kindergartenName: formData.kindergartenName,
+            contact: formData.contact,
+            source: adSource,
+            timestamp: new Date().toISOString(),
+          }),
+        }
+      );
 
-      // localStorage에 저장 (선택사항)
+      // no-cors 모드에서는 응답을 읽을 수 없으므로 성공으로 간주
+      // localStorage에도 백업 저장 (선택사항)
       const submissions = JSON.parse(
         localStorage.getItem('contactSubmissions') || '[]'
       );
