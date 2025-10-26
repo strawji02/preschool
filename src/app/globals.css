@@ -1,26 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f6f9;
+  --foreground: #2c3e50;
+  --font-noto-sans-kr: 'Noto Sans KR', sans-serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-noto-sans-kr);
+}
+
+/* 폼 요소 스타일 */
+input[type='text'],
+input[type='tel'],
+input[type='email'] {
+  background-color: #ffffff;
+  color: #1a202c;
+}
+
+input[type='text']:focus,
+input[type='tel']:focus,
+input[type='email']:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #e67e22;
+}
+
+input[type='checkbox']:checked {
+  background-color: #e67e22;
+  border-color: #e67e22;
 }
