@@ -12,9 +12,6 @@ export default function Footer() {
             <span>휴대폰: {COMPANY_INFO.fax}</span>
           </p>
         </div>
-        <div className="text-gray-500">
-          <p>{COMPANY_INFO.copyright}</p>
-        </div>
       </div>
     </footer>
   );

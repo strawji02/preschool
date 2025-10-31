@@ -5,6 +5,7 @@ import type { ContactFormData, ContactFormErrors } from '@/types/form';
 import { validateContactForm, isFormValid } from '@/lib/validation';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import Spinner from '@/components/ui/Spinner';
 import { COMPANY_INFO } from '@/lib/constants';
 
 export default function ContactForm() {
@@ -32,24 +33,72 @@ export default function ContactForm() {
     setAdSource(source);
   }, []);
 
-  // 전화번호 자동 포맷팅 함수
+  // 전화번호 자동 포맷팅 함수 (지역번호 지원)
   const formatPhoneNumber = (value: string) => {
     // 숫자만 추출
     const numbers = value.replace(/[^\d]/g, '');
 
-    // 최대 11자리까지만 허용
-    const limitedNumbers = numbers.slice(0, 11);
+    // 최대 12자리까지 허용 (지역번호 4자리 + 8자리)
+    const limitedNumbers = numbers.slice(0, 12);
 
     // 포맷팅 적용
+    if (limitedNumbers.length <= 2) {
+      return limitedNumbers;
+    }
+
+    // 02 지역번호 (서울)
+    if (limitedNumbers.startsWith('02')) {
+      if (limitedNumbers.length <= 2) {
+        return limitedNumbers;
+      } else if (limitedNumbers.length <= 5) {
+        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2)}`;
+      } else if (limitedNumbers.length <= 9) {
+        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2, 5)}-${limitedNumbers.slice(5)}`;
+      } else {
+        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2, 6)}-${limitedNumbers.slice(6, 10)}`;
+      }
+    }
+
+    // 010, 011, 016, 017, 018, 019 (휴대폰)
+    if (limitedNumbers.startsWith('01')) {
+      if (limitedNumbers.length <= 3) {
+        return limitedNumbers;
+      } else if (limitedNumbers.length <= 7) {
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
+      } else {
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7, 11)}`;
+      }
+    }
+
+    // 3자리 지역번호 (031, 032, 033, 041, 042, 043, 051, 052, 053, 054, 055, 061, 062, 063, 064 등)
+    if (limitedNumbers.length >= 3 && /^0[3-6]/.test(limitedNumbers)) {
+      if (limitedNumbers.length <= 3) {
+        return limitedNumbers;
+      } else if (limitedNumbers.length <= 6) {
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
+      } else if (limitedNumbers.length <= 10) {
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 6)}-${limitedNumbers.slice(6)}`;
+      } else {
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7, 11)}`;
+      }
+    }
+
+    // 4자리 지역번호 (1544, 1588 등 대표번호)
+    if (limitedNumbers.startsWith('15') || limitedNumbers.startsWith('16') || limitedNumbers.startsWith('18')) {
+      if (limitedNumbers.length <= 4) {
+        return limitedNumbers;
+      } else {
+        return `${limitedNumbers.slice(0, 4)}-${limitedNumbers.slice(4, 8)}`;
+      }
+    }
+
+    // 기본 포맷 (3-4-4)
     if (limitedNumbers.length <= 3) {
       return limitedNumbers;
     } else if (limitedNumbers.length <= 7) {
       return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
     } else {
-      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
-        3,
-        7
-      )}-${limitedNumbers.slice(7)}`;
+      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7)}`;
     }
   };
 
@@ -165,7 +214,7 @@ export default function ContactForm() {
               id="contact"
               value={formData.contact}
               onChange={handlePhoneChange}
-              placeholder="010-0000-0000"
+              placeholder="010-1234-5678 또는 02-123-4567"
               inputMode="numeric"
               className={`w-full h-10 px-3 rounded-md border-0 text-base ${
                 errors.contact ? 'ring-2 ring-red-500' : ''
@@ -216,7 +265,14 @@ export default function ContactForm() {
         {/* 제출 버튼 */}
         <div className="text-right mt-5">
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? '제출 중...' : '제출하기'}
+            {isSubmitting ? (
+              <span className="flex items-center gap-2">
+                <Spinner size="sm" className="text-white" />
+                제출 중...
+              </span>
+            ) : (
+              '제출하기'
+            )}
           </Button>
         </div>
       </form>

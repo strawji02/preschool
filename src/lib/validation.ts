@@ -10,14 +10,15 @@ export function validateContactForm(data: ContactFormData): ContactFormErrors {
     errors.kindergartenName = '최소 2자 이상 입력해주세요.';
   }
 
-  // 연락처 검증
+  // 연락처 검증 (지역번호 포함)
   const contactDigits = data.contact.replace(/[^0-9]/g, '');
   if (!data.contact.trim()) {
     errors.contact = '연락처를 입력해주세요.';
   } else if (!/^[0-9]+$/.test(contactDigits)) {
     errors.contact = '숫자만 입력해주세요.';
-  } else if (contactDigits.length < 10 || contactDigits.length > 11) {
-    errors.contact = '올바른 연락처를 입력해주세요. (10-11자리)';
+  } else if (contactDigits.length < 9 || contactDigits.length > 11) {
+    // 9-11자리 허용: 02-123-4567(9자리), 031-123-4567(10자리), 010-1234-5678(11자리)
+    errors.contact = '올바른 연락처를 입력해주세요. (9-11자리)';
   }
 
   // 개인정보 동의 검증

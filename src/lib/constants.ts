@@ -52,7 +52,6 @@ export const COMPANY_INFO = {
   call: '02-2157-8085',
   fax: '02-2157-8086',
   email: 'ilsinkim0616@gmail.com',
-  copyright: 'ⓒ 2024 First Consulting. All rights reserved"',
 } as const;
 
 export const NAVIGATION_ITEMS = [
