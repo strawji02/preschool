@@ -5,6 +5,7 @@ import type { ContactFormData, ContactFormErrors } from '@/types/form';
 import { validateContactForm, isFormValid } from '@/lib/validation';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { COMPANY_INFO } from '@/lib/constants';
 
 export default function ContactForm() {
   const [formData, setFormData] = useState<ContactFormData>({
@@ -45,7 +46,10 @@ export default function ContactForm() {
     } else if (limitedNumbers.length <= 7) {
       return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
     } else {
-      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7)}`;
+      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
+        3,
+        7
+      )}-${limitedNumbers.slice(7)}`;
     }
   };
 
@@ -184,7 +188,10 @@ export default function ContactForm() {
             }
             className="h-4 w-4 text-[#e67e22] border-gray-300 rounded focus:ring-[#e67e22]"
           />
-          <label htmlFor="privacy_agree" className="ml-2 text-sm text-[#ecf0f1]">
+          <label
+            htmlFor="privacy_agree"
+            className="ml-2 text-sm text-[#ecf0f1]"
+          >
             개인정보 수집 및 이용에 동의합니다.
           </label>
           <button
@@ -222,11 +229,11 @@ export default function ContactForm() {
       >
         <div className="space-y-4">
           <p>
-            퍼스트 컨설팅(이하 &apos;회사&apos;라 함)은 이용자의 개인정보를 중요시하며,
-            「개인정보 보호법」 등 관련 법령을 준수하고 있습니다. 회사는 본
-            개인정보처리방침을 통하여 이용자가 제공하는 개인정보가 어떠한
-            용도와 방식으로 이용되고 있으며, 개인정보보호를 위해 어떠한 조치가
-            취해지고 있는지 알려드립니다.
+            퍼스트 컨설팅(이하 &apos;회사&apos;라 함)은 이용자의 개인정보를
+            중요시하며, 「개인정보 보호법」 등 관련 법령을 준수하고 있습니다.
+            회사는 본 개인정보처리방침을 통하여 이용자가 제공하는 개인정보가
+            어떠한 용도와 방식으로 이용되고 있으며, 개인정보보호를 위해 어떠한
+            조치가 취해지고 있는지 알려드립니다.
           </p>
 
           <div>
@@ -266,11 +273,12 @@ export default function ContactForm() {
               달성되면 지체 없이 파기합니다.
             </p>
             <ul className="list-disc list-inside mt-1 pl-2">
-              <li>보유 기간: 상담 종료 후 1년 (내부 방침에 따른 상담 이력 관리)</li>
               <li>
-                단, 이용자의 삭제 요청이 있거나 관계 법령의 규정에 의하여
-                보존할 필요가 있는 경우 해당 법령에서 정한 기간 동안
-                보관합니다.
+                보유 기간: 상담 종료 후 1년 (내부 방침에 따른 상담 이력 관리)
+              </li>
+              <li>
+                단, 이용자의 삭제 요청이 있거나 관계 법령의 규정에 의하여 보존할
+                필요가 있는 경우 해당 법령에서 정한 기간 동안 보관합니다.
               </li>
             </ul>
           </div>
@@ -280,10 +288,10 @@ export default function ContactForm() {
               4. 정보주체의 권리·의무 및 행사방법
             </h5>
             <p className="mt-1">
-              이용자는 언제든지 등록되어 있는 자신의 개인정보를 조회하거나
-              수정, 삭제를 요청할 수 있습니다. 개인정보의 조회, 수정, 삭제
-              요청은 회사의 대표 연락처(전화 또는 이메일)를 통해 본인 확인
-              절차를 거친 후 가능합니다.
+              이용자는 언제든지 등록되어 있는 자신의 개인정보를 조회하거나 수정,
+              삭제를 요청할 수 있습니다. 개인정보의 조회, 수정, 삭제 요청은
+              회사의 대표 연락처(전화 또는 이메일)를 통해 본인 확인 절차를 거친
+              후 가능합니다.
             </p>
           </div>
 
@@ -297,13 +305,11 @@ export default function ContactForm() {
               있습니다.
             </p>
             <ul className="list-none mt-1 pl-2 space-y-1">
-              <li>- 개인정보 보호책임자: [담당자 이름 입력]</li>
-              <li>- 전화번호: 02-0000-0000</li>
-              <li>- 휴대폰: 010-3033-3122</li>
-              <li>
-                - 주소: 서울시 송파구 충민로 66, 가든파이브라이프 F8100
-              </li>
-              <li>- 이메일: [회사 이메일 주소 입력]</li>
+              <li>- 개인정보 보호책임자: {COMPANY_INFO.representative}</li>
+              <li>- 전화: {COMPANY_INFO.call}</li>
+              <li>- Fax: {COMPANY_INFO.fax}</li>
+              <li>- 주소: {COMPANY_INFO.address}</li>
+              <li>- 이메일: {COMPANY_INFO.email}</li>
             </ul>
           </div>
 
@@ -315,7 +321,7 @@ export default function ContactForm() {
               본 개인정보처리방침의 내용 추가, 삭제 및 수정이 있을 경우, 시행
               최소 7일 전에 홈페이지를 통해 고지할 것입니다.
             </p>
-            <p className="mt-2 font-semibold">- 시행일자: 202X년 XX월 XX일</p>
+            <p className="mt-2 font-semibold">- 시행일자: 2025년 11월 1일</p>
           </div>
         </div>
       </Modal>

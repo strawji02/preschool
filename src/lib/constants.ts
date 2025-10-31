@@ -27,7 +27,7 @@ export const SERVICES = [
     id: 'labor',
     title: '노무 컨설팅',
     items: [
-      '10인 이상 사업장 취업규칙 작성 및 제출',
+      '취업규칙 컨설팅',
       '근로계약서 필수 표기사항 및 부당 계약내용 검토',
       '교직원 보수 규정 관리 및 4대 보험 자문',
       '연차휴가 관리 및 퇴직금 적립/정산 자문',
@@ -47,11 +47,12 @@ export const SERVICES = [
 
 export const COMPANY_INFO = {
   name: '퍼스트 컨설팅',
-  address: '서울시 송파구 충민로 66, 가든파이브라이프 F8100',
-  phone: '02-0000-0000',
-  mobile: '010-3033-3122',
-  email: '', // 추후 추가
-  copyright: '© 2024 First Consulting. All rights reserved.',
+  representative: '김 중 영',
+  address: '서울시 송파구 충민로 66, 가든파이브라이프 F8100 ~ F8101',
+  call: '02-2157-8085',
+  fax: '02-2157-8086',
+  email: 'ilsinkim0616@gmail.com',
+  copyright: 'ⓒ 2024 First Consulting. All rights reserved"',
 } as const;
 
 export const NAVIGATION_ITEMS = [
