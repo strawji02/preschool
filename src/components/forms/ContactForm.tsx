@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Spinner from '@/components/ui/Spinner';
 import { COMPANY_INFO } from '@/lib/constants';
+import { sendGAEvent } from '@next/third-parties/google';
 
 export default function ContactForm() {
   const [formData, setFormData] = useState<ContactFormData>({
@@ -124,7 +125,7 @@ export default function ContactForm() {
 
     try {
       // Google Sheets로 데이터 전송
-      const response = await fetch(
+      await fetch(
         'https://script.google.com/macros/s/AKfycbxIRP7vUsVjLpg5KA457Qu_wEZC6hDvaIQuBT1XJrxvvMN0hPsmN28iZMK8xvs7dnOmTg/exec',
         {
           method: 'POST',
@@ -152,6 +153,14 @@ export default function ContactForm() {
         timestamp: new Date().toISOString(),
       });
       localStorage.setItem('contactSubmissions', JSON.stringify(submissions));
+
+      // ✅ GA4 이벤트 전송
+      sendGAEvent('event', 'form_submit', {
+        event_category: 'engagement',
+        event_label: 'contact_form',
+        kindergarten_name: formData.kindergartenName,
+        source: adSource,
+      });
 
       // 성공 처리
       setSubmitSuccess(true);

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Noto_Sans_KR } from 'next/font/google';
 import './globals.css';
 import { Analytics } from '@vercel/analytics/next';
+import { GoogleAnalytics } from '@next/third-parties/google';
 
 const notoSansKr = Noto_Sans_KR({
   subsets: ['latin'],
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body className={`${notoSansKr.variable} font-sans antialiased`}>
         {children}
         <Analytics />
+        <GoogleAnalytics gaId="G-XPXZTY2WMN" />
       </body>
     </html>
   );
