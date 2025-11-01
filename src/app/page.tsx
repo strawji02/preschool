@@ -10,7 +10,7 @@ export default function Home() {
   return (
     <div className="p-4 sm:p-8">
       <PageviewTracker />
-      <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl p-6 sm:p-10 mx-auto">
+      <div className="w-full max-w-7xl bg-white rounded-2xl shadow-xl p-6 sm:p-10 mx-auto">
         <Header />
 
         <main>

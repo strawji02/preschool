@@ -9,7 +9,7 @@ export default function Footer() {
           <p className="mt-1">주소: {COMPANY_INFO.address}</p>
           <p>
             <span className="mr-3">전화: {COMPANY_INFO.call}</span>
-            <span>휴대폰: {COMPANY_INFO.fax}</span>
+            <span>Fax: {COMPANY_INFO.fax}</span>
           </p>
         </div>
       </div>

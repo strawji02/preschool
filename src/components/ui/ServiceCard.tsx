@@ -27,7 +27,10 @@ export default function ServiceCard({ title, items }: ServiceCardProps) {
       </div>
       <ul className="mt-5 text-base text-[#555] space-y-3">
         {items.map((item, index) => (
-          <li key={index}>• {item}</li>
+          <li key={index} className="pl-4 relative">
+            <span className="absolute left-0">•</span>
+            {item}
+          </li>
         ))}
       </ul>
     </div>
