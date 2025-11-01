@@ -17,6 +17,9 @@ export default function PageviewTracker() {
       return;
     }
 
+    // ✅ Race condition 방지: fetch 시작 전에 즉시 마킹
+    sessionStorage.setItem(SESSION_STORAGE_KEY, 'true');
+
     // URL 파라미터 읽기
     const urlParams = new URLSearchParams(window.location.search);
     const adSource =
@@ -37,14 +40,14 @@ export default function PageviewTracker() {
             type: 'pageview',
             source: adSource || 'direct', // 광고 출처 또는 'direct'
             page: window.location.pathname + window.location.search,
+            href: window.location.href, // ✅ 전체 URL 추가
             timestamp: new Date().toISOString(),
           }),
         });
-
-        // 기록 완료 후 세션 스토리지에 표시
-        sessionStorage.setItem(SESSION_STORAGE_KEY, 'true');
       } catch (error) {
         console.error('Analytics tracking error:', error);
+        // ❌ 실패 시 마킹 제거 (재시도 가능하도록)
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
       }
     };
 
