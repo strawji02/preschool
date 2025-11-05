@@ -54,9 +54,15 @@ export default function ContactForm() {
       } else if (limitedNumbers.length <= 5) {
         return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2)}`;
       } else if (limitedNumbers.length <= 9) {
-        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2, 5)}-${limitedNumbers.slice(5)}`;
+        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(
+          2,
+          5
+        )}-${limitedNumbers.slice(5)}`;
       } else {
-        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(2, 6)}-${limitedNumbers.slice(6, 10)}`;
+        return `${limitedNumbers.slice(0, 2)}-${limitedNumbers.slice(
+          2,
+          6
+        )}-${limitedNumbers.slice(6, 10)}`;
       }
     }
 
@@ -67,7 +73,10 @@ export default function ContactForm() {
       } else if (limitedNumbers.length <= 7) {
         return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
       } else {
-        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7, 11)}`;
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
+          3,
+          7
+        )}-${limitedNumbers.slice(7, 11)}`;
       }
     }
 
@@ -78,14 +87,24 @@ export default function ContactForm() {
       } else if (limitedNumbers.length <= 6) {
         return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
       } else if (limitedNumbers.length <= 10) {
-        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 6)}-${limitedNumbers.slice(6)}`;
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
+          3,
+          6
+        )}-${limitedNumbers.slice(6)}`;
       } else {
-        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7, 11)}`;
+        return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
+          3,
+          7
+        )}-${limitedNumbers.slice(7, 11)}`;
       }
     }
 
     // 4자리 지역번호 (1544, 1588 등 대표번호)
-    if (limitedNumbers.startsWith('15') || limitedNumbers.startsWith('16') || limitedNumbers.startsWith('18')) {
+    if (
+      limitedNumbers.startsWith('15') ||
+      limitedNumbers.startsWith('16') ||
+      limitedNumbers.startsWith('18')
+    ) {
       if (limitedNumbers.length <= 4) {
         return limitedNumbers;
       } else {
@@ -99,7 +118,10 @@ export default function ContactForm() {
     } else if (limitedNumbers.length <= 7) {
       return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`;
     } else {
-      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 7)}-${limitedNumbers.slice(7)}`;
+      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(
+        3,
+        7
+      )}-${limitedNumbers.slice(7)}`;
     }
   };
 
@@ -373,6 +395,7 @@ export default function ContactForm() {
               <li>- 개인정보 보호책임자: {COMPANY_INFO.representative}</li>
               <li>- 전화: {COMPANY_INFO.call}</li>
               <li>- Fax: {COMPANY_INFO.fax}</li>
+              <li>- 휴대전화: {COMPANY_INFO.phone}</li>
               <li>- 주소: {COMPANY_INFO.address}</li>
               <li>- 이메일: {COMPANY_INFO.email}</li>
             </ul>

@@ -51,6 +51,7 @@ export const COMPANY_INFO = {
   address: '서울시 송파구 충민로 66, 가든파이브라이프 F8100 ~ F8101',
   call: '02-2157-8085',
   fax: '02-2157-8086',
+  phone: '010-3033-3122',
   email: 'ilsinkim0616@gmail.com',
 } as const;
 

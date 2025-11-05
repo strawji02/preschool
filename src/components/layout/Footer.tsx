@@ -10,6 +10,7 @@ export default function Footer() {
           <p>
             <span className="mr-3">전화: {COMPANY_INFO.call}</span>
             <span>Fax: {COMPANY_INFO.fax}</span>
+            <span>휴대전화: {COMPANY_INFO.phone}</span>
           </p>
         </div>
       </div>
