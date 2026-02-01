@@ -4,36 +4,49 @@ import { useState, useEffect, useCallback } from 'react'
 import { X, Search, Loader2, Check } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import type { AuditItemResponse, MatchCandidate, Supplier } from '@/types/audit'
+import type { ComparisonItem, MatchCandidate, Supplier } from '@/types/audit'
 
 interface ProductSearchModalProps {
-  item: AuditItemResponse
+  item: ComparisonItem
+  initialSupplier?: Supplier
   isOpen: boolean
   onClose: () => void
-  onSelect: (itemId: string, product: MatchCandidate) => void
+  onSelect: (itemId: string, product: MatchCandidate, supplier: Supplier) => void
 }
 
-export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductSearchModalProps) {
+export function ProductSearchModal({
+  item,
+  initialSupplier,
+  isOpen,
+  onClose,
+  onSelect,
+}: ProductSearchModalProps) {
   const [query, setQuery] = useState('')
-  const [supplier, setSupplier] = useState<Supplier | ''>('')
+  const [supplier, setSupplier] = useState<Supplier | ''>(initialSupplier || '')
   const [results, setResults] = useState<MatchCandidate[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     if (isOpen && item) {
       setQuery(item.extracted_name)
-      setResults(item.match_candidates || [])
-    }
-  }, [isOpen, item])
+      setSupplier(initialSupplier || '')
+      setResults([])
 
-  const handleSearch = useCallback(async () => {
-    if (!query.trim()) return
+      // 초기 검색 자동 실행
+      if (item.extracted_name) {
+        performSearch(item.extracted_name, initialSupplier || '')
+      }
+    }
+  }, [isOpen, item, initialSupplier])
+
+  const performSearch = async (searchQuery: string, searchSupplier: Supplier | '') => {
+    if (!searchQuery.trim()) return
 
     setIsLoading(true)
     try {
-      const params = new URLSearchParams({ q: query })
-      if (supplier) {
-        params.set('supplier', supplier)
+      const params = new URLSearchParams({ q: searchQuery })
+      if (searchSupplier) {
+        params.set('supplier', searchSupplier)
       }
 
       const res = await fetch(`/api/products/search?${params}`)
@@ -47,10 +60,14 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleSearch = useCallback(() => {
+    performSearch(query, supplier)
   }, [query, supplier])
 
   const handleSelect = (product: MatchCandidate) => {
-    onSelect(item.id, product)
+    onSelect(item.id, product, product.supplier)
     onClose()
   }
 
@@ -65,6 +82,16 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
             <h3 className="text-lg font-semibold text-gray-900">상품 검색</h3>
             <p className="text-sm text-gray-500">
               원본: <span className="font-medium">{item.extracted_name}</span>
+              {initialSupplier && (
+                <span
+                  className={cn(
+                    'ml-2 rounded px-1.5 py-0.5 text-xs font-medium',
+                    initialSupplier === 'CJ' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'
+                  )}
+                >
+                  {initialSupplier === 'CJ' ? 'CJ 검색' : '신세계 검색'}
+                </span>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
@@ -90,7 +117,11 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
             <select
               value={supplier}
               onChange={(e) => setSupplier(e.target.value as Supplier | '')}
-              className="rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className={cn(
+                'rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200',
+                supplier === 'CJ' && 'border-orange-300 bg-orange-50',
+                supplier === 'SHINSEGAE' && 'border-purple-300 bg-purple-50'
+              )}
             >
               <option value="">전체 공급사</option>
               <option value="CJ">CJ</option>
@@ -118,14 +149,16 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
             <div className="space-y-2">
               {results.map((product, idx) => {
                 const priceDiff = item.extracted_unit_price - product.standard_price
-                const hasLoss = priceDiff > 0
+                const hasSavings = priceDiff > 0
+                const totalSavings = hasSavings ? priceDiff * item.extracted_quantity : 0
 
                 return (
                   <div
                     key={`${product.id}-${idx}`}
                     className={cn(
                       'flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors',
-                      'hover:border-blue-300 hover:bg-blue-50'
+                      'hover:border-blue-300 hover:bg-blue-50',
+                      hasSavings && 'border-green-200 bg-green-50/50'
                     )}
                     onClick={() => handleSelect(product)}
                   >
@@ -137,7 +170,7 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
                             product.supplier === 'CJ' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'
                           )}
                         >
-                          {product.supplier}
+                          {product.supplier === 'CJ' ? 'CJ' : '신세계'}
                         </span>
                         <span className="font-medium text-gray-900">{product.product_name}</span>
                       </div>
@@ -146,25 +179,24 @@ export function ProductSearchModal({ item, isOpen, onClose, onSelect }: ProductS
                         <span>
                           기준가: <span className="font-medium text-gray-700">{formatCurrency(product.standard_price)}</span>
                         </span>
-                        <span>
-                          단위: {product.unit_normalized}
-                        </span>
-                        {product.match_score > 0 && (
-                          <span>
-                            일치율: {Math.round(product.match_score * 100)}%
-                          </span>
-                        )}
+                        <span>단위: {product.unit_normalized}</span>
+                        {product.match_score > 0 && <span>일치율: {Math.round(product.match_score * 100)}%</span>}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-4">
-                      {hasLoss ? (
-                        <span className="font-medium text-red-600">+{formatCurrency(priceDiff)}</span>
-                      ) : priceDiff < 0 ? (
-                        <span className="font-medium text-green-600">{formatCurrency(priceDiff)}</span>
-                      ) : (
-                        <span className="text-gray-400">동일</span>
-                      )}
+                      <div className="text-right">
+                        {hasSavings ? (
+                          <div>
+                            <p className="font-medium text-green-600">절감 {formatCurrency(totalSavings)}</p>
+                            <p className="text-xs text-gray-500">단가 차이 {formatCurrency(priceDiff)}</p>
+                          </div>
+                        ) : priceDiff < 0 ? (
+                          <span className="text-sm text-gray-500">손해 {formatCurrency(Math.abs(priceDiff))}</span>
+                        ) : (
+                          <span className="text-sm text-gray-400">동일</span>
+                        )}
+                      </div>
 
                       <button className="rounded-lg bg-blue-100 p-2 text-blue-600 hover:bg-blue-200">
                         <Check size={18} />

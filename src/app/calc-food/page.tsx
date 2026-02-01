@@ -30,7 +30,7 @@ function LoadingFallback() {
 }
 
 export default function CalcFoodPage() {
-  const { state, processFile, setCurrentPage, updateItem, reset } = useAuditSession()
+  const { state, processFile, setCurrentPage, updateItemMatch, reset } = useAuditSession()
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -83,7 +83,7 @@ export default function CalcFoodPage() {
             items={state.items}
             stats={state.stats}
             fileName={state.fileName || '명세서'}
-            onItemUpdate={updateItem}
+            onItemMatchUpdate={updateItemMatch}
           />
         )}
 

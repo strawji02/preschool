@@ -4,6 +4,52 @@ export type Supplier = 'CJ' | 'SHINSEGAE'
 // 매칭 상태
 export type MatchStatus = 'auto_matched' | 'pending' | 'manual_matched' | 'unmatched'
 
+// ========================================
+// Side-by-Side Comparison Types
+// ========================================
+
+// 공급사별 매칭 결과 (간소화)
+export interface SupplierMatch {
+  id: string
+  product_name: string
+  standard_price: number
+  match_score: number
+  unit_normalized?: string
+}
+
+// 절감액 계산 결과
+export interface SavingsResult {
+  cj: number           // (내단가 - CJ단가) * 수량
+  ssg: number          // (내단가 - SSG단가) * 수량
+  max: number          // max(cj, ssg, 0)
+  best_supplier?: 'CJ' | 'SHINSEGAE'
+}
+
+// 비교 아이템 (새 핵심 타입)
+export interface ComparisonItem {
+  id: string
+  extracted_name: string
+  extracted_spec?: string
+  extracted_quantity: number
+  extracted_unit_price: number
+
+  cj_match?: SupplierMatch
+  ssg_match?: SupplierMatch
+
+  savings: SavingsResult
+
+  match_status: MatchStatus
+  match_candidates?: MatchCandidate[]  // 기존 호환성 유지
+}
+
+// 새 API 응답 타입
+export interface ComparisonPageResponse {
+  success: boolean
+  page_number: number
+  items: ComparisonItem[]
+  error?: string
+}
+
 // OCR 추출 품목
 export interface ExtractedItem {
   name: string

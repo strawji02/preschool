@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { AuditItemResponse, MatchCandidate } from '@/types/audit'
+import type { ComparisonItem, MatchCandidate, Supplier } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import type { SessionStats } from '../hooks/useAuditSession'
 import { InvoiceViewer } from './InvoiceViewer'
@@ -13,10 +13,10 @@ interface AnalysisDashboardProps {
   pages: PageImage[]
   currentPage: number
   onPageSelect: (page: number) => void
-  items: AuditItemResponse[]
+  items: ComparisonItem[]
   stats: SessionStats
   fileName: string
-  onItemUpdate: (itemId: string, updates: Partial<AuditItemResponse>) => void
+  onItemMatchUpdate: (itemId: string, product: MatchCandidate, supplier: Supplier) => void
 }
 
 export function AnalysisDashboard({
@@ -26,26 +26,18 @@ export function AnalysisDashboard({
   items,
   stats,
   fileName,
-  onItemUpdate,
+  onItemMatchUpdate,
 }: AnalysisDashboardProps) {
-  const [searchItem, setSearchItem] = useState<AuditItemResponse | null>(null)
+  const [searchItem, setSearchItem] = useState<ComparisonItem | null>(null)
+  const [searchSupplier, setSearchSupplier] = useState<Supplier | undefined>(undefined)
 
-  const handleSearchClick = (item: AuditItemResponse) => {
+  const handleSearchClick = (item: ComparisonItem, supplier: Supplier) => {
     setSearchItem(item)
+    setSearchSupplier(supplier)
   }
 
-  const handleProductSelect = (itemId: string, product: MatchCandidate) => {
-    onItemUpdate(itemId, {
-      matched_product: {
-        id: product.id,
-        product_name: product.product_name,
-        standard_price: product.standard_price,
-        supplier: product.supplier,
-      },
-      match_status: 'manual_matched',
-      match_score: product.match_score,
-      loss_amount: Math.max(0, items.find(i => i.id === itemId)!.extracted_unit_price - product.standard_price) * items.find(i => i.id === itemId)!.extracted_quantity,
-    })
+  const handleProductSelect = (itemId: string, product: MatchCandidate, supplier: Supplier) => {
+    onItemMatchUpdate(itemId, product, supplier)
   }
 
   return (
@@ -67,8 +59,12 @@ export function AnalysisDashboard({
       {searchItem && (
         <ProductSearchModal
           item={searchItem}
+          initialSupplier={searchSupplier}
           isOpen={!!searchItem}
-          onClose={() => setSearchItem(null)}
+          onClose={() => {
+            setSearchItem(null)
+            setSearchSupplier(undefined)
+          }}
           onSelect={handleProductSelect}
         />
       )}

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { MatchResult, MatchCandidate, Supplier } from '@/types/audit'
+import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus } from '@/types/audit'
 
 // Matching thresholds
 const AUTO_MATCH_THRESHOLD = 0.8
@@ -108,4 +108,120 @@ export function calculateLoss(
   const priceDiff = extractedUnitPrice - standardPrice
   if (priceDiff <= 0) return 0
   return priceDiff * quantity
+}
+
+// ========================================
+// Side-by-Side Comparison Functions
+// ========================================
+
+interface ComparisonMatchResult {
+  cj_match?: SupplierMatch
+  ssg_match?: SupplierMatch
+  status: MatchStatus
+}
+
+/**
+ * 공급사별 병렬 매칭 - CJ와 SSG 각각 best match 검색
+ */
+export async function findComparisonMatches(
+  itemName: string,
+  supabase: SupabaseClient
+): Promise<ComparisonMatchResult> {
+  try {
+    const normalizedName = normalizeItemName(itemName)
+    console.log(`  [Comparison] Raw: "${itemName}" | Clean: "${normalizedName}"`)
+
+    // 병렬 실행: CJ와 SSG 동시 검색
+    const [cjResult, ssgResult] = await Promise.all([
+      supabase.rpc('search_products_fuzzy', {
+        search_term_raw: itemName,
+        search_term_clean: normalizedName,
+        limit_count: 1,
+        supplier_filter: 'CJ',
+      }),
+      supabase.rpc('search_products_fuzzy', {
+        search_term_raw: itemName,
+        search_term_clean: normalizedName,
+        limit_count: 1,
+        supplier_filter: 'SHINSEGAE',
+      }),
+    ])
+
+    // 결과 매핑
+    const cjData = cjResult.data as RpcResult[] | null
+    const ssgData = ssgResult.data as RpcResult[] | null
+
+    const cj_match: SupplierMatch | undefined = cjData?.[0] ? {
+      id: cjData[0].id,
+      product_name: cjData[0].product_name,
+      standard_price: cjData[0].standard_price,
+      match_score: cjData[0].match_score,
+      unit_normalized: cjData[0].unit_normalized,
+    } : undefined
+
+    const ssg_match: SupplierMatch | undefined = ssgData?.[0] ? {
+      id: ssgData[0].id,
+      product_name: ssgData[0].product_name,
+      standard_price: ssgData[0].standard_price,
+      match_score: ssgData[0].match_score,
+      unit_normalized: ssgData[0].unit_normalized,
+    } : undefined
+
+    // 상태 결정: 둘 중 하나라도 고득점이면 auto_matched
+    const topScore = Math.max(
+      cj_match?.match_score ?? 0,
+      ssg_match?.match_score ?? 0
+    )
+
+    let status: MatchStatus = 'unmatched'
+    if (topScore > AUTO_MATCH_THRESHOLD) {
+      status = 'auto_matched'
+    } else if (topScore >= PENDING_THRESHOLD) {
+      status = 'pending'
+    }
+
+    return { cj_match, ssg_match, status }
+  } catch (error) {
+    console.error('Comparison matching error:', error)
+    return { status: 'unmatched' }
+  }
+}
+
+/**
+ * Side-by-Side 절감액 계산
+ */
+export function calculateComparisonSavings(
+  unitPrice: number,
+  quantity: number,
+  cjPrice?: number,
+  ssgPrice?: number
+): SavingsResult {
+  // 절감액 = (내 단가 - 공급사 단가) * 수량
+  // 음수면 0으로 처리 (손해 안 보는 경우)
+  const cjSavings = cjPrice !== undefined
+    ? Math.max(0, (unitPrice - cjPrice) * quantity)
+    : 0
+
+  const ssgSavings = ssgPrice !== undefined
+    ? Math.max(0, (unitPrice - ssgPrice) * quantity)
+    : 0
+
+  const maxSavings = Math.max(cjSavings, ssgSavings)
+
+  // 최대 절감 공급사 결정
+  let best_supplier: 'CJ' | 'SHINSEGAE' | undefined
+  if (maxSavings > 0) {
+    if (cjSavings >= ssgSavings && cjSavings > 0) {
+      best_supplier = 'CJ'
+    } else if (ssgSavings > 0) {
+      best_supplier = 'SHINSEGAE'
+    }
+  }
+
+  return {
+    cj: cjSavings,
+    ssg: ssgSavings,
+    max: maxSavings,
+    best_supplier,
+  }
 }

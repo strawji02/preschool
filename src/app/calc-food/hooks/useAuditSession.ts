@@ -1,21 +1,27 @@
 'use client'
 
 import { useReducer, useCallback } from 'react'
-import type { AuditItemResponse } from '@/types/audit'
+import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, extractPagesFromImages, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 
 // 상태 타입
 export type AuditStatus = 'empty' | 'processing' | 'analysis' | 'error'
 
+// 공급사별 통계 포함
 export interface SessionStats {
   totalItems: number
   matchedItems: number
   pendingItems: number
   unmatchedItems: number
   totalBilled: number
-  totalStandard: number
-  totalLoss: number
+  // 공급사별 절감액
+  cjSavings: number
+  ssgSavings: number
+  maxSavings: number
+  // 매칭률
+  cjMatchRate: number
+  ssgMatchRate: number
 }
 
 export interface AuditState {
@@ -23,7 +29,7 @@ export interface AuditState {
   sessionId: string | null
   pages: PageImage[]
   currentPage: number
-  items: AuditItemResponse[]
+  items: ComparisonItem[]
   stats: SessionStats
   processingPage: number
   totalPages: number
@@ -37,10 +43,10 @@ type AuditAction =
   | { type: 'SET_SESSION_ID'; sessionId: string }
   | { type: 'SET_PAGES'; pages: PageImage[] }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
-  | { type: 'ADD_PAGE_ITEMS'; items: AuditItemResponse[] }
+  | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
   | { type: 'SET_CURRENT_PAGE'; page: number }
-  | { type: 'UPDATE_ITEM'; itemId: string; updates: Partial<AuditItemResponse> }
+  | { type: 'UPDATE_ITEM_MATCH'; itemId: string; supplier: Supplier; match: SupplierMatch }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'RESET' }
 
@@ -50,8 +56,11 @@ const initialStats: SessionStats = {
   pendingItems: 0,
   unmatchedItems: 0,
   totalBilled: 0,
-  totalStandard: 0,
-  totalLoss: 0,
+  cjSavings: 0,
+  ssgSavings: 0,
+  maxSavings: 0,
+  cjMatchRate: 0,
+  ssgMatchRate: 0,
 }
 
 const initialState: AuditState = {
@@ -67,32 +76,77 @@ const initialState: AuditState = {
   fileName: null,
 }
 
-function calculateStats(items: AuditItemResponse[]): SessionStats {
-  return items.reduce(
-    (acc, item) => {
-      acc.totalItems++
+function calculateStats(items: ComparisonItem[]): SessionStats {
+  if (items.length === 0) return initialStats
 
-      if (item.match_status === 'auto_matched' || item.match_status === 'manual_matched') {
-        acc.matchedItems++
-      } else if (item.match_status === 'pending') {
-        acc.pendingItems++
-      } else {
-        acc.unmatchedItems++
-      }
+  let totalBilled = 0
+  let cjSavings = 0
+  let ssgSavings = 0
+  let maxSavings = 0
+  let matchedItems = 0
+  let pendingItems = 0
+  let unmatchedItems = 0
+  let cjMatchCount = 0
+  let ssgMatchCount = 0
 
-      const itemTotal = item.extracted_unit_price * item.extracted_quantity
-      acc.totalBilled += itemTotal
+  for (const item of items) {
+    // 청구 총액
+    totalBilled += item.extracted_unit_price * item.extracted_quantity
 
-      if (item.matched_product) {
-        const standardTotal = item.matched_product.standard_price * item.extracted_quantity
-        acc.totalStandard += standardTotal
-        acc.totalLoss += Math.max(0, itemTotal - standardTotal)
-      }
+    // 절감액 합산
+    cjSavings += item.savings.cj
+    ssgSavings += item.savings.ssg
+    maxSavings += item.savings.max
 
-      return acc
-    },
-    { ...initialStats }
-  )
+    // 매칭 상태 카운트
+    if (item.match_status === 'auto_matched' || item.match_status === 'manual_matched') {
+      matchedItems++
+    } else if (item.match_status === 'pending') {
+      pendingItems++
+    } else {
+      unmatchedItems++
+    }
+
+    // 공급사별 매칭 카운트
+    if (item.cj_match) cjMatchCount++
+    if (item.ssg_match) ssgMatchCount++
+  }
+
+  return {
+    totalItems: items.length,
+    matchedItems,
+    pendingItems,
+    unmatchedItems,
+    totalBilled,
+    cjSavings,
+    ssgSavings,
+    maxSavings,
+    cjMatchRate: items.length > 0 ? (cjMatchCount / items.length) * 100 : 0,
+    ssgMatchRate: items.length > 0 ? (ssgMatchCount / items.length) * 100 : 0,
+  }
+}
+
+// 아이템 매칭 업데이트 시 savings 재계산
+function recalculateSavings(
+  unitPrice: number,
+  quantity: number,
+  cjPrice?: number,
+  ssgPrice?: number
+): SavingsResult {
+  const cjSavings = cjPrice !== undefined ? Math.max(0, (unitPrice - cjPrice) * quantity) : 0
+  const ssgSavings = ssgPrice !== undefined ? Math.max(0, (unitPrice - ssgPrice) * quantity) : 0
+  const maxSavings = Math.max(cjSavings, ssgSavings)
+
+  let best_supplier: 'CJ' | 'SHINSEGAE' | undefined
+  if (maxSavings > 0) {
+    if (cjSavings >= ssgSavings && cjSavings > 0) {
+      best_supplier = 'CJ'
+    } else if (ssgSavings > 0) {
+      best_supplier = 'SHINSEGAE'
+    }
+  }
+
+  return { cj: cjSavings, ssg: ssgSavings, max: maxSavings, best_supplier }
 }
 
 function auditReducer(state: AuditState, action: AuditAction): AuditState {
@@ -130,10 +184,32 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'SET_CURRENT_PAGE':
       return { ...state, currentPage: action.page }
 
-    case 'UPDATE_ITEM': {
-      const newItems = state.items.map((item) =>
-        item.id === action.itemId ? { ...item, ...action.updates } : item
-      )
+    case 'UPDATE_ITEM_MATCH': {
+      const newItems = state.items.map((item) => {
+        if (item.id !== action.itemId) return item
+
+        // 새 매칭 적용
+        const updatedItem = { ...item }
+        if (action.supplier === 'CJ') {
+          updatedItem.cj_match = action.match
+        } else {
+          updatedItem.ssg_match = action.match
+        }
+
+        // savings 재계산
+        updatedItem.savings = recalculateSavings(
+          item.extracted_unit_price,
+          item.extracted_quantity,
+          updatedItem.cj_match?.standard_price,
+          updatedItem.ssg_match?.standard_price
+        )
+
+        // 상태 업데이트 (수동 매칭)
+        updatedItem.match_status = 'manual_matched'
+
+        return updatedItem
+      })
+
       return {
         ...state,
         items: newItems,
@@ -229,9 +305,20 @@ export function useAuditSession() {
     dispatch({ type: 'SET_CURRENT_PAGE', page })
   }, [])
 
-  const updateItem = useCallback((itemId: string, updates: Partial<AuditItemResponse>) => {
-    dispatch({ type: 'UPDATE_ITEM', itemId, updates })
-  }, [])
+  // 아이템 매칭 업데이트 (수동 검색 결과 적용)
+  const updateItemMatch = useCallback(
+    (itemId: string, product: MatchCandidate, supplier: Supplier) => {
+      const match: SupplierMatch = {
+        id: product.id,
+        product_name: product.product_name,
+        standard_price: product.standard_price,
+        match_score: product.match_score,
+        unit_normalized: product.unit_normalized,
+      }
+      dispatch({ type: 'UPDATE_ITEM_MATCH', itemId, supplier, match })
+    },
+    []
+  )
 
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' })
@@ -241,7 +328,7 @@ export function useAuditSession() {
     state,
     processFile,
     setCurrentPage,
-    updateItem,
+    updateItemMatch,
     reset,
   }
 }

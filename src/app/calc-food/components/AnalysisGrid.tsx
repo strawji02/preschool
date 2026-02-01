@@ -4,41 +4,75 @@ import { useState } from 'react'
 import { Search, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import type { AuditItemResponse } from '@/types/audit'
+import type { ComparisonItem, Supplier } from '@/types/audit'
 
 interface AnalysisGridProps {
-  items: AuditItemResponse[]
-  onSearchClick: (item: AuditItemResponse) => void
+  items: ComparisonItem[]
+  onSearchClick: (item: ComparisonItem, supplier: Supplier) => void
 }
 
 export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'matched' | 'pending' | 'unmatched'>('all')
+  const [filter, setFilter] = useState<'all' | 'matched' | 'pending' | 'unmatched' | 'savings'>('all')
 
-  // 현재 페이지의 아이템만 필터링
-  const pageItems = items.filter((item) => {
-    // page_number가 없으면 전체 아이템에서 추정
-    const matchesPage = true // 일단 모든 아이템 표시, 페이지 필터링은 나중에
-
-    if (filter === 'all') return matchesPage
+  // 필터링
+  const filteredItems = items.filter((item) => {
+    if (filter === 'all') return true
     if (filter === 'matched')
-      return matchesPage && (item.match_status === 'auto_matched' || item.match_status === 'manual_matched')
-    if (filter === 'pending') return matchesPage && item.match_status === 'pending'
-    if (filter === 'unmatched') return matchesPage && item.match_status === 'unmatched'
-    return matchesPage
+      return item.match_status === 'auto_matched' || item.match_status === 'manual_matched'
+    if (filter === 'pending') return item.match_status === 'pending'
+    if (filter === 'unmatched') return item.match_status === 'unmatched'
+    if (filter === 'savings') return item.savings.max > 0
+    return true
   })
 
-  const getStatusBadge = (status: AuditItemResponse['match_status']) => {
+  const getStatusBadge = (status: ComparisonItem['match_status']) => {
     switch (status) {
       case 'auto_matched':
-        return <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">자동매칭</span>
+        return <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">자동</span>
       case 'manual_matched':
-        return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">수동매칭</span>
+        return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">수동</span>
       case 'pending':
-        return <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">확인필요</span>
+        return <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">확인</span>
       case 'unmatched':
         return <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">미매칭</span>
     }
+  }
+
+  // 가격 셀 렌더링 (CJ 또는 SSG)
+  const renderPriceCell = (
+    item: ComparisonItem,
+    supplier: Supplier,
+    match: ComparisonItem['cj_match'] | ComparisonItem['ssg_match']
+  ) => {
+    const hasMatch = match !== undefined
+    const isBetter = hasMatch && match.standard_price < item.extracted_unit_price
+
+    if (!hasMatch) {
+      return (
+        <button
+          onClick={() => onSearchClick(item, supplier)}
+          className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200"
+        >
+          검색
+        </button>
+      )
+    }
+
+    return (
+      <div
+        className={cn(
+          'cursor-pointer rounded px-2 py-1 text-sm transition-colors',
+          isBetter ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-100'
+        )}
+        onClick={() => onSearchClick(item, supplier)}
+        title={`${match.product_name} (${Math.round(match.match_score * 100)}%)`}
+      >
+        <span className={cn('font-medium', isBetter && 'text-green-700')}>
+          {formatCurrency(match.standard_price)}
+        </span>
+      </div>
+    )
   }
 
   return (
@@ -47,6 +81,7 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
       <div className="flex gap-1 border-b bg-gray-50 p-2">
         {[
           { key: 'all', label: '전체' },
+          { key: 'savings', label: '절감가능' },
           { key: 'matched', label: '매칭됨' },
           { key: 'pending', label: '확인필요' },
           { key: 'unmatched', label: '미매칭' },
@@ -64,71 +99,89 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
         ))}
       </div>
 
-      {/* 테이블 헤더 */}
-      <div className="grid grid-cols-[1fr_80px_100px_100px_80px_50px] gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600">
+      {/* 테이블 헤더 - 7컬럼 */}
+      <div className="grid grid-cols-[1fr_60px_90px_90px_90px_80px_40px] gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600">
         <div>품목명</div>
         <div className="text-right">수량</div>
-        <div className="text-right">청구단가</div>
-        <div className="text-right">기준단가</div>
-        <div className="text-right">차액</div>
+        <div className="text-right">내 단가</div>
+        <div className="text-center">
+          <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">CJ</span>
+        </div>
+        <div className="text-center">
+          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">신세계</span>
+        </div>
+        <div className="text-right">최대절감</div>
         <div></div>
       </div>
 
       {/* 테이블 바디 */}
       <div className="flex-1 overflow-y-auto">
-        {pageItems.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <div className="flex h-40 items-center justify-center text-gray-500">표시할 항목이 없습니다</div>
         ) : (
-          pageItems.map((item) => {
+          filteredItems.map((item) => {
             const isExpanded = expandedId === item.id
-            const hasLoss = item.loss_amount && item.loss_amount > 0
+            const hasSavings = item.savings.max > 0
 
             return (
               <div key={item.id} className="border-b">
                 {/* 메인 행 */}
                 <div
                   className={cn(
-                    'grid grid-cols-[1fr_80px_100px_100px_80px_50px] gap-2 px-4 py-3 transition-colors',
-                    hasLoss ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
+                    'grid grid-cols-[1fr_60px_90px_90px_90px_80px_40px] gap-2 px-4 py-3 transition-colors',
+                    hasSavings ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
                   )}
                 >
-                  <div className="flex items-center gap-2">
+                  {/* 품목명 */}
+                  <div className="flex items-center gap-2 min-w-0">
                     {getStatusBadge(item.match_status)}
-                    <span className="truncate text-sm">{item.extracted_name}</span>
+                    <span className="truncate text-sm" title={item.extracted_name}>
+                      {item.extracted_name}
+                    </span>
                     {item.extracted_spec && (
-                      <span className="truncate text-xs text-gray-500">({item.extracted_spec})</span>
+                      <span className="hidden truncate text-xs text-gray-500 lg:inline">({item.extracted_spec})</span>
                     )}
                   </div>
 
+                  {/* 수량 */}
                   <div className="text-right text-sm">{item.extracted_quantity}</div>
 
-                  <div className="text-right text-sm">{formatCurrency(item.extracted_unit_price)}</div>
+                  {/* 내 단가 */}
+                  <div className="text-right text-sm font-medium">{formatCurrency(item.extracted_unit_price)}</div>
 
+                  {/* CJ 가격 */}
+                  <div className="flex items-center justify-center">
+                    {renderPriceCell(item, 'CJ', item.cj_match)}
+                  </div>
+
+                  {/* 신세계 가격 */}
+                  <div className="flex items-center justify-center">
+                    {renderPriceCell(item, 'SHINSEGAE', item.ssg_match)}
+                  </div>
+
+                  {/* 최대 절감액 */}
                   <div className="text-right text-sm">
-                    {item.matched_product ? (
-                      <span className="text-green-600">{formatCurrency(item.matched_product.standard_price)}</span>
+                    {hasSavings ? (
+                      <div className="flex flex-col items-end">
+                        <span className="font-bold text-red-600">{formatCurrency(item.savings.max)}</span>
+                        {item.savings.best_supplier && (
+                          <span
+                            className={cn(
+                              'text-xs',
+                              item.savings.best_supplier === 'CJ' ? 'text-orange-600' : 'text-purple-600'
+                            )}
+                          >
+                            {item.savings.best_supplier === 'CJ' ? 'CJ' : '신세계'}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-gray-400">-</span>
                     )}
                   </div>
 
-                  <div className="text-right text-sm">
-                    {hasLoss ? (
-                      <span className="font-medium text-red-600">+{formatCurrency(item.loss_amount!)}</span>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-end gap-1">
-                    <button
-                      onClick={() => onSearchClick(item)}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
-                      title="상품 검색"
-                    >
-                      <Search size={16} />
-                    </button>
-
+                  {/* 확장 버튼 */}
+                  <div className="flex items-center justify-center">
                     <button
                       onClick={() => setExpandedId(isExpanded ? null : item.id)}
                       className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
@@ -138,23 +191,77 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
                   </div>
                 </div>
 
-                {/* 확장 영역 - 매칭 후보 */}
-                {isExpanded && item.match_candidates && item.match_candidates.length > 0 && (
+                {/* 확장 영역 - 상세 비교 */}
+                {isExpanded && (
                   <div className="border-t bg-gray-50 px-4 py-3">
-                    <p className="mb-2 text-xs font-medium text-gray-600">매칭 후보</p>
-                    <div className="space-y-2">
-                      {item.match_candidates.map((candidate, idx) => (
-                        <div key={idx} className="flex items-center justify-between rounded bg-white p-2 text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                              {candidate.supplier}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* CJ 상세 */}
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="rounded bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                            CJ
+                          </span>
+                          {item.cj_match && (
+                            <span className="text-xs text-gray-500">
+                              {Math.round(item.cj_match.match_score * 100)}% 일치
                             </span>
-                            <span>{candidate.product_name}</span>
-                            <span className="text-xs text-gray-500">({Math.round(candidate.match_score * 100)}%)</span>
-                          </div>
-                          <span className="font-medium">{formatCurrency(candidate.standard_price)}</span>
+                          )}
                         </div>
-                      ))}
+                        {item.cj_match ? (
+                          <div className="space-y-1 text-sm">
+                            <p className="font-medium">{item.cj_match.product_name}</p>
+                            <p className="text-gray-600">
+                              단가: <span className="font-medium">{formatCurrency(item.cj_match.standard_price)}</span>
+                            </p>
+                            {item.savings.cj > 0 && (
+                              <p className="text-red-600">절감: {formatCurrency(item.savings.cj)}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">매칭된 상품 없음</p>
+                        )}
+                        <button
+                          onClick={() => onSearchClick(item, 'CJ')}
+                          className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                        >
+                          <Search size={12} />
+                          다른 상품 검색
+                        </button>
+                      </div>
+
+                      {/* 신세계 상세 */}
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
+                            신세계
+                          </span>
+                          {item.ssg_match && (
+                            <span className="text-xs text-gray-500">
+                              {Math.round(item.ssg_match.match_score * 100)}% 일치
+                            </span>
+                          )}
+                        </div>
+                        {item.ssg_match ? (
+                          <div className="space-y-1 text-sm">
+                            <p className="font-medium">{item.ssg_match.product_name}</p>
+                            <p className="text-gray-600">
+                              단가: <span className="font-medium">{formatCurrency(item.ssg_match.standard_price)}</span>
+                            </p>
+                            {item.savings.ssg > 0 && (
+                              <p className="text-red-600">절감: {formatCurrency(item.savings.ssg)}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">매칭된 상품 없음</p>
+                        )}
+                        <button
+                          onClick={() => onSearchClick(item, 'SHINSEGAE')}
+                          className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                        >
+                          <Search size={12} />
+                          다른 상품 검색
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
