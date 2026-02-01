@@ -33,13 +33,32 @@ export interface ComparisonItem {
   extracted_quantity: number
   extracted_unit_price: number
 
+  // 현재 선택된 매칭 (Top 1 또는 사용자 선택)
   cj_match?: SupplierMatch
   ssg_match?: SupplierMatch
+
+  // Top 5 후보 리스트 (새로 추가)
+  cj_candidates: SupplierMatch[]
+  ssg_candidates: SupplierMatch[]
+
+  // 확정 여부 (새로 추가)
+  is_confirmed: boolean
 
   savings: SavingsResult
 
   match_status: MatchStatus
   match_candidates?: MatchCandidate[]  // 기존 호환성 유지
+}
+
+// 공급사별 시나리오 분석 결과 (새로 추가)
+export interface SupplierScenario {
+  supplier: 'CJ' | 'SHINSEGAE'
+  totalOurCost: number        // 현재 총액
+  totalSupplierCost: number   // 공급사 전환 시 총액
+  totalSavings: number        // 절감액
+  savingsPercent: number      // 절감률
+  matchedCount: number        // 매칭된 품목 수
+  unmatchedCount: number      // 미매칭 품목 수
 }
 
 // 새 API 응답 타입

@@ -14,8 +14,8 @@ export async function extractPagesFromPDF(file: File): Promise<PageImage[]> {
   // 동적 임포트로 클라이언트에서만 로드
   const pdfjsLib = await import('pdfjs-dist')
 
-  // PDF.js 워커 설정
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  // PDF.js 워커 설정 - 로컬 파일 사용 (PDF.js 5.x 호환)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise

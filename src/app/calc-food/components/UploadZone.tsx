@@ -5,7 +5,7 @@ import { Upload, FileText, Image } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 interface UploadZoneProps {
-  onFileSelect: (file: File) => void
+  onFileSelect: (files: File[]) => void
 }
 
 export function UploadZone({ onFileSelect }: UploadZoneProps) {
@@ -26,9 +26,22 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
       e.preventDefault()
       setIsDragOver(false)
 
-      const file = e.dataTransfer.files[0]
-      if (file && (file.type === 'application/pdf' || file.type.startsWith('image/'))) {
-        onFileSelect(file)
+      const droppedFiles = Array.from(e.dataTransfer.files)
+      const validFiles = droppedFiles.filter(
+        file => file.type === 'application/pdf' || file.type.startsWith('image/')
+      )
+
+      if (validFiles.length > 0) {
+        // PDF는 단일 파일만, 이미지는 여러 장 허용
+        const hasPDF = validFiles.some(f => f.type === 'application/pdf')
+        if (hasPDF) {
+          // PDF가 있으면 첫 번째 PDF만 사용
+          const pdfFile = validFiles.find(f => f.type === 'application/pdf')!
+          onFileSelect([pdfFile])
+        } else {
+          // 이미지만 있으면 모두 사용
+          onFileSelect(validFiles)
+        }
       }
     },
     [onFileSelect]
@@ -36,9 +49,19 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (file) {
-        onFileSelect(file)
+      const selectedFiles = e.target.files
+      if (!selectedFiles || selectedFiles.length === 0) return
+
+      const filesArray = Array.from(selectedFiles)
+      const hasPDF = filesArray.some(f => f.type === 'application/pdf')
+
+      if (hasPDF) {
+        // PDF가 있으면 첫 번째 PDF만 사용
+        const pdfFile = filesArray.find(f => f.type === 'application/pdf')!
+        onFileSelect([pdfFile])
+      } else {
+        // 이미지만 있으면 모두 사용
+        onFileSelect(filesArray)
       }
     },
     [onFileSelect]
@@ -62,6 +85,7 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
         <input
           type="file"
           accept="application/pdf,image/*"
+          multiple
           className="hidden"
           onChange={handleFileChange}
         />
@@ -81,6 +105,8 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
 
         <p className="mb-6 text-center text-gray-500">
           식자재 명세서 파일을 드래그하거나 클릭하여 선택하세요
+          <br />
+          <span className="text-sm text-gray-400">이미지는 여러 장 선택 가능</span>
         </p>
 
         <div className="flex items-center gap-4">

@@ -1,73 +1,80 @@
 'use client'
 
-import { useState } from 'react'
-import type { ComparisonItem, MatchCandidate, Supplier } from '@/types/audit'
+import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
-import type { SessionStats } from '../hooks/useAuditSession'
-import { InvoiceViewer } from './InvoiceViewer'
-import { SummaryHeader } from './SummaryHeader'
-import { AnalysisGrid } from './AnalysisGrid'
-import { ProductSearchModal } from './ProductSearchModal'
+import type { AnalysisStep } from '../hooks/useAuditSession'
+import { MatchingView } from './MatchingStep'
+import { ReportView } from './ReportStep'
 
 interface AnalysisDashboardProps {
+  currentStep: AnalysisStep
   pages: PageImage[]
   currentPage: number
   onPageSelect: (page: number) => void
   items: ComparisonItem[]
-  stats: SessionStats
   fileName: string
+  confirmationStats: {
+    total: number
+    confirmed: number
+    unconfirmed: number
+  }
+  scenarios: {
+    cj: SupplierScenario
+    ssg: SupplierScenario
+  }
+  // Matching step callbacks
+  onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
+  onConfirmItem: (itemId: string) => void
+  onConfirmAllAutoMatched: () => void
+  onProceedToReport: () => void
   onItemMatchUpdate: (itemId: string, product: MatchCandidate, supplier: Supplier) => void
+  // Report step callbacks
+  onBackToMatching: () => void
 }
 
 export function AnalysisDashboard({
+  currentStep,
   pages,
   currentPage,
   onPageSelect,
   items,
-  stats,
   fileName,
+  confirmationStats,
+  scenarios,
+  onSelectCandidate,
+  onConfirmItem,
+  onConfirmAllAutoMatched,
+  onProceedToReport,
   onItemMatchUpdate,
+  onBackToMatching,
 }: AnalysisDashboardProps) {
-  const [searchItem, setSearchItem] = useState<ComparisonItem | null>(null)
-  const [searchSupplier, setSearchSupplier] = useState<Supplier | undefined>(undefined)
-
-  const handleSearchClick = (item: ComparisonItem, supplier: Supplier) => {
-    setSearchItem(item)
-    setSearchSupplier(supplier)
-  }
-
-  const handleProductSelect = (itemId: string, product: MatchCandidate, supplier: Supplier) => {
-    onItemMatchUpdate(itemId, product, supplier)
+  if (currentStep === 'matching') {
+    return (
+      <MatchingView
+        pages={pages}
+        currentPage={currentPage}
+        onPageSelect={onPageSelect}
+        items={items}
+        fileName={fileName}
+        confirmationStats={confirmationStats}
+        onSelectCandidate={onSelectCandidate}
+        onConfirmItem={onConfirmItem}
+        onConfirmAllAutoMatched={onConfirmAllAutoMatched}
+        onProceedToReport={onProceedToReport}
+        onItemMatchUpdate={onItemMatchUpdate}
+      />
+    )
   }
 
   return (
-    <div className="flex h-[calc(100vh-64px)]">
-      {/* 좌측: 이미지 뷰어 (50%) */}
-      <div className="w-1/2 border-r">
-        <InvoiceViewer pages={pages} currentPage={currentPage} onPageSelect={onPageSelect} />
-      </div>
-
-      {/* 우측: 분석 결과 (50%) */}
-      <div className="flex w-1/2 flex-col">
-        <SummaryHeader stats={stats} fileName={fileName} />
-        <div className="flex-1 overflow-hidden">
-          <AnalysisGrid items={items} onSearchClick={handleSearchClick} />
-        </div>
-      </div>
-
-      {/* 검색 모달 */}
-      {searchItem && (
-        <ProductSearchModal
-          item={searchItem}
-          initialSupplier={searchSupplier}
-          isOpen={!!searchItem}
-          onClose={() => {
-            setSearchItem(null)
-            setSearchSupplier(undefined)
-          }}
-          onSelect={handleProductSelect}
-        />
-      )}
-    </div>
+    <ReportView
+      pages={pages}
+      currentPage={currentPage}
+      onPageSelect={onPageSelect}
+      items={items}
+      fileName={fileName}
+      scenarios={scenarios}
+      onBackToMatching={onBackToMatching}
+    />
   )
 }

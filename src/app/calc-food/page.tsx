@@ -30,7 +30,21 @@ function LoadingFallback() {
 }
 
 export default function CalcFoodPage() {
-  const { state, processFile, setCurrentPage, updateItemMatch, reset } = useAuditSession()
+  const {
+    state,
+    processFiles,
+    setCurrentPage,
+    updateItemMatch,
+    reset,
+    // 2-Step Workflow
+    selectCandidate,
+    confirmItem,
+    confirmAllAutoMatched,
+    proceedToReport,
+    backToMatching,
+    scenarios,
+    confirmationStats,
+  } = useAuditSession()
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -49,6 +63,22 @@ export default function CalcFoodPage() {
             <div className="h-6 w-px bg-gray-300" />
 
             <h1 className="text-lg font-semibold text-gray-900">식자재 단가 감사</h1>
+
+            {/* 현재 단계 표시 */}
+            {state.status === 'analysis' && (
+              <>
+                <div className="h-6 w-px bg-gray-300" />
+                <div className="flex items-center gap-2">
+                  <span className={`rounded px-2 py-0.5 text-sm font-medium ${
+                    state.currentStep === 'matching'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}>
+                    {state.currentStep === 'matching' ? '1. 매칭 확인' : '2. 리포트'}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {state.status !== 'empty' && (
@@ -65,7 +95,7 @@ export default function CalcFoodPage() {
 
       {/* 메인 콘텐츠 */}
       <main>
-        {state.status === 'empty' && <UploadZone onFileSelect={processFile} />}
+        {state.status === 'empty' && <UploadZone onFileSelect={processFiles} />}
 
         {state.status === 'processing' && (
           <ProcessingView
@@ -77,13 +107,22 @@ export default function CalcFoodPage() {
 
         {state.status === 'analysis' && (
           <AnalysisDashboard
+            currentStep={state.currentStep}
             pages={state.pages}
             currentPage={state.currentPage}
             onPageSelect={setCurrentPage}
             items={state.items}
-            stats={state.stats}
             fileName={state.fileName || '명세서'}
+            confirmationStats={confirmationStats}
+            scenarios={scenarios}
+            // Matching step callbacks
+            onSelectCandidate={selectCandidate}
+            onConfirmItem={confirmItem}
+            onConfirmAllAutoMatched={confirmAllAutoMatched}
+            onProceedToReport={proceedToReport}
             onItemMatchUpdate={updateItemMatch}
+            // Report step callbacks
+            onBackToMatching={backToMatching}
           />
         )}
 

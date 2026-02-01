@@ -11,6 +11,21 @@ import { createClient } from '@supabase/supabase-js'
 import { normalizeUnit } from './lib/unit-normalizer'
 import { parseCJSpec, parseShinsegaeSpec } from './lib/spec-parser'
 
+/**
+ * 품목명 정규화 - 노이즈 제거로 매칭 정확도 향상
+ * (src/lib/matching.ts의 normalizeItemName과 동일 로직)
+ */
+function normalizeItemName(name: string): string {
+  return name
+    .replace(/\([^)]*\)/g, '')           // (괄호 내용) 제거
+    .replace(/\[[^\]]*\]/g, '')          // [대괄호 내용] 제거
+    .replace(/\d+(\.\d+)?\s*(kg|g|ml|l|ea|개|팩|봉|box)/gi, '')  // 숫자+단위 제거
+    .replace(/\d+/g, '')                 // 남은 숫자 제거
+    .replace(/[^\uAC00-\uD7A3a-zA-Z\s]/g, '')  // 특수문자 제거 (한글, 영문만)
+    .replace(/\s+/g, ' ')                // 연속 공백 정리
+    .trim()
+}
+
 // Supabase Admin 클라이언트 생성
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,6 +42,7 @@ interface ProductInsert {
   supplier: 'CJ' | 'SHINSEGAE'
   product_code: string
   product_name: string
+  product_name_normalized: string  // 정규화된 상품명 (검색용)
   standard_price: number
   unit_raw: string
   unit_normalized: string
@@ -65,6 +81,7 @@ async function seedCJ(): Promise<number> {
         supplier: 'CJ' as const,
         product_code: String(row['상품코드'] || ''),
         product_name: productName,
+        product_name_normalized: normalizeItemName(productName),
         standard_price: parseInt(String(row['판매단가'])) || 0,
         unit_raw: rawUnit,
         unit_normalized: normalizeUnit(rawUnit),
@@ -132,10 +149,13 @@ async function seedShinsegae(): Promise<number> {
       const spec = parseShinsegaeSpec(specRaw || '')
       const rawUnit = String(row['단위'] || '개')
 
+      const productName = String(row['품목명'] || '')
+
       return {
         supplier: 'SHINSEGAE' as const,
         product_code: String(row['코드'] || ''),
-        product_name: String(row['품목명'] || ''),
+        product_name: productName,
+        product_name_normalized: normalizeItemName(productName),
         standard_price: parseInt(String(row['결정단가'])) || 0,
         unit_raw: rawUnit,
         unit_normalized: normalizeUnit(rawUnit),

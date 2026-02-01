@@ -1,12 +1,15 @@
 'use client'
 
-import { useReducer, useCallback } from 'react'
-import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult } from '@/types/audit'
+import { useReducer, useCallback, useMemo } from 'react'
+import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, extractPagesFromImages, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 
 // 상태 타입
 export type AuditStatus = 'empty' | 'processing' | 'analysis' | 'error'
+
+// 분석 단계 (새로 추가)
+export type AnalysisStep = 'matching' | 'report'
 
 // 공급사별 통계 포함
 export interface SessionStats {
@@ -26,6 +29,7 @@ export interface SessionStats {
 
 export interface AuditState {
   status: AuditStatus
+  currentStep: AnalysisStep  // 새로 추가: 매칭 → 리포트 단계
   sessionId: string | null
   pages: PageImage[]
   currentPage: number
@@ -49,6 +53,13 @@ type AuditAction =
   | { type: 'UPDATE_ITEM_MATCH'; itemId: string; supplier: Supplier; match: SupplierMatch }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'RESET' }
+  // 2-Step Workflow 액션 (새로 추가)
+  | { type: 'SET_STEP'; step: AnalysisStep }
+  | { type: 'SELECT_CANDIDATE'; itemId: string; supplier: Supplier; candidate: SupplierMatch }
+  | { type: 'CONFIRM_ITEM'; itemId: string }
+  | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
+  | { type: 'PROCEED_TO_REPORT' }
+  | { type: 'BACK_TO_MATCHING' }
 
 const initialStats: SessionStats = {
   totalItems: 0,
@@ -65,6 +76,7 @@ const initialStats: SessionStats = {
 
 const initialState: AuditState = {
   status: 'empty',
+  currentStep: 'matching',  // 기본값: 매칭 단계
   sessionId: null,
   pages: [],
   currentPage: 1,
@@ -223,6 +235,78 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'RESET':
       return initialState
 
+    // 2-Step Workflow 액션 핸들러
+    case 'SET_STEP':
+      return { ...state, currentStep: action.step }
+
+    case 'SELECT_CANDIDATE': {
+      const newItems = state.items.map((item) => {
+        if (item.id !== action.itemId) return item
+
+        const updatedItem = { ...item }
+        if (action.supplier === 'CJ') {
+          updatedItem.cj_match = action.candidate
+        } else {
+          updatedItem.ssg_match = action.candidate
+        }
+
+        // savings 재계산
+        updatedItem.savings = recalculateSavings(
+          item.extracted_unit_price,
+          item.extracted_quantity,
+          updatedItem.cj_match?.standard_price,
+          updatedItem.ssg_match?.standard_price
+        )
+
+        return updatedItem
+      })
+
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
+      }
+    }
+
+    case 'CONFIRM_ITEM': {
+      const newItems = state.items.map((item) => {
+        if (item.id !== action.itemId) return item
+        // 토글: 이미 확정되어 있으면 해제, 아니면 확정
+        return {
+          ...item,
+          is_confirmed: !item.is_confirmed,
+          match_status: item.is_confirmed ? item.match_status : 'manual_matched' as const
+        }
+      })
+
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
+      }
+    }
+
+    case 'CONFIRM_ALL_AUTO_MATCHED': {
+      const newItems = state.items.map((item) => {
+        if (item.match_status === 'auto_matched' || item.match_status === 'manual_matched') {
+          return { ...item, is_confirmed: true }
+        }
+        return item
+      })
+
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
+      }
+    }
+
+    case 'PROCEED_TO_REPORT':
+      return { ...state, currentStep: 'report' }
+
+    case 'BACK_TO_MATCHING':
+      return { ...state, currentStep: 'matching' }
+
     default:
       return state
   }
@@ -231,20 +315,29 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 export function useAuditSession() {
   const [state, dispatch] = useReducer(auditReducer, initialState)
 
-  const processFile = useCallback(async (file: File) => {
+  const processFiles = useCallback(async (files: File[]) => {
     try {
+      if (files.length === 0) {
+        throw new Error('파일을 선택해주세요.')
+      }
+
       // 1. 파일 타입에 따라 페이지 추출
       let pages: PageImage[]
+      let fileName: string
 
-      if (isPDF(file)) {
-        pages = await extractPagesFromPDF(file)
-      } else if (isImage(file)) {
-        pages = await extractPagesFromImages([file])
+      // 첫 번째 파일이 PDF인지 확인
+      if (isPDF(files[0])) {
+        pages = await extractPagesFromPDF(files[0])
+        fileName = files[0].name
+      } else if (files.every(f => isImage(f))) {
+        // 모든 파일이 이미지인 경우
+        pages = await extractPagesFromImages(files)
+        fileName = files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}장`
       } else {
         throw new Error('지원하지 않는 파일 형식입니다. PDF 또는 이미지 파일을 업로드하세요.')
       }
 
-      dispatch({ type: 'START_PROCESSING', fileName: file.name, totalPages: pages.length })
+      dispatch({ type: 'START_PROCESSING', fileName, totalPages: pages.length })
       dispatch({ type: 'SET_PAGES', pages })
 
       // 2. 세션 초기화 API 호출
@@ -252,7 +345,7 @@ export function useAuditSession() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: file.name,
+          name: fileName,
           total_pages: pages.length,
         }),
       })
@@ -324,11 +417,109 @@ export function useAuditSession() {
     dispatch({ type: 'RESET' })
   }, [])
 
+  // 2-Step Workflow 함수들
+  const selectCandidate = useCallback(
+    (itemId: string, supplier: Supplier, candidate: SupplierMatch) => {
+      dispatch({ type: 'SELECT_CANDIDATE', itemId, supplier, candidate })
+    },
+    []
+  )
+
+  const confirmItem = useCallback((itemId: string) => {
+    dispatch({ type: 'CONFIRM_ITEM', itemId })
+  }, [])
+
+  const confirmAllAutoMatched = useCallback(() => {
+    dispatch({ type: 'CONFIRM_ALL_AUTO_MATCHED' })
+  }, [])
+
+  const proceedToReport = useCallback(() => {
+    dispatch({ type: 'PROCEED_TO_REPORT' })
+  }, [])
+
+  const backToMatching = useCallback(() => {
+    dispatch({ type: 'BACK_TO_MATCHING' })
+  }, [])
+
+  // 시나리오 계산 (CJ vs SSG)
+  const scenarios = useMemo((): { cj: SupplierScenario; ssg: SupplierScenario } => {
+    const items = state.items
+
+    let cjTotalOur = 0
+    let cjTotalSupplier = 0
+    let cjMatchedCount = 0
+    let ssgTotalOur = 0
+    let ssgTotalSupplier = 0
+    let ssgMatchedCount = 0
+
+    for (const item of items) {
+      const itemTotal = item.extracted_unit_price * item.extracted_quantity
+
+      // CJ 시나리오
+      cjTotalOur += itemTotal
+      if (item.cj_match) {
+        cjTotalSupplier += item.cj_match.standard_price * item.extracted_quantity
+        cjMatchedCount++
+      } else {
+        cjTotalSupplier += itemTotal // 매칭 없으면 현재가 유지
+      }
+
+      // SSG 시나리오
+      ssgTotalOur += itemTotal
+      if (item.ssg_match) {
+        ssgTotalSupplier += item.ssg_match.standard_price * item.extracted_quantity
+        ssgMatchedCount++
+      } else {
+        ssgTotalSupplier += itemTotal // 매칭 없으면 현재가 유지
+      }
+    }
+
+    const cjSavings = Math.max(0, cjTotalOur - cjTotalSupplier)
+    const ssgSavings = Math.max(0, ssgTotalOur - ssgTotalSupplier)
+
+    return {
+      cj: {
+        supplier: 'CJ',
+        totalOurCost: cjTotalOur,
+        totalSupplierCost: cjTotalSupplier,
+        totalSavings: cjSavings,
+        savingsPercent: cjTotalOur > 0 ? (cjSavings / cjTotalOur) * 100 : 0,
+        matchedCount: cjMatchedCount,
+        unmatchedCount: items.length - cjMatchedCount,
+      },
+      ssg: {
+        supplier: 'SHINSEGAE',
+        totalOurCost: ssgTotalOur,
+        totalSupplierCost: ssgTotalSupplier,
+        totalSavings: ssgSavings,
+        savingsPercent: ssgTotalOur > 0 ? (ssgSavings / ssgTotalOur) * 100 : 0,
+        matchedCount: ssgMatchedCount,
+        unmatchedCount: items.length - ssgMatchedCount,
+      },
+    }
+  }, [state.items])
+
+  // 확정 현황
+  const confirmationStats = useMemo(() => {
+    const total = state.items.length
+    const confirmed = state.items.filter(item => item.is_confirmed).length
+    const unconfirmed = total - confirmed
+    return { total, confirmed, unconfirmed }
+  }, [state.items])
+
   return {
     state,
-    processFile,
+    processFiles,
     setCurrentPage,
     updateItemMatch,
     reset,
+    // 2-Step Workflow
+    selectCandidate,
+    confirmItem,
+    confirmAllAutoMatched,
+    proceedToReport,
+    backToMatching,
+    scenarios,
+    confirmationStats,
   }
 }

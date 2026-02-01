@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     // 새 RPC: supplier_filter 없이 전체 DB 검색
     const { data, error } = await supabase.rpc('search_products_fuzzy', {
-      search_term: query,
+      search_term_raw: query,
       limit_count: Math.min(limit, 50),
     })
 

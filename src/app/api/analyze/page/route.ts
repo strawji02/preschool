@@ -136,6 +136,8 @@ export async function POST(request: NextRequest) {
         // Response용 추가 데이터
         cj_match: match.cj_match,
         ssg_match: match.ssg_match,
+        cj_candidates: match.cj_candidates,
+        ssg_candidates: match.ssg_candidates,
         savings,
       }
     })
@@ -173,6 +175,9 @@ export async function POST(request: NextRequest) {
       extracted_unit_price: item.dbRecord.extracted_unit_price,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
+      cj_candidates: item.cj_candidates,
+      ssg_candidates: item.ssg_candidates,
+      is_confirmed: false, // 초기값: 미확정
       savings: item.savings,
       match_status: item.dbRecord.match_status,
     }))

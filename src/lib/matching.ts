@@ -20,18 +20,23 @@ interface RpcResult {
  * 품목명 정규화 - 노이즈 제거로 매칭 정확도 향상
  *
  * 규칙:
- * 1. 괄호/대괄호 내용 제거: "얼갈이배추(계약재배)" → "얼갈이배추"
- * 2. 특수문자 제거 (한글, 영문, 숫자, 공백만 유지)
- * 3. 앞뒤 공백 제거
+ * 1. 괄호/대괄호 내용 제거: "[K]바라깻잎(1kg_국산)" → "바라깻잎"
+ * 2. 숫자+단위 패턴 제거: "200g", "1kg", "1Kg" 등
+ * 3. 특수문자 제거 (한글, 영문만 유지)
+ * 4. 앞뒤 공백 제거
  */
 export function normalizeItemName(name: string): string {
   return name
     // 1. 괄호 내용 제거: (...) 또는 [...]
     .replace(/\([^)]*\)/g, '')
     .replace(/\[[^\]]*\]/g, '')
-    // 2. 특수문자 제거 (한글, 영문, 숫자, 공백만 유지)
-    .replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s]/g, '')
-    // 3. 연속 공백 정리 및 trim
+    // 2. 숫자+단위 패턴 제거 (1kg, 200g, 500ml 등)
+    .replace(/\d+(\.\d+)?\s*(kg|g|ml|l|ea|개|팩|봉|box)/gi, '')
+    // 3. 남은 숫자 제거
+    .replace(/\d+/g, '')
+    // 4. 특수문자 제거 (한글, 영문, 공백만 유지)
+    .replace(/[^\uAC00-\uD7A3a-zA-Z\s]/g, '')
+    // 5. 연속 공백 정리 및 trim
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -115,13 +120,15 @@ export function calculateLoss(
 // ========================================
 
 interface ComparisonMatchResult {
-  cj_match?: SupplierMatch
-  ssg_match?: SupplierMatch
+  cj_match?: SupplierMatch      // Top 1 (자동 선택)
+  ssg_match?: SupplierMatch     // Top 1 (자동 선택)
+  cj_candidates: SupplierMatch[]  // Top 5 후보
+  ssg_candidates: SupplierMatch[] // Top 5 후보
   status: MatchStatus
 }
 
 /**
- * 공급사별 병렬 매칭 - CJ와 SSG 각각 best match 검색
+ * 공급사별 병렬 매칭 - CJ와 SSG 각각 Top 5 후보 검색
  */
 export async function findComparisonMatches(
   itemName: string,
@@ -131,41 +138,45 @@ export async function findComparisonMatches(
     const normalizedName = normalizeItemName(itemName)
     console.log(`  [Comparison] Raw: "${itemName}" | Clean: "${normalizedName}"`)
 
-    // 병렬 실행: CJ와 SSG 동시 검색
+    // 병렬 실행: CJ와 SSG 동시 검색 (Top 5)
     const [cjResult, ssgResult] = await Promise.all([
       supabase.rpc('search_products_fuzzy', {
         search_term_raw: itemName,
         search_term_clean: normalizedName,
-        limit_count: 1,
+        limit_count: 5,  // Top 5 후보
         supplier_filter: 'CJ',
       }),
       supabase.rpc('search_products_fuzzy', {
         search_term_raw: itemName,
         search_term_clean: normalizedName,
-        limit_count: 1,
+        limit_count: 5,  // Top 5 후보
         supplier_filter: 'SHINSEGAE',
       }),
     ])
 
-    // 결과 매핑
+    // 결과 매핑 - 전체 후보 배열 생성
     const cjData = cjResult.data as RpcResult[] | null
     const ssgData = ssgResult.data as RpcResult[] | null
 
-    const cj_match: SupplierMatch | undefined = cjData?.[0] ? {
-      id: cjData[0].id,
-      product_name: cjData[0].product_name,
-      standard_price: cjData[0].standard_price,
-      match_score: cjData[0].match_score,
-      unit_normalized: cjData[0].unit_normalized,
-    } : undefined
+    const cj_candidates: SupplierMatch[] = (cjData || []).map(item => ({
+      id: item.id,
+      product_name: item.product_name,
+      standard_price: item.standard_price,
+      match_score: item.match_score,
+      unit_normalized: item.unit_normalized,
+    }))
 
-    const ssg_match: SupplierMatch | undefined = ssgData?.[0] ? {
-      id: ssgData[0].id,
-      product_name: ssgData[0].product_name,
-      standard_price: ssgData[0].standard_price,
-      match_score: ssgData[0].match_score,
-      unit_normalized: ssgData[0].unit_normalized,
-    } : undefined
+    const ssg_candidates: SupplierMatch[] = (ssgData || []).map(item => ({
+      id: item.id,
+      product_name: item.product_name,
+      standard_price: item.standard_price,
+      match_score: item.match_score,
+      unit_normalized: item.unit_normalized,
+    }))
+
+    // Top 1 = 자동 선택
+    const cj_match = cj_candidates[0]
+    const ssg_match = ssg_candidates[0]
 
     // 상태 결정: 둘 중 하나라도 고득점이면 auto_matched
     const topScore = Math.max(
@@ -180,10 +191,10 @@ export async function findComparisonMatches(
       status = 'pending'
     }
 
-    return { cj_match, ssg_match, status }
+    return { cj_match, ssg_match, cj_candidates, ssg_candidates, status }
   } catch (error) {
     console.error('Comparison matching error:', error)
-    return { status: 'unmatched' }
+    return { cj_candidates: [], ssg_candidates: [], status: 'unmatched' }
   }
 }
 
