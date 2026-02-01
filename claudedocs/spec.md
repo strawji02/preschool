@@ -66,3 +66,43 @@
     sample data representing the CJ and Shinsegae files described above.
 2.  **Implementation:** Build the Full-Stack feature (`/api/upload`,
     `/calc-food` page) based on your design.
+
+## 6. Phase 2 Update: API & Architecture Strategy (Vercel Optimized)
+
+**CRITICAL CONSTRAINT:**
+This system is deployed on Vercel Free Tier (Serverless Function Timeout: 10s).
+Therefore, **the Backend MUST NOT try to process a multi-page PDF in a single request.**
+
+### 1. Architecture: Frontend-Driven Loop
+
+- **Frontend Responsibility:**
+  - Loads the PDF.
+  - Renders PDF to Images (one image per page).
+  - Sends requests to Backend **sequentially** (Page 1 -> Page 2 -> ...).
+- **Backend Responsibility:**
+  - Statelessly processes **ONE single page image** per request.
+  - Returns the analysis result immediately.
+
+### 2. API Endpoints (To be implemented)
+
+#### A. `POST /api/session/init`
+
+- **Purpose:** Start a new audit session.
+- **Body:** `{ "supplier": "CJ" | "SHINSEGAE", "total_pages": 5, ... }`
+- **Action:** Create a record in `audit_sessions` table.
+- **Response:** `{ "session_id": "uuid..." }`
+
+#### B. `POST /api/analyze/page` (The Worker)
+
+- **Purpose:** Analyze a single page image.
+- **Body:**
+  - `session_id`: UUID
+  - `page_number`: Integer
+  - `image`: Base64 string (Single Page Image)
+- **Process:**
+  1. **Upload:** Save the image to Supabase Storage (`/sessions/{id}/{page}.jpg`).
+  2. **OCR (Gemini):** Send image to Gemini 2.5 Flash with prompt: "Extract item list as JSON".
+  3. **Match (DB):** Query `products` table using `pg_trgm` (Similarity > 0.3).
+     - Save Top 5 candidates for manual review if similarity is between 0.3 and 0.8.
+  4. **Save:** Insert results into `audit_items` table.
+- **Response:** JSON `{ "items": [...], "success": true }`
