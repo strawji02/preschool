@@ -15,9 +15,13 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
     "@vercel/analytics": "^1.5.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.563.0",
     "next": "16.0.0",
+    "pdfjs-dist": "^5.4.530",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "tailwind-merge": "^3.4.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

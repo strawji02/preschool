@@ -9,8 +9,8 @@
 
 ```
 Phase 1: DB 설계 & 시드     [██████████] 100% ✅
-Phase 2: 매칭 & API         [░░░░░░░░░░]   0% ⏳
-Phase 3: 감사 UI            [░░░░░░░░░░]   0% ⏳
+Phase 2: 매칭 & API         [██████████] 100% ✅
+Phase 3: 감사 UI            [██████████] 100% ✅
 ```
 
 ---
@@ -76,70 +76,93 @@ c32cac8 feat: Phase 1 - Supabase DB setup and product data seeding
 
 ---
 
-## Phase 2: Intelligent Matching & API ⏳ 대기
+## Phase 2: Intelligent Matching & API ✅ 완료
 
 ### 목표
 > Fuzzy Matching 검색 API와 PDF 업로드/OCR 파이프라인 구축
 
-### 예정 작업
+### 완료된 작업
 
-#### 2.1 검색 API
-- [ ] `GET /api/products/search` - Fuzzy 검색 API
-  - Query params: `q` (검색어), `supplier` (필터), `limit`
-  - pg_trgm의 `similarity()` 함수 활용
-  - 상위 5개 후보 반환
+#### 2.1 타입 정의
+| 파일 | 용도 |
+|------|------|
+| `src/types/audit.ts` | 감사 관련 TypeScript 타입 정의 |
 
-#### 2.2 업로드 API
-- [ ] `POST /api/upload` - PDF 업로드
-  - Supabase Storage에 파일 저장
-  - `audit_sessions` 레코드 생성
-  - `audit_files` 레코드 생성
+#### 2.2 API 엔드포인트
+| 엔드포인트 | 상태 | 용도 |
+|------------|------|------|
+| `POST /api/session/init` | ✅ | 감사 세션 생성 |
+| `GET /api/products/search` | ✅ | Fuzzy 검색 API (pg_trgm) |
+| `POST /api/analyze/page` | ✅ | 페이지 분석 (OCR + 매칭) |
 
-#### 2.3 OCR API
-- [ ] `POST /api/ocr` - Gemini Vision API 연동
-  - PDF → 이미지 변환
-  - Gemini 2.5 Flash로 텍스트 추출
-  - 품목명, 규격, 수량, 청구단가 파싱
-  - `audit_items` 레코드 생성
+#### 2.3 핵심 라이브러리
+| 파일 | 용도 |
+|------|------|
+| `src/lib/gemini.ts` | Google Gemini Vision OCR 래퍼 |
+| `src/lib/matching.ts` | Fuzzy Matching 로직 |
 
-#### 2.4 자동 매칭 로직
-- [ ] 추출된 품목명으로 `products` 테이블 Fuzzy 검색
-- [ ] similarity > 0.8 → `auto_matched`
-- [ ] similarity 0.3~0.8 → `pending` (후보 제시)
-- [ ] similarity < 0.3 → `unmatched`
+#### 2.4 RPC 함수
+| 함수 | 용도 |
+|------|------|
+| `fuzzy_search_products` | pg_trgm 기반 상품 검색 |
+| `search_products` | 전체 공급사 대상 검색 |
+
+### 커밋 이력
+```
+193284c feat: Phase 2 - OCR extraction and dual search matching API
+```
 
 ---
 
-## Phase 3: The Audit Interface ⏳ 대기
+## Phase 3: The Audit Interface ✅ 완료
 
 ### 목표
 > Split View UI로 PDF 뷰어 + 데이터 그리드 감사 화면 구축
 
-### 예정 작업
+### 완료된 작업
 
-#### 3.1 페이지 구조
-- [ ] `/calc-food` 페이지 생성
-- [ ] Split View 레이아웃 (좌: PDF, 우: 그리드)
+#### 3.1 신규 의존성
+| 패키지 | 용도 |
+|--------|------|
+| `pdfjs-dist` | PDF → 이미지 변환 |
+| `lucide-react` | 아이콘 라이브러리 |
+| `clsx` + `tailwind-merge` | 조건부 스타일링 |
 
-#### 3.2 PDF 뷰어 (좌측 패널)
-- [ ] PDF.js 또는 react-pdf 연동
-- [ ] 페이지 네비게이션
-- [ ] 줌 인/아웃
+#### 3.2 유틸리티 함수
+| 파일 | 용도 |
+|------|------|
+| `src/lib/cn.ts` | clsx + tailwind-merge 래퍼 |
+| `src/lib/format.ts` | 통화 포맷 (formatCurrency) |
+| `src/lib/pdf-processor.ts` | PDF 페이지 추출 |
 
-#### 3.3 데이터 그리드 (우측 패널)
-- [ ] 감사 항목 테이블
-- [ ] 손실 계산: `(청구단가 - 기준단가) × 수량`
-- [ ] 손실 > 0 → 빨간색 하이라이트
-- [ ] 매칭 상태 표시 (auto/pending/unmatched)
+#### 3.3 페이지 및 훅
+| 파일 | 용도 |
+|------|------|
+| `src/app/calc-food/page.tsx` | 메인 감사 페이지 |
+| `src/app/calc-food/hooks/useAuditSession.ts` | 상태 관리 (useReducer) |
 
-#### 3.4 수동 매칭 기능
-- [ ] 상품 검색 모달
-- [ ] 후보 상품 선택
-- [ ] 매칭 확정/수정
+#### 3.4 컴포넌트
+| 컴포넌트 | 용도 |
+|----------|------|
+| `UploadZone.tsx` | Drag & Drop PDF 업로드 |
+| `ProcessingView.tsx` | 분석 진행 표시 |
+| `AnalysisDashboard.tsx` | Split View 컨테이너 |
+| `InvoiceViewer.tsx` | 좌측: 이미지 뷰어 (줌, 회전, 드래그) |
+| `PageThumbnails.tsx` | 페이지 썸네일 네비게이션 |
+| `SummaryHeader.tsx` | 절감액 요약 (총 손실액, 매칭 현황) |
+| `AnalysisGrid.tsx` | 우측: 데이터 테이블 (필터, 확장) |
+| `ProductSearchModal.tsx` | 수동 상품 검색/매칭 모달 |
 
-#### 3.5 세션 관리
-- [ ] 세션 목록 페이지
-- [ ] 세션별 통계 (총 청구액, 기준액, 손실액)
+#### 3.5 UI 상태 머신
+```
+EMPTY → PROCESSING → ANALYSIS
+                 ↘    ERROR
+```
+
+- **EMPTY**: PDF 업로드 대기
+- **PROCESSING**: 페이지별 OCR + 매칭 진행
+- **ANALYSIS**: Split View 감사 화면
+- **ERROR**: 오류 표시 + 재시도
 
 ---
 
@@ -148,8 +171,8 @@ c32cac8 feat: Phase 1 - Supabase DB setup and product data seeding
 | 분류 | 기술 |
 |------|------|
 | **Framework** | Next.js 16 (App Router) |
-| **Database** | Supabase (PostgreSQL) |
-| **AI/OCR** | Google Gemini 2.5 Flash |
+| **Database** | Supabase (PostgreSQL + pg_trgm) |
+| **AI/OCR** | Google Gemini 2.0 Flash |
 | **Styling** | Tailwind CSS v4 |
 | **Language** | TypeScript |
 
@@ -159,16 +182,35 @@ c32cac8 feat: Phase 1 - Supabase DB setup and product data seeding
 
 ```
 preschool/
-├── .env.local                    # 환경 변수 (Supabase)
+├── .env.local                    # 환경 변수 (Supabase, Gemini API)
 ├── src/
 │   ├── app/
-│   │   ├── calc-food/           # [Phase 3] 감사 페이지
+│   │   ├── calc-food/           # ✅ 감사 페이지
+│   │   │   ├── page.tsx
+│   │   │   ├── hooks/
+│   │   │   │   └── useAuditSession.ts
+│   │   │   └── components/
+│   │   │       ├── UploadZone.tsx
+│   │   │       ├── ProcessingView.tsx
+│   │   │       ├── AnalysisDashboard.tsx
+│   │   │       ├── InvoiceViewer.tsx
+│   │   │       ├── PageThumbnails.tsx
+│   │   │       ├── SummaryHeader.tsx
+│   │   │       ├── AnalysisGrid.tsx
+│   │   │       └── ProductSearchModal.tsx
 │   │   └── api/
-│   │       ├── products/        # [Phase 2] 검색 API
-│   │       ├── upload/          # [Phase 2] 업로드 API
-│   │       └── ocr/             # [Phase 2] OCR API
-│   └── lib/
-│       └── supabase/            # ✅ Supabase 클라이언트
+│   │       ├── products/search/  # ✅ 검색 API
+│   │       ├── session/init/     # ✅ 세션 API
+│   │       └── analyze/page/     # ✅ 분석 API
+│   ├── lib/
+│   │   ├── supabase/            # ✅ Supabase 클라이언트
+│   │   ├── gemini.ts            # ✅ Gemini OCR
+│   │   ├── matching.ts          # ✅ 매칭 로직
+│   │   ├── cn.ts                # ✅ 스타일 유틸
+│   │   ├── format.ts            # ✅ 포맷 유틸
+│   │   └── pdf-processor.ts     # ✅ PDF 처리
+│   └── types/
+│       └── audit.ts             # ✅ 타입 정의
 ├── scripts/
 │   ├── seed.ts                  # ✅ 시드 스크립트
 │   └── lib/                     # ✅ 파싱 유틸리티
@@ -177,25 +219,55 @@ preschool/
 └── claudedocs/
     ├── spec.md                  # PRD 원본
     ├── db-schema-plan.md        # DB 설계 문서
+    ├── phase-spec/              # 단계별 스펙
+    │   ├── phase2-backend-api.md
+    │   └── phase3-frontend-ui.md
     └── progress.md              # 진행 상황 (이 문서)
 ```
 
 ---
 
-## 다음 단계
+## 사용 방법
 
-1. **Phase 2 시작**: `/api/products/search` Fuzzy 검색 API 구현
-2. **Gemini API 키 준비**: OCR 연동을 위한 API 키 필요
-3. **Storage 버킷 생성**: PDF 업로드용 `invoice-pdfs` 버킷
+### 1. 환경 변수 설정
+```bash
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+GOOGLE_GEMINI_API_KEY=...  # https://aistudio.google.com/app/apikey
+```
+
+### 2. 개발 서버 실행
+```bash
+npm run dev
+# http://localhost:3000/calc-food
+```
+
+### 3. 감사 프로세스
+1. `/calc-food` 접속
+2. 식자재 명세서 PDF 업로드 (Drag & Drop 또는 클릭)
+3. AI가 자동으로 품목 추출 + 기준단가 매칭
+4. Split View에서 결과 확인
+   - 좌측: 원본 PDF 이미지
+   - 우측: 품목별 손실액 분석
+5. 필요시 수동 매칭 (검색 아이콘 클릭)
 
 ---
 
-## 이슈 & 메모
+## 완료 상태
 
-### 규격 파싱 실패 케이스 (1,659건)
-- 대부분 CJ 데이터의 비표준 규격 표기
-- 추후 파싱 로직 개선 또는 수동 보정 필요
+모든 Phase가 완료되었습니다:
 
-### 단위 정규화 범위
-- 현재 23개 단위 매핑 등록
-- 새로운 단위 발견 시 `unit_mappings` 테이블에 추가 필요
+- ✅ **Phase 1**: DB 설계 및 23,866개 상품 시드
+- ✅ **Phase 2**: Gemini OCR + pg_trgm Fuzzy Matching API
+- ✅ **Phase 3**: Split View 감사 UI
+
+---
+
+## 추후 개선 사항 (Optional)
+
+1. **세션 관리 페이지**: 과거 감사 이력 조회
+2. **엑셀 내보내기**: 분석 결과 다운로드
+3. **배치 처리**: 여러 PDF 동시 분석
+4. **정확도 향상**: 규격 파싱 로직 개선

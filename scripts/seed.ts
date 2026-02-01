@@ -8,7 +8,7 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 import * as XLSX from 'xlsx'
 import { createClient } from '@supabase/supabase-js'
-import { normalizeUnit, getUnitCategory } from './lib/unit-normalizer'
+import { normalizeUnit } from './lib/unit-normalizer'
 import { parseCJSpec, parseShinsegaeSpec } from './lib/spec-parser'
 
 // Supabase Admin 클라이언트 생성

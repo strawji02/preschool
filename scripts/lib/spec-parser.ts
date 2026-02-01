@@ -111,7 +111,7 @@ export function parseShinsegaeSpec(spec: string): ParsedSpec {
   const pattern2 = /^(\d+(?:[.,]\d+)?)\s*([GgKkMmLl]+)\s*\*\s*(\d+)/
   match = spec.match(pattern2)
   if (match) {
-    let baseQty = parseFloat(match[1].replace(',', '.'))
+    const baseQty = parseFloat(match[1].replace(',', '.'))
     const unit = match[2].toUpperCase()
     let multiplier = parseInt(match[3])
 
