@@ -15,6 +15,8 @@ export interface SupplierMatch {
   standard_price: number
   match_score: number
   unit_normalized?: string
+  ppu?: number              // Price Per Unit (단가당 가격)
+  standard_unit?: string    // 표준 단위 (e.g., "100g", "1kg")
 }
 
 // 절감액 계산 결과

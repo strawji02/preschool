@@ -14,6 +14,8 @@ interface RpcResult {
   spec_unit: string | null
   supplier: string
   match_score: number
+  ppu: number | null
+  standard_unit: string | null
 }
 
 /**
@@ -75,6 +77,8 @@ export async function findMatches(
       spec_unit: c.spec_unit ?? undefined,
       supplier: c.supplier as Supplier,
       match_score: c.match_score,
+      ppu: c.ppu ?? undefined,
+      standard_unit: c.standard_unit ?? undefined,
     }))
 
     const topScore = matchCandidates[0].match_score
