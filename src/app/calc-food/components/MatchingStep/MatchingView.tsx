@@ -63,6 +63,7 @@ export function MatchingView({
         <MatchingHeader
           fileName={fileName}
           confirmationStats={confirmationStats}
+          items={items}
           onConfirmAllAutoMatched={onConfirmAllAutoMatched}
           onProceedToReport={onProceedToReport}
         />
