@@ -19,6 +19,7 @@ interface MatchingViewProps {
     confirmed: number
     unconfirmed: number
   }
+  totalPages: number
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
   onConfirmItem: (itemId: string) => void
   onConfirmAllAutoMatched: () => void
@@ -35,6 +36,7 @@ export function MatchingView({
   items,
   fileName,
   confirmationStats,
+  totalPages,
   onSelectCandidate,
   onConfirmItem,
   onConfirmAllAutoMatched,
@@ -74,6 +76,7 @@ export function MatchingView({
           fileName={fileName}
           confirmationStats={confirmationStats}
           items={items}
+          totalPages={totalPages}
           onConfirmAllAutoMatched={onConfirmAllAutoMatched}
           onProceedToReport={onProceedToReport}
         />

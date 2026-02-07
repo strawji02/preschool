@@ -18,6 +18,7 @@ interface AnalysisDashboardProps {
     confirmed: number
     unconfirmed: number
   }
+  totalPages: number
   scenarios: {
     cj: SupplierScenario
     ssg: SupplierScenario
@@ -42,6 +43,7 @@ export function AnalysisDashboard({
   items,
   fileName,
   confirmationStats,
+  totalPages,
   scenarios,
   onSelectCandidate,
   onConfirmItem,
@@ -61,6 +63,7 @@ export function AnalysisDashboard({
         items={items}
         fileName={fileName}
         confirmationStats={confirmationStats}
+        totalPages={totalPages}
         onSelectCandidate={onSelectCandidate}
         onConfirmItem={onConfirmItem}
         onConfirmAllAutoMatched={onConfirmAllAutoMatched}

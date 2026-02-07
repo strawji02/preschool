@@ -117,6 +117,7 @@ export default function CalcFoodPage() {
             items={state.items}
             fileName={state.fileName || '명세서'}
             confirmationStats={confirmationStats}
+            totalPages={state.totalPages}
             scenarios={scenarios}
             // Matching step callbacks
             onSelectCandidate={selectCandidate}

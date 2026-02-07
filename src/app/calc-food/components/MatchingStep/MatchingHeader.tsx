@@ -1,7 +1,8 @@
 'use client'
 
-import { CheckCircle, AlertCircle, ArrowRight, Download } from 'lucide-react'
-import { formatNumber } from '@/lib/format'
+import { useState } from 'react'
+import { CheckCircle, AlertCircle, ArrowRight, Download, FileCheck } from 'lucide-react'
+import { formatNumber, formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem } from '@/types/audit'
 
@@ -13,6 +14,7 @@ interface MatchingHeaderProps {
     unconfirmed: number
   }
   items: ComparisonItem[]
+  totalPages: number
   onConfirmAllAutoMatched: () => void
   onProceedToReport: () => void
 }
@@ -21,12 +23,34 @@ export function MatchingHeader({
   fileName,
   confirmationStats,
   items,
+  totalPages,
   onConfirmAllAutoMatched,
   onProceedToReport,
 }: MatchingHeaderProps) {
   const { total, confirmed, unconfirmed } = confirmationStats
   const progress = total > 0 ? (confirmed / total) * 100 : 0
   const isAllConfirmed = unconfirmed === 0
+  const [showMissingCheck, setShowMissingCheck] = useState(false)
+
+  // 누락점검 계산
+  const totalExtractedAmount = items.reduce(
+    (sum, item) => sum + (item.extracted_unit_price * item.extracted_quantity),
+    0
+  )
+
+  // 페이지별 아이템 수 계산
+  const itemsPerPage = new Map<number, number>()
+  items.forEach(item => {
+    // item.id는 "page1-0", "page1-1" 형식이라고 가정
+    const pageMatch = item.id.match(/page(\d+)/)
+    if (pageMatch) {
+      const pageNum = parseInt(pageMatch[1])
+      itemsPerPage.set(pageNum, (itemsPerPage.get(pageNum) || 0) + 1)
+    }
+  })
+
+  const pagesWithoutItems = Array.from({ length: totalPages }, (_, i) => i + 1)
+    .filter(page => !itemsPerPage.has(page))
 
   const handleExportExcel = async () => {
     try {
@@ -95,6 +119,20 @@ export function MatchingHeader({
         </div>
 
         <div className="flex gap-2">
+          {/* 누락점검 버튼 */}
+          <button
+            onClick={() => setShowMissingCheck(true)}
+            className={cn(
+              'flex items-center gap-2 rounded-lg border px-4 py-2.5 font-medium transition-colors',
+              pagesWithoutItems.length > 0
+                ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+                : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+            )}
+          >
+            <FileCheck size={18} />
+            누락점검
+          </button>
+
           {/* 엑셀 다운로드 버튼 */}
           <button
             onClick={handleExportExcel}
@@ -175,6 +213,106 @@ export function MatchingHeader({
           </div>
         </div>
       </div>
+
+      {/* 누락점검 모달 */}
+      {showMissingCheck && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">누락 점검 결과</h3>
+              <button
+                onClick={() => setShowMissingCheck(false)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* PDF 페이지 점검 */}
+              <div className="rounded-lg border border-gray-200 p-4">
+                <h4 className="mb-2 flex items-center gap-2 font-medium text-gray-900">
+                  <FileCheck size={16} />
+                  PDF 페이지 분석
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">총 페이지 수:</span>
+                    <span className="font-medium">{totalPages}페이지</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">분석된 페이지:</span>
+                    <span className="font-medium">{totalPages - pagesWithoutItems.length}페이지</span>
+                  </div>
+                  {pagesWithoutItems.length > 0 && (
+                    <div className="mt-2 rounded bg-yellow-50 p-2">
+                      <p className="font-medium text-yellow-800">
+                        ⚠️ 아이템 없는 페이지: {pagesWithoutItems.join(', ')}
+                      </p>
+                      <p className="mt-1 text-xs text-yellow-600">
+                        표지, 빈 페이지, 또는 인식 실패일 수 있습니다
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 품목 및 총액 점검 */}
+              <div className="rounded-lg border border-gray-200 p-4">
+                <h4 className="mb-2 flex items-center gap-2 font-medium text-gray-900">
+                  <CheckCircle size={16} />
+                  품목 및 총액
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">총 품목 수:</span>
+                    <span className="font-medium">{total}개</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">추출된 총액:</span>
+                    <span className="font-medium">{formatCurrency(totalExtractedAmount)}</span>
+                  </div>
+                  <div className="mt-2 rounded bg-blue-50 p-2">
+                    <p className="text-xs text-blue-600">
+                      💡 명세서의 총액과 비교하여 누락 여부를 확인하세요
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 페이지별 분포 */}
+              <div className="rounded-lg border border-gray-200 p-4">
+                <h4 className="mb-2 font-medium text-gray-900">페이지별 품목 수</h4>
+                <div className="max-h-40 space-y-1 overflow-y-auto text-sm">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    const count = itemsPerPage.get(page) || 0
+                    return (
+                      <div key={page} className="flex justify-between">
+                        <span className="text-gray-600">페이지 {page}:</span>
+                        <span className={cn(
+                          'font-medium',
+                          count === 0 ? 'text-yellow-600' : 'text-gray-900'
+                        )}>
+                          {count}개
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setShowMissingCheck(false)}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
