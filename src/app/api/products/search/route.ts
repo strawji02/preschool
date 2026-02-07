@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { generateEmbedding } from '@/lib/embedding'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -11,6 +12,7 @@ interface RpcResult {
   spec_unit: string | null
   supplier: string
   match_score: number
+  similarity?: number // For semantic search
 }
 
 export async function GET(request: NextRequest) {
@@ -36,12 +38,42 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createAdminClient()
+    const searchMode = process.env.NEXT_PUBLIC_SEARCH_MODE || 'hybrid'
 
-    // 새 RPC: supplier_filter 없이 전체 DB 검색
-    const { data, error } = await supabase.rpc('search_products_fuzzy', {
-      search_term_raw: query,
-      limit_count: Math.min(limit, 50),
-    })
+    let results: RpcResult[] = []
+    let error: any = null
+
+    // Choose search strategy based on mode
+    if (searchMode === 'semantic') {
+      try {
+        const embedding = await generateEmbedding(query)
+        const { data, error: rpcError } = await supabase.rpc('search_products_vector', {
+          query_embedding: embedding,
+          limit_count: Math.min(limit, 50),
+          supplier_filter: supplier || undefined,
+          similarity_threshold: 0.3,
+        })
+        results = (data as RpcResult[] || []).map(r => ({
+          ...r,
+          match_score: r.similarity ?? 0,
+        }))
+        error = rpcError
+      } catch (embedError) {
+        console.error('Embedding generation failed:', embedError)
+        return NextResponse.json<SearchProductsResponse>(
+          { success: false, products: [], error: 'Embedding generation failed' },
+          { status: 500 }
+        )
+      }
+    } else {
+      // Use fuzzy search for other modes (trigram, hybrid, bm25)
+      const { data, error: rpcError } = await supabase.rpc('search_products_fuzzy', {
+        search_term_raw: query,
+        limit_count: Math.min(limit, 50),
+      })
+      results = data as RpcResult[] || []
+      error = rpcError
+    }
 
     if (error) {
       console.error('Search RPC error:', error)
@@ -51,10 +83,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    let results = (data as RpcResult[] || [])
-
-    // supplier 필터가 있으면 결과에서 필터링
-    if (supplier) {
+    // supplier 필터가 있으면 결과에서 필터링 (semantic 모드는 이미 RPC에서 필터링됨)
+    if (supplier && searchMode !== 'semantic') {
       results = results.filter((p) => p.supplier === supplier)
     }
 

@@ -1,13 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus } from '@/types/audit'
 import { preprocessKoreanFoodName, dualNormalize } from '@/lib/preprocessing'
+import { generateEmbedding } from '@/lib/embedding'
 
 // Matching thresholds
 const AUTO_MATCH_THRESHOLD = 0.8
 const PENDING_THRESHOLD = 0.3
 
 // Search mode
-type SearchMode = 'trigram' | 'hybrid' | 'bm25'
+type SearchMode = 'trigram' | 'hybrid' | 'bm25' | 'semantic'
 const SEARCH_MODE: SearchMode = process.env.NEXT_PUBLIC_SEARCH_MODE as SearchMode || 'hybrid'
 
 interface RpcResult {
@@ -19,6 +20,7 @@ interface RpcResult {
   spec_unit: string | null
   supplier: string
   match_score: number
+  similarity?: number // For semantic search (search_products_vector)
   ppu: number | null
   standard_unit: string | null
 }
@@ -58,7 +60,25 @@ export async function findMatches(
     let candidates: RpcResult[] = []
     let error: any = null
 
-    if (searchMode === 'hybrid') {
+    if (searchMode === 'semantic') {
+      // Phase 2: Semantic Search (Vector Similarity)
+      try {
+        const embedding = await generateEmbedding(forSemantic)
+        const result = await supabase.rpc('search_products_vector', {
+          query_embedding: embedding,
+          limit_count: 5,
+          similarity_threshold: 0.3,
+        })
+        candidates = (result.data as RpcResult[] || []).map(c => ({
+          ...c,
+          match_score: c.similarity ?? 0, // Convert similarity to match_score
+        }))
+        error = result.error
+      } catch (embedError) {
+        console.error('Embedding generation failed:', embedError)
+        error = embedError
+      }
+    } else if (searchMode === 'hybrid') {
       // Phase 1: Hybrid Search (BM25 + Trigram with RRF)
       const result = await supabase.rpc('search_products_hybrid', {
         search_term_raw: itemName,
@@ -179,7 +199,30 @@ export async function findComparisonMatches(
     let cjResult: any
     let ssgResult: any
 
-    if (searchMode === 'hybrid') {
+    if (searchMode === 'semantic') {
+      // Phase 2: Semantic Search with supplier filter
+      try {
+        const embedding = await generateEmbedding(forSemantic)
+        ;[cjResult, ssgResult] = await Promise.all([
+          supabase.rpc('search_products_vector', {
+            query_embedding: embedding,
+            limit_count: 5,
+            supplier_filter: 'CJ',
+            similarity_threshold: 0.3,
+          }),
+          supabase.rpc('search_products_vector', {
+            query_embedding: embedding,
+            limit_count: 5,
+            supplier_filter: 'SHINSEGAE',
+            similarity_threshold: 0.3,
+          }),
+        ])
+      } catch (embedError) {
+        console.error('Embedding generation failed:', embedError)
+        cjResult = { data: null, error: embedError }
+        ssgResult = { data: null, error: embedError }
+      }
+    } else if (searchMode === 'hybrid') {
       [cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_hybrid', {
           search_term_raw: itemName,
@@ -237,7 +280,7 @@ export async function findComparisonMatches(
       id: item.id,
       product_name: item.product_name,
       standard_price: item.standard_price,
-      match_score: item.match_score,
+      match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
       unit_normalized: item.unit_normalized,
     }))
 
@@ -245,7 +288,7 @@ export async function findComparisonMatches(
       id: item.id,
       product_name: item.product_name,
       standard_price: item.standard_price,
-      match_score: item.match_score,
+      match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
       unit_normalized: item.unit_normalized,
     }))
 
