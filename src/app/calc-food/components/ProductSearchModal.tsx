@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { X, Search, Loader2, Check } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { X, Search, Loader2, Check, GripVertical } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, MatchCandidate, Supplier } from '@/types/audit'
@@ -25,6 +25,12 @@ export function ProductSearchModal({
   const [supplier, setSupplier] = useState<Supplier | ''>(initialSupplier || '')
   const [results, setResults] = useState<MatchCandidate[]>([])
   const [isLoading, setIsLoading] = useState(false)
+
+  // 드래그 상태
+  const [isDragging, setIsDragging] = useState(false)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const modalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isOpen && item) {
@@ -71,28 +77,81 @@ export function ProductSearchModal({
     onClose()
   }
 
+  // 드래그 핸들러
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.drag-handle')) {
+      setIsDragging(true)
+      setDragStart({
+        x: e.clientX - position.x,
+        y: e.clientY - position.y,
+      })
+    }
+  }
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+      setPosition({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      })
+    }
+  }, [isDragging, dragStart])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp])
+
+  // 모달 열릴 때 위치 초기화
+  useEffect(() => {
+    if (isOpen) {
+      setPosition({ x: 0, y: 0 })
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl">
+      <div
+        ref={modalRef}
+        onMouseDown={handleMouseDown}
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl"
+        style={{
+          transform: `translate(${position.x}px, ${position.y}px)`,
+          cursor: isDragging ? 'grabbing' : 'default',
+        }}
+      >
         {/* 헤더 */}
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">상품 검색</h3>
-            <p className="text-sm text-gray-500">
-              원본: <span className="font-medium">{item.extracted_name}</span>
-              {initialSupplier && (
-                <span
-                  className={cn(
-                    'ml-2 rounded px-1.5 py-0.5 text-xs font-medium',
-                    initialSupplier === 'CJ' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'
-                  )}
-                >
-                  {initialSupplier === 'CJ' ? 'CJ 검색' : '신세계 검색'}
-                </span>
-              )}
-            </p>
+        <div className="drag-handle flex items-center justify-between border-b px-6 py-4 cursor-grab active:cursor-grabbing">
+          <div className="flex items-center gap-2">
+            <GripVertical size={20} className="text-gray-400" />
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">상품 검색</h3>
+              <p className="text-sm text-gray-500">
+                원본: <span className="font-medium">{item.extracted_name}</span>
+                {initialSupplier && (
+                  <span
+                    className={cn(
+                      'ml-2 rounded px-1.5 py-0.5 text-xs font-medium',
+                      initialSupplier === 'CJ' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'
+                    )}
+                  >
+                    {initialSupplier === 'CJ' ? 'CJ 검색' : '신세계 검색'}
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
             <X size={20} />
