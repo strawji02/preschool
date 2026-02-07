@@ -22,7 +22,15 @@ export function MatchingRow({
 }: MatchingRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
+  // 견적불가 여부 확인 (CJ와 SSG 모두 후보가 없는 경우)
+  const noMatch = item.cj_candidates.length === 0 && item.ssg_candidates.length === 0
+
   const getStatusBadge = () => {
+    // 견적불가 우선 표시
+    if (noMatch) {
+      return <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">견적불가</span>
+    }
+
     switch (item.match_status) {
       case 'auto_matched':
         return <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">자동</span>

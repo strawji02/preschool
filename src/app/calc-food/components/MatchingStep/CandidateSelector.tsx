@@ -58,6 +58,9 @@ export function CandidateSelector({
     )
   }
 
+  // "없음" 선택 여부 확인
+  const isNoneSelected = selectedMatch?.id === 'NONE'
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
@@ -65,22 +68,30 @@ export function CandidateSelector({
         disabled={disabled}
         className={cn(
           'flex min-w-[90px] items-center justify-between gap-1 rounded px-2 py-1.5 text-sm transition-colors',
-          selectedMatch
+          isNoneSelected
+            ? 'bg-red-50 hover:bg-red-100'
+            : selectedMatch
             ? `bg-${colorClass}-50 hover:bg-${colorClass}-100`
             : 'bg-gray-100 hover:bg-gray-200',
           disabled && 'cursor-not-allowed opacity-50'
         )}
         style={{
-          backgroundColor: selectedMatch
+          backgroundColor: isNoneSelected
+            ? 'rgb(254 242 242)'
+            : selectedMatch
             ? (isCJ ? 'rgb(255 247 237)' : 'rgb(250 245 255)')
             : undefined,
         }}
       >
         <span className={cn(
           'truncate font-medium',
-          selectedMatch && (isCJ ? 'text-orange-700' : 'text-purple-700')
+          isNoneSelected
+            ? 'text-red-700'
+            : selectedMatch && (isCJ ? 'text-orange-700' : 'text-purple-700')
         )}>
-          {selectedMatch
+          {isNoneSelected
+            ? '없음'
+            : selectedMatch
             ? `${formatCurrency(selectedMatch.standard_price)}${selectedMatch.unit_normalized ? '/' + selectedMatch.unit_normalized : ''}`
             : '선택'}
         </span>
@@ -90,6 +101,23 @@ export function CandidateSelector({
       {isOpen && (
         <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border bg-white shadow-lg">
           <div className="max-h-60 overflow-y-auto p-1">
+            {/* "없음" 옵션 추가 */}
+            <button
+              onClick={() => {
+                onSelect({ id: 'NONE', product_name: '없음', standard_price: 0, match_score: 0, unit_normalized: '' } as SupplierMatch)
+                setIsOpen(false)
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-red-50"
+            >
+              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-100 text-xs text-red-700">
+                ✕
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-red-700">없음 (점검필요)</p>
+                <p className="text-xs text-red-500">해당 공급사에 매칭 불가</p>
+              </div>
+            </button>
+
             {candidates.map((candidate, index) => {
               const isSelected = selectedMatch?.id === candidate.id
               return (
