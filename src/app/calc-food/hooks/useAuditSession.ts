@@ -39,6 +39,8 @@ export interface AuditState {
   totalPages: number
   error: string | null
   fileName: string | null
+  isReanalyzing: boolean
+  reanalyzingPage: number | null
 }
 
 // 액션 타입
@@ -60,6 +62,10 @@ type AuditAction =
   | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
   | { type: 'PROCEED_TO_REPORT' }
   | { type: 'BACK_TO_MATCHING' }
+  // 재분석 액션
+  | { type: 'START_REANALYZE'; pageNumber: number }
+  | { type: 'REPLACE_PAGE_ITEMS'; pageNumber: number; items: ComparisonItem[] }
+  | { type: 'COMPLETE_REANALYZE' }
 
 const initialStats: SessionStats = {
   totalItems: 0,
@@ -86,6 +92,8 @@ const initialState: AuditState = {
   totalPages: 0,
   error: null,
   fileName: null,
+  isReanalyzing: false,
+  reanalyzingPage: null,
 }
 
 function calculateStats(items: ComparisonItem[]): SessionStats {
@@ -307,6 +315,26 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'BACK_TO_MATCHING':
       return { ...state, currentStep: 'matching' }
 
+    // 재분석 액션 핸들러
+    case 'START_REANALYZE':
+      return { ...state, isReanalyzing: true, reanalyzingPage: action.pageNumber }
+
+    case 'REPLACE_PAGE_ITEMS': {
+      // 해당 페이지의 기존 아이템 제거하고 새 아이템으로 교체
+      const filteredItems = state.items.filter(
+        item => item.id.split('-')[0] !== `page${action.pageNumber}`
+      )
+      const newItems = [...filteredItems, ...action.items]
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
+      }
+    }
+
+    case 'COMPLETE_REANALYZE':
+      return { ...state, isReanalyzing: false, reanalyzingPage: null }
+
     default:
       return state
   }
@@ -441,6 +469,45 @@ export function useAuditSession() {
     dispatch({ type: 'BACK_TO_MATCHING' })
   }, [])
 
+  // 재분석
+  const reanalyze = useCallback(async (pageNumber: number) => {
+    if (!state.sessionId || state.isReanalyzing) return
+
+    try {
+      dispatch({ type: 'START_REANALYZE', pageNumber })
+
+      const page = state.pages.find(p => p.pageNumber === pageNumber)
+      if (!page) {
+        throw new Error('페이지를 찾을 수 없습니다.')
+      }
+
+      const analyzeRes = await fetch('/api/analyze/page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: state.sessionId,
+          page_number: pageNumber,
+          image: extractBase64(page.dataUrl),
+        }),
+      })
+
+      if (!analyzeRes.ok) {
+        throw new Error('페이지 재분석 실패')
+      }
+
+      const analyzeData = await analyzeRes.json()
+      if (analyzeData.success && analyzeData.items) {
+        dispatch({ type: 'REPLACE_PAGE_ITEMS', pageNumber, items: analyzeData.items })
+      }
+
+      dispatch({ type: 'COMPLETE_REANALYZE' })
+    } catch (error) {
+      console.error('재분석 실패:', error)
+      dispatch({ type: 'COMPLETE_REANALYZE' })
+      alert('페이지 재분석에 실패했습니다.')
+    }
+  }, [state.sessionId, state.pages, state.isReanalyzing])
+
   // 시나리오 계산 (CJ vs SSG)
   const scenarios = useMemo((): { cj: SupplierScenario; ssg: SupplierScenario } => {
     const items = state.items
@@ -521,5 +588,8 @@ export function useAuditSession() {
     backToMatching,
     scenarios,
     confirmationStats,
+    // 재분석
+    reanalyze,
+    isReanalyzing: state.isReanalyzing,
   }
 }

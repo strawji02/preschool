@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useLayoutEffect } from 'react'
-import { ZoomIn, ZoomOut, RotateCw, Move } from 'lucide-react'
+import { ZoomIn, ZoomOut, RotateCw, Move, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { PageImage } from '@/lib/pdf-processor'
 import { PageThumbnails } from './PageThumbnails'
@@ -10,9 +10,11 @@ interface InvoiceViewerProps {
   pages: PageImage[]
   currentPage: number
   onPageSelect: (page: number) => void
+  onReanalyze?: (pageNumber: number) => void
+  isReanalyzing?: boolean
 }
 
-export function InvoiceViewer({ pages, currentPage, onPageSelect }: InvoiceViewerProps) {
+export function InvoiceViewer({ pages, currentPage, onPageSelect, onReanalyze, isReanalyzing }: InvoiceViewerProps) {
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
@@ -110,6 +112,25 @@ export function InvoiceViewer({ pages, currentPage, onPageSelect }: InvoiceViewe
           >
             <Move size={18} />
           </button>
+
+          {onReanalyze && (
+            <>
+              <div className="mx-2 h-5 w-px bg-gray-600" />
+              <button
+                onClick={() => onReanalyze(currentPage)}
+                disabled={isReanalyzing}
+                className={cn(
+                  'rounded p-2 transition-colors',
+                  isReanalyzing
+                    ? 'cursor-not-allowed text-gray-500'
+                    : 'text-blue-400 hover:bg-gray-700 hover:text-blue-300'
+                )}
+                title="페이지 재분석"
+              >
+                <RefreshCw size={18} className={cn(isReanalyzing && 'animate-spin')} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

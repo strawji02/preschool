@@ -24,6 +24,8 @@ interface MatchingViewProps {
   onConfirmAllAutoMatched: () => void
   onProceedToReport: () => void
   onItemMatchUpdate: (itemId: string, product: MatchCandidate, supplier: Supplier) => void
+  onReanalyze?: (pageNumber: number) => void
+  isReanalyzing?: boolean
 }
 
 export function MatchingView({
@@ -38,6 +40,8 @@ export function MatchingView({
   onConfirmAllAutoMatched,
   onProceedToReport,
   onItemMatchUpdate,
+  onReanalyze,
+  isReanalyzing,
 }: MatchingViewProps) {
   const [searchItem, setSearchItem] = useState<ComparisonItem | null>(null)
   const [searchSupplier, setSearchSupplier] = useState<Supplier | undefined>(undefined)
@@ -55,7 +59,13 @@ export function MatchingView({
     <div className="flex h-[calc(100vh-64px)]">
       {/* 좌측: 이미지 뷰어 (50%) */}
       <div className="w-1/2 border-r">
-        <InvoiceViewer pages={pages} currentPage={currentPage} onPageSelect={onPageSelect} />
+        <InvoiceViewer
+          pages={pages}
+          currentPage={currentPage}
+          onPageSelect={onPageSelect}
+          onReanalyze={onReanalyze}
+          isReanalyzing={isReanalyzing}
+        />
       </div>
 
       {/* 우측: 매칭 그리드 (50%) */}

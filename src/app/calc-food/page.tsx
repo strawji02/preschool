@@ -44,6 +44,9 @@ export default function CalcFoodPage() {
     backToMatching,
     scenarios,
     confirmationStats,
+    // 재분석
+    reanalyze,
+    isReanalyzing,
   } = useAuditSession()
 
   return (
@@ -121,6 +124,8 @@ export default function CalcFoodPage() {
             onConfirmAllAutoMatched={confirmAllAutoMatched}
             onProceedToReport={proceedToReport}
             onItemMatchUpdate={updateItemMatch}
+            onReanalyze={reanalyze}
+            isReanalyzing={isReanalyzing}
             // Report step callbacks
             onBackToMatching={backToMatching}
           />

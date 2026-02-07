@@ -28,6 +28,8 @@ interface AnalysisDashboardProps {
   onConfirmAllAutoMatched: () => void
   onProceedToReport: () => void
   onItemMatchUpdate: (itemId: string, product: MatchCandidate, supplier: Supplier) => void
+  onReanalyze?: (pageNumber: number) => void
+  isReanalyzing?: boolean
   // Report step callbacks
   onBackToMatching: () => void
 }
@@ -46,6 +48,8 @@ export function AnalysisDashboard({
   onConfirmAllAutoMatched,
   onProceedToReport,
   onItemMatchUpdate,
+  onReanalyze,
+  isReanalyzing,
   onBackToMatching,
 }: AnalysisDashboardProps) {
   if (currentStep === 'matching') {
@@ -62,6 +66,8 @@ export function AnalysisDashboard({
         onConfirmAllAutoMatched={onConfirmAllAutoMatched}
         onProceedToReport={onProceedToReport}
         onItemMatchUpdate={onItemMatchUpdate}
+        onReanalyze={onReanalyze}
+        isReanalyzing={isReanalyzing}
       />
     )
   }
