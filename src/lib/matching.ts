@@ -1,9 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus } from '@/types/audit'
+import { preprocessKoreanFoodName, dualNormalize } from '@/lib/preprocessing'
 
 // Matching thresholds
 const AUTO_MATCH_THRESHOLD = 0.8
 const PENDING_THRESHOLD = 0.3
+
+// Search mode
+type SearchMode = 'trigram' | 'hybrid' | 'bm25'
+const SEARCH_MODE: SearchMode = process.env.NEXT_PUBLIC_SEARCH_MODE as SearchMode || 'hybrid'
 
 interface RpcResult {
   id: string
@@ -21,43 +26,67 @@ interface RpcResult {
 /**
  * 품목명 정규화 - 노이즈 제거로 매칭 정확도 향상
  *
- * 규칙:
- * 1. 괄호/대괄호 내용 제거: "[K]바라깻잎(1kg_국산)" → "바라깻잎"
- * 2. 숫자+단위 패턴 제거: "200g", "1kg", "1Kg" 등
- * 3. 특수문자 제거 (한글, 영문만 유지)
- * 4. 앞뒤 공백 제거
+ * Phase 1 개선: 한국어 특화 전처리 적용
+ * - 조사 제거 (은/는/이/가)
+ * - 맞춤법 통일 (초콜렛→초콜릿)
+ * - 기존 로직 유지
  */
 export function normalizeItemName(name: string): string {
-  return name
-    // 1. 괄호 내용 제거: (...) 또는 [...]
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]/g, '')
-    // 2. 숫자+단위 패턴 제거 (1kg, 200g, 500ml 등)
-    .replace(/\d+(\.\d+)?\s*(kg|g|ml|l|ea|개|팩|봉|box)/gi, '')
-    // 3. 남은 숫자 제거
-    .replace(/\d+/g, '')
-    // 4. 특수문자 제거 (한글, 영문, 공백만 유지)
-    .replace(/[^\uAC00-\uD7A3a-zA-Z\s]/g, '')
-    // 5. 연속 공백 정리 및 trim
-    .replace(/\s+/g, ' ')
-    .trim()
+  // Phase 1: 한국어 특화 전처리 사용
+  return preprocessKoreanFoodName(name, {
+    removeParticles: true,
+    normalizeSpelling: true,
+    normalizeBrands: false,
+    removeNumbers: true,
+    removeSpecialChars: true,
+  })
 }
 
-// 전체 DB 검색 (Dual Search: Raw + Normalized)
+// 전체 DB 검색 (Phase 1: Hybrid Search 지원)
 export async function findMatches(
   itemName: string,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  searchMode: SearchMode = SEARCH_MODE
 ): Promise<MatchResult> {
   try {
-    // Dual Search: 원본과 정규화 둘 다 사용
-    const normalizedName = normalizeItemName(itemName)
-    console.log(`  [Matching] Raw: "${itemName}" | Clean: "${normalizedName}"`)
+    // Dual Normalization: BM25용 vs Semantic용
+    const { forKeyword, forSemantic } = dualNormalize(itemName)
+    console.log(`  [Matching] Mode: ${searchMode}`)
+    console.log(`  [Matching] Raw: "${itemName}"`)
+    console.log(`  [Matching] Keyword: "${forKeyword}" | Semantic: "${forSemantic}"`)
 
-    const { data: candidates, error } = await supabase.rpc('search_products_fuzzy', {
-      search_term_raw: itemName,       // 원본 (규격 포함)
-      search_term_clean: normalizedName, // 정규화 (노이즈 제거)
-      limit_count: 5,
-    })
+    let candidates: RpcResult[] = []
+    let error: any = null
+
+    if (searchMode === 'hybrid') {
+      // Phase 1: Hybrid Search (BM25 + Trigram with RRF)
+      const result = await supabase.rpc('search_products_hybrid', {
+        search_term_raw: itemName,
+        search_term_clean: forKeyword, // BM25용
+        limit_count: 5,
+        bm25_weight: 0.5, // 50% BM25
+        semantic_weight: 0.5, // 50% Semantic
+      })
+      candidates = result.data as RpcResult[]
+      error = result.error
+    } else if (searchMode === 'bm25') {
+      // BM25 only (키워드 검색)
+      const result = await supabase.rpc('search_products_bm25', {
+        search_term: forKeyword,
+        limit_count: 5,
+      })
+      candidates = result.data as RpcResult[]
+      error = result.error
+    } else {
+      // Legacy: Trigram only (기존 방식)
+      const result = await supabase.rpc('search_products_fuzzy', {
+        search_term_raw: itemName,
+        search_term_clean: forSemantic,
+        limit_count: 5,
+      })
+      candidates = result.data as RpcResult[]
+      error = result.error
+    }
 
     if (error) {
       console.error('RPC error:', error.message)
@@ -68,7 +97,7 @@ export async function findMatches(
       return { status: 'unmatched' }
     }
 
-    const matchCandidates: MatchCandidate[] = (candidates as RpcResult[]).map((c) => ({
+    const matchCandidates: MatchCandidate[] = candidates.map((c) => ({
       id: c.id,
       product_name: c.product_name,
       standard_price: c.standard_price,
@@ -133,30 +162,72 @@ interface ComparisonMatchResult {
 
 /**
  * 공급사별 병렬 매칭 - CJ와 SSG 각각 Top 5 후보 검색
+ * Phase 1: Hybrid Search 지원
  */
 export async function findComparisonMatches(
   itemName: string,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  searchMode: SearchMode = SEARCH_MODE
 ): Promise<ComparisonMatchResult> {
   try {
-    const normalizedName = normalizeItemName(itemName)
-    console.log(`  [Comparison] Raw: "${itemName}" | Clean: "${normalizedName}"`)
+    const { forKeyword, forSemantic } = dualNormalize(itemName)
+    console.log(`  [Comparison] Mode: ${searchMode}`)
+    console.log(`  [Comparison] Raw: "${itemName}"`)
+    console.log(`  [Comparison] Keyword: "${forKeyword}" | Semantic: "${forSemantic}"`)
 
     // 병렬 실행: CJ와 SSG 동시 검색 (Top 5)
-    const [cjResult, ssgResult] = await Promise.all([
-      supabase.rpc('search_products_fuzzy', {
-        search_term_raw: itemName,
-        search_term_clean: normalizedName,
-        limit_count: 5,  // Top 5 후보
-        supplier_filter: 'CJ',
-      }),
-      supabase.rpc('search_products_fuzzy', {
-        search_term_raw: itemName,
-        search_term_clean: normalizedName,
-        limit_count: 5,  // Top 5 후보
-        supplier_filter: 'SHINSEGAE',
-      }),
-    ])
+    let cjResult: any
+    let ssgResult: any
+
+    if (searchMode === 'hybrid') {
+      [cjResult, ssgResult] = await Promise.all([
+        supabase.rpc('search_products_hybrid', {
+          search_term_raw: itemName,
+          search_term_clean: forKeyword,
+          limit_count: 5,
+          supplier_filter: 'CJ',
+          bm25_weight: 0.5,
+          semantic_weight: 0.5,
+        }),
+        supabase.rpc('search_products_hybrid', {
+          search_term_raw: itemName,
+          search_term_clean: forKeyword,
+          limit_count: 5,
+          supplier_filter: 'SHINSEGAE',
+          bm25_weight: 0.5,
+          semantic_weight: 0.5,
+        }),
+      ])
+    } else if (searchMode === 'bm25') {
+      [cjResult, ssgResult] = await Promise.all([
+        supabase.rpc('search_products_bm25', {
+          search_term: forKeyword,
+          limit_count: 5,
+          supplier_filter: 'CJ',
+        }),
+        supabase.rpc('search_products_bm25', {
+          search_term: forKeyword,
+          limit_count: 5,
+          supplier_filter: 'SHINSEGAE',
+        }),
+      ])
+    } else {
+      // Legacy: Trigram
+      [cjResult, ssgResult] = await Promise.all([
+        supabase.rpc('search_products_fuzzy', {
+          search_term_raw: itemName,
+          search_term_clean: forSemantic,
+          limit_count: 5,
+          supplier_filter: 'CJ',
+        }),
+        supabase.rpc('search_products_fuzzy', {
+          search_term_raw: itemName,
+          search_term_clean: forSemantic,
+          limit_count: 5,
+          supplier_filter: 'SHINSEGAE',
+        }),
+      ])
+    }
 
     // 결과 매핑 - 전체 후보 배열 생성
     const cjData = cjResult.data as RpcResult[] | null
