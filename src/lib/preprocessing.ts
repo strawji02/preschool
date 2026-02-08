@@ -87,8 +87,8 @@ export function preprocessKoreanFoodName(
 
   let processed = name.trim()
 
-  // 1. 괄호/대괄호 내용 제거
-  processed = processed.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '')
+  // 1. 괄호/대괄호만 제거 (내용은 유지)
+  processed = processed.replace(/[()]/g, ' ').replace(/[\[\]]/g, ' ')
 
   // 2. 숫자+단위 패턴 제거 (1kg, 200g, 500ml 등)
   if (removeNumbers) {
@@ -142,8 +142,8 @@ export function preprocessKoreanFoodName(
  */
 export function normalizeItemNameLegacy(name: string): string {
   return name
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]/g, '')
+    .replace(/[()]/g, ' ')
+    .replace(/[\[\]]/g, ' ')
     .replace(/\d+(\.\d+)?\s*(kg|g|ml|l|ea|개|팩|봉|box)/gi, '')
     .replace(/\d+/g, '')
     .replace(/[^\uAC00-\uD7A3a-zA-Z\s]/g, '')
