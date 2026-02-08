@@ -218,7 +218,7 @@ async function main() {
 
     // 3. 최종 통계 확인
     console.log('📈 최종 통계 조회 중...')
-    const { data: stats } = await supabase.rpc('get_embedding_stats').single()
+    const { data: stats } = await supabase.rpc('get_embedding_stats').single() as { data: { total_products: number; products_with_embedding: number; embedding_coverage_percent: number } | null }
 
     if (stats) {
       console.log(`   총 상품: ${stats.total_products}`)

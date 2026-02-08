@@ -221,7 +221,7 @@ async function analyzeMatching() {
       }
     }))
 
-    processedCount += batch.size
+    processedCount += batch.length
     process.stdout.write(`\r   진행: ${processedCount}/${allItems.length} (${Math.round(processedCount / allItems.length * 100)}%)`)
   }
 

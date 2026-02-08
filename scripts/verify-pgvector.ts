@@ -54,11 +54,11 @@ async function verifyPgvector() {
     console.log('\n📊 2. Embedding 통계 확인')
     const { data: stats, error: statsError } = await supabase
       .rpc('get_embedding_stats')
-      .single()
+      .single() as { data: { total_products: number; products_with_embedding: number; embedding_coverage_percent: number } | null; error: any }
 
     if (statsError) {
       console.error('   ❌ 통계 조회 실패:', statsError.message)
-    } else {
+    } else if (stats) {
       console.log(`   총 상품 수: ${stats.total_products}개`)
       console.log(`   임베딩 생성: ${stats.products_with_embedding}개`)
       console.log(`   커버리지: ${stats.embedding_coverage_percent}%`)
