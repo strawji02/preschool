@@ -63,7 +63,7 @@ export async function findMatches(
     if (searchMode === 'semantic') {
       // Phase 2: Semantic Search (Vector Similarity)
       try {
-        const embedding = await generateEmbedding(forSemantic)
+        const embedding = await generateEmbedding(itemName)
         const result = await supabase.rpc('search_products_vector', {
           query_embedding: embedding,
           limit_count: 5,
@@ -202,7 +202,7 @@ export async function findComparisonMatches(
     if (searchMode === 'semantic') {
       // Phase 2: Semantic Search with supplier filter
       try {
-        const embedding = await generateEmbedding(forSemantic)
+        const embedding = await generateEmbedding(itemName)
         ;[cjResult, ssgResult] = await Promise.all([
           supabase.rpc('search_products_vector', {
             query_embedding: embedding,
