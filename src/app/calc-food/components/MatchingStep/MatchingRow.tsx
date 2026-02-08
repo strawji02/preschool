@@ -6,6 +6,50 @@ import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, Supplier, SupplierMatch } from '@/types/audit'
 import { CandidateSelector } from './CandidateSelector'
+import { convertPrice, parseUnitString, type NormalizedUnit } from '@/lib/unitConversion'
+
+// 추출된 spec 또는 name에서 단위와 수량 파싱
+function parseExtractedSpec(spec: string | null | undefined, name: string | null | undefined): { unit: NormalizedUnit; quantity: number } {
+  // 1. spec에서 먼저 시도 (예: "3KG", "1KG/EA", "500G/중", "65ML*5EA")
+  if (spec) {
+    // 패턴: 숫자 + 단위 (중간이나 끝에 있을 수 있음)
+    const specMatch = spec.match(/(\d+\.?\d*)\s*(kg|g|l|ml)/i)
+    if (specMatch) {
+      return {
+        unit: normalizeUnit(specMatch[2].toLowerCase()),
+        quantity: parseFloat(specMatch[1])
+      }
+    }
+    // 단위만 있는 경우 (예: "KG/상", "KG")
+    const unitOnly = spec.match(/^(kg|g|l|ml)/i)
+    if (unitOnly) {
+      return { unit: normalizeUnit(unitOnly[1].toLowerCase()), quantity: 1 }
+    }
+  }
+  
+  // 2. name에서 수량/단위 추출 (예: "콩나물(친환경 600g/EA)")
+  if (name) {
+    const nameMatch = name.match(/(\d+\.?\d*)\s*(kg|g|l|ml)/i)
+    if (nameMatch) {
+      return {
+        unit: normalizeUnit(nameMatch[2].toLowerCase()),
+        quantity: parseFloat(nameMatch[1])
+      }
+    }
+  }
+  
+  return { unit: 'g', quantity: 1 }
+}
+
+// 단위 정규화 헬퍼
+function normalizeUnit(unitLower: string): NormalizedUnit {
+  if (unitLower === 'kg') return 'kg'
+  if (unitLower === 'g') return 'g'
+  if (unitLower === 'l') return 'L'
+  if (unitLower === 'ml') return 'ml'
+  if (unitLower === '개' || unitLower === 'ea') return 'EA'
+  return 'g'
+}
 
 interface MatchingRowProps {
   item: ComparisonItem
@@ -22,8 +66,19 @@ export function MatchingRow({
 }: MatchingRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
+  // 사용자가 설정한 단위와 수량 (추출된 spec/name에서 파싱하여 초기값 설정)
+  const initialSpec = parseExtractedSpec(item.extracted_spec, item.extracted_name)
+  const [userUnit, setUserUnit] = useState<NormalizedUnit>(initialSpec.unit)
+  const [userQuantity, setUserQuantity] = useState<number>(initialSpec.quantity)
+
   // 견적불가 여부 확인 (CJ와 SSG 모두 후보가 없는 경우)
   const noMatch = item.cj_candidates.length === 0 && item.ssg_candidates.length === 0
+
+  // 환산 가격 계산 함수
+  const getConvertedPrice = (supplierPrice: number, supplierUnit: string | undefined): number | null => {
+    if (!supplierUnit) return null
+    return convertPrice(supplierPrice, supplierUnit, userUnit, userQuantity)
+  }
 
   const getStatusBadge = () => {
     // 견적불가 우선 표시
@@ -45,10 +100,10 @@ export function MatchingRow({
 
   return (
     <div className="border-b">
-      {/* 메인 행 - 7컬럼 (절감액 제외) */}
+      {/* 메인 행 - 8컬럼 (단위 수정 UI 추가) */}
       <div
         className={cn(
-          'grid grid-cols-[1fr_60px_90px_120px_120px_60px_40px] gap-2 px-4 py-3 transition-colors',
+          'grid grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px] gap-2 px-4 py-3 transition-colors',
           item.is_confirmed ? 'bg-green-50' : 'hover:bg-gray-50'
         )}
       >
@@ -70,9 +125,40 @@ export function MatchingRow({
           {item.extracted_quantity}
         </div>
 
-        {/* 내 단가 */}
+        {/* 현재 급식 단가 */}
         <div className="flex items-center justify-end text-sm font-medium">
           {formatCurrency(item.extracted_unit_price)}
+        </div>
+
+        {/* 단위 수정 UI */}
+        <div className="flex items-center gap-2">
+          <select
+            value={userUnit}
+            onChange={(e) => setUserUnit(e.target.value as NormalizedUnit)}
+            disabled={item.is_confirmed}
+            className={cn(
+              'rounded border border-gray-300 px-2 py-1 text-sm',
+              item.is_confirmed && 'cursor-not-allowed bg-gray-100'
+            )}
+          >
+            <option value="g">g</option>
+            <option value="kg">kg</option>
+            <option value="ml">ml</option>
+            <option value="L">L</option>
+            <option value="EA">개</option>
+          </select>
+          <input
+            type="number"
+            value={userQuantity}
+            onChange={(e) => setUserQuantity(Number(e.target.value))}
+            disabled={item.is_confirmed}
+            className={cn(
+              'w-20 rounded border border-gray-300 px-2 py-1 text-sm',
+              item.is_confirmed && 'cursor-not-allowed bg-gray-100'
+            )}
+            min="0"
+            step="0.1"
+          />
         </div>
 
         {/* CJ 선택 */}
@@ -81,6 +167,8 @@ export function MatchingRow({
             supplier="CJ"
             candidates={item.cj_candidates}
             selectedMatch={item.cj_match}
+            userUnit={userUnit}
+            userQuantity={userQuantity}
             onSelect={(candidate) => onSelectCandidate(item.id, 'CJ', candidate)}
             onSearchClick={() => onSearchClick(item, 'CJ')}
             disabled={item.is_confirmed}
@@ -93,6 +181,8 @@ export function MatchingRow({
             supplier="SHINSEGAE"
             candidates={item.ssg_candidates}
             selectedMatch={item.ssg_match}
+            userUnit={userUnit}
+            userQuantity={userQuantity}
             onSelect={(candidate) => onSelectCandidate(item.id, 'SHINSEGAE', candidate)}
             onSearchClick={() => onSearchClick(item, 'SHINSEGAE')}
             disabled={item.is_confirmed}
@@ -177,11 +267,21 @@ export function MatchingRow({
                             {Math.round(candidate.match_score * 100)}%
                           </span>
                         </div>
-                        <div className="mt-1 pl-7 text-sm text-orange-600 font-medium">
-                          {formatCurrency(candidate.standard_price)}
-                          {candidate.unit_normalized && (
-                            <span className="text-orange-400">/{candidate.unit_normalized}</span>
-                          )}
+                        <div className="mt-1 pl-7 space-y-1">
+                          <div className="text-sm text-orange-600 font-medium">
+                            {formatCurrency(candidate.standard_price)}
+                            {candidate.unit_normalized && (
+                              <span className="text-orange-400">/{candidate.unit_normalized}</span>
+                            )}
+                          </div>
+                          {candidate.unit_normalized && (() => {
+                            const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                            return (
+                              <div className="text-xs text-orange-500">
+                                → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                              </div>
+                            )
+                          })()}
                         </div>
                       </button>
                     )
@@ -233,11 +333,21 @@ export function MatchingRow({
                             {Math.round(candidate.match_score * 100)}%
                           </span>
                         </div>
-                        <div className="mt-1 pl-7 text-sm text-purple-600 font-medium">
-                          {formatCurrency(candidate.standard_price)}
-                          {candidate.unit_normalized && (
-                            <span className="text-purple-400">/{candidate.unit_normalized}</span>
-                          )}
+                        <div className="mt-1 pl-7 space-y-1">
+                          <div className="text-sm text-purple-600 font-medium">
+                            {formatCurrency(candidate.standard_price)}
+                            {candidate.unit_normalized && (
+                              <span className="text-purple-400">/{candidate.unit_normalized}</span>
+                            )}
+                          </div>
+                          {candidate.unit_normalized && (() => {
+                            const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                            return (
+                              <div className="text-xs text-purple-500">
+                                → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                              </div>
+                            )
+                          })()}
                         </div>
                       </button>
                     )

@@ -81,11 +81,12 @@ export function MatchingGrid({
         ))}
       </div>
 
-      {/* 테이블 헤더 - 7컬럼 (절감액 없음!) */}
-      <div className="grid grid-cols-[1fr_60px_90px_120px_120px_60px_40px] gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600">
+      {/* 테이블 헤더 - 8컬럼 (단위 수정 추가) */}
+      <div className="grid grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px] gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600">
         <div>품목명</div>
         <div className="text-right">수량</div>
-        <div className="text-right">내 단가</div>
+        <div className="text-right">현재 급식 단가</div>
+        <div className="text-center">단위 수정</div>
         <div className="text-center">
           <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
             CJ 선택

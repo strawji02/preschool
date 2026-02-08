@@ -13,6 +13,7 @@ interface RpcResult {
   supplier: string
   match_score: number
   similarity?: number // For semantic search
+  bm25_rank?: number // For BM25 search
 }
 
 export async function GET(request: NextRequest) {
@@ -44,7 +45,30 @@ export async function GET(request: NextRequest) {
     let error: any = null
 
     // Choose search strategy based on mode
-    if (searchMode === 'semantic') {
+    if (searchMode === 'hybrid') {
+      // Hybrid Search: BM25 + Vector (Recommended)
+      try {
+        const embedding = await generateEmbedding(query)
+        const { data, error: rpcError } = await supabase.rpc('search_products_hybrid_bm25_vector', {
+          search_term: query,
+          query_embedding: embedding,
+          limit_count: Math.min(limit, 50),
+          supplier_filter: supplier || undefined,
+          bm25_weight: 0.5,
+          vector_weight: 0.5,
+          similarity_threshold: 0.3,
+        })
+        results = data as RpcResult[] || []
+        error = rpcError
+      } catch (embedError) {
+        console.error('Embedding generation failed:', embedError)
+        return NextResponse.json<SearchProductsResponse>(
+          { success: false, products: [], error: 'Embedding generation failed' },
+          { status: 500 }
+        )
+      }
+    } else if (searchMode === 'semantic') {
+      // Semantic-only Search: Vector similarity
       try {
         const embedding = await generateEmbedding(query)
         const { data, error: rpcError } = await supabase.rpc('search_products_vector', {
@@ -65,8 +89,20 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         )
       }
+    } else if (searchMode === 'bm25') {
+      // BM25-only Search: Keyword matching
+      const { data, error: rpcError } = await supabase.rpc('search_products_bm25', {
+        search_term: query,
+        limit_count: Math.min(limit, 50),
+        supplier_filter: supplier || undefined,
+      })
+      results = (data as RpcResult[] || []).map(r => ({
+        ...r,
+        match_score: r.bm25_rank ?? 0,
+      }))
+      error = rpcError
     } else {
-      // Use fuzzy search for other modes (trigram, hybrid, bm25)
+      // Trigram Search (fallback for legacy mode)
       const { data, error: rpcError } = await supabase.rpc('search_products_fuzzy', {
         search_term_raw: query,
         limit_count: Math.min(limit, 50),

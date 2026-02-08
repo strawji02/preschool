@@ -5,6 +5,7 @@ import { ChevronDown, Check, Search } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { SupplierMatch, Supplier } from '@/types/audit'
+import { convertPrice, type NormalizedUnit } from '@/lib/unitConversion'
 
 interface CandidateSelectorProps {
   supplier: Supplier
@@ -13,6 +14,8 @@ interface CandidateSelectorProps {
   onSelect: (candidate: SupplierMatch) => void
   onSearchClick: () => void
   disabled?: boolean
+  userUnit?: NormalizedUnit
+  userQuantity?: number
 }
 
 export function CandidateSelector({
@@ -22,7 +25,18 @@ export function CandidateSelector({
   onSelect,
   onSearchClick,
   disabled,
+  userUnit = 'g',
+  userQuantity = 1,
 }: CandidateSelectorProps) {
+  // 환산가 계산 함수
+  const getConvertedPrice = (price: number, unitNormalized: string | undefined): number | null => {
+    if (!unitNormalized) return null
+    try {
+      return convertPrice(price, unitNormalized, userUnit, userQuantity)
+    } catch {
+      return null
+    }
+  }
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -67,7 +81,7 @@ export function CandidateSelector({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className={cn(
-          'flex min-w-[90px] items-center justify-between gap-1 rounded px-2 py-1.5 text-sm transition-colors',
+          'flex min-w-[100px] flex-col items-start gap-0.5 rounded px-2 py-1 text-sm transition-colors',
           isNoneSelected
             ? 'bg-red-50 hover:bg-red-100'
             : selectedMatch
@@ -83,19 +97,30 @@ export function CandidateSelector({
             : undefined,
         }}
       >
-        <span className={cn(
-          'truncate font-medium',
-          isNoneSelected
-            ? 'text-red-700'
-            : selectedMatch && (isCJ ? 'text-orange-700' : 'text-purple-700')
-        )}>
-          {isNoneSelected
-            ? '없음'
-            : selectedMatch
-            ? `${formatCurrency(selectedMatch.standard_price)}${selectedMatch.unit_normalized ? '/' + selectedMatch.unit_normalized : ''}`
-            : '선택'}
-        </span>
-        <ChevronDown size={14} className={cn('transition-transform', isOpen && 'rotate-180')} />
+        <div className="flex w-full items-center justify-between">
+          <span className={cn(
+            'truncate font-medium',
+            isNoneSelected
+              ? 'text-red-700'
+              : selectedMatch && (isCJ ? 'text-orange-700' : 'text-purple-700')
+          )}>
+            {isNoneSelected
+              ? '없음'
+              : selectedMatch
+              ? `${formatCurrency(selectedMatch.standard_price)}${selectedMatch.unit_normalized ? '/' + selectedMatch.unit_normalized : ''}`
+              : '선택'}
+          </span>
+          <ChevronDown size={14} className={cn('transition-transform', isOpen && 'rotate-180')} />
+        </div>
+        {/* 환산가 표시 */}
+        {selectedMatch && !isNoneSelected && selectedMatch.unit_normalized && (() => {
+          const converted = getConvertedPrice(selectedMatch.standard_price, selectedMatch.unit_normalized)
+          return (
+            <span className="text-xs text-gray-500">
+              → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+            </span>
+          )
+        })()}
       </button>
 
       {isOpen && (
@@ -146,16 +171,27 @@ export function CandidateSelector({
                     <p className="truncate text-sm font-medium text-gray-900">
                       {candidate.product_name}
                     </p>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span className="font-medium text-gray-700">
-                        {formatCurrency(candidate.standard_price)}
-                        {candidate.unit_normalized && (
-                          <span className="text-gray-500">/{candidate.unit_normalized}</span>
-                        )}
-                      </span>
-                      <span>
-                        {Math.round(candidate.match_score * 100)}% 일치
-                      </span>
+                    <div className="flex flex-col gap-0.5 text-xs">
+                      <div className="flex items-center gap-2 text-gray-500">
+                        <span className="font-medium text-gray-700">
+                          {formatCurrency(candidate.standard_price)}
+                          {candidate.unit_normalized && (
+                            <span className="text-gray-500">/{candidate.unit_normalized}</span>
+                          )}
+                        </span>
+                        <span>
+                          {Math.round(candidate.match_score * 100)}% 일치
+                        </span>
+                      </div>
+                      {/* 환산가 표시 */}
+                      {candidate.unit_normalized && (() => {
+                        const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                        return (
+                          <span className={cn('font-medium', isCJ ? 'text-orange-600' : 'text-purple-600')}>
+                            → {userQuantity}{userUnit}: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                          </span>
+                        )
+                      })()}
                     </div>
                   </div>
                 </button>
