@@ -5,8 +5,11 @@
  * - 조사 제거 (은/는/이/가/을/를)
  * - 맞춤법 통일
  * - 브랜드명 정규화
+ * - 동의어 처리 (돈전지↔앞다리, 계란↔달걀 등)
  * - 불필요한 패턴 제거
  */
+
+import { normalizeText as normalizeSynonyms, expandWithSynonyms } from './synonyms'
 
 // 맞춤법 통일 매핑
 const SPELLING_NORMALIZATION: Record<string, string> = {
@@ -75,6 +78,7 @@ export function preprocessKoreanFoodName(
     normalizeBrands?: boolean // 브랜드명 정규화 (기본: false)
     removeNumbers?: boolean // 숫자 제거 (기본: true)
     removeSpecialChars?: boolean // 특수문자 제거 (기본: true)
+    normalizeSynonyms?: boolean // 동의어 정규화 (기본: true)
   } = {}
 ): string {
   const {
@@ -83,9 +87,15 @@ export function preprocessKoreanFoodName(
     normalizeBrands = false,
     removeNumbers = true,
     removeSpecialChars = true,
+    normalizeSynonyms: applySynonyms = true,
   } = options
 
   let processed = name.trim()
+
+  // 0. 동의어 정규화 (가장 먼저 적용)
+  if (applySynonyms) {
+    processed = normalizeSynonyms(processed)
+  }
 
   // 1. 괄호/대괄호만 제거 (내용은 유지)
   processed = processed.replace(/[()]/g, ' ').replace(/[\[\]]/g, ' ')
@@ -154,32 +164,59 @@ export function normalizeItemNameLegacy(name: string): string {
 /**
  * Dual 정규화: BM25 키워드 검색용 + Semantic 검색용
  *
- * BM25용: 조사 제거, 맞춤법 통일 (키워드 매칭 향상)
+ * BM25용: 조사 제거, 맞춤법 통일, 동의어 정규화 (키워드 매칭 향상)
  * Semantic용: 최소 정규화 (의미 보존)
  */
 export function dualNormalize(name: string): {
   forKeyword: string // BM25 검색용
   forSemantic: string // Trigram/Vector 검색용
 } {
-  // BM25용: 공격적 정규화 (조사 제거, 맞춤법 통일)
+  // BM25용: 공격적 정규화 (조사 제거, 맞춤법 통일, 동의어 정규화)
   const forKeyword = preprocessKoreanFoodName(name, {
     removeParticles: true,
     normalizeSpelling: true,
     normalizeBrands: false,
     removeNumbers: true,
     removeSpecialChars: true,
+    normalizeSynonyms: true, // 동의어 정규화 활성화
   })
 
-  // Semantic용: 보수적 정규화 (의미 보존)
+  // Semantic용: 보수적 정규화 (의미 보존, 동의어 정규화)
   const forSemantic = preprocessKoreanFoodName(name, {
     removeParticles: false, // 조사는 의미에 영향 줄 수 있음
     normalizeSpelling: true, // 맞춤법만 통일
     normalizeBrands: false,
     removeNumbers: true,
     removeSpecialChars: true,
+    normalizeSynonyms: true, // 동의어 정규화 활성화
   })
 
   return { forKeyword, forSemantic }
+}
+
+/**
+ * 검색 쿼리 확장: 동의어를 포함한 모든 검색 용어 생성
+ *
+ * @param query - 원본 검색 쿼리
+ * @returns 동의어가 확장된 검색 용어 배열
+ *
+ * @example
+ * expandSearchQuery('앞다리') // ['돈전지', '앞다리', '앞다리살', '전지']
+ * expandSearchQuery('계란 10개') // 전처리 후 ['계란', '달걀', '란', '에그']
+ */
+export function expandSearchQuery(query: string): string[] {
+  // 먼저 전처리 (숫자 등 제거)
+  const normalized = preprocessKoreanFoodName(query, {
+    removeParticles: true,
+    normalizeSpelling: true,
+    normalizeBrands: false,
+    removeNumbers: true,
+    removeSpecialChars: true,
+    normalizeSynonyms: false, // 동의어는 expandWithSynonyms에서 처리
+  })
+
+  // 동의어 확장
+  return expandWithSynonyms(normalized)
 }
 
 /**
