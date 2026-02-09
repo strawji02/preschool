@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Search, ChevronDown, ChevronUp, AlertTriangle, Info } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, Supplier } from '@/types/audit'
+import { validateItems, getHighestLevel, getLevelStyles } from '@/lib/integrity-check'
+import type { ItemValidation, ValidationResult } from '@/lib/integrity-check'
 
 interface AnalysisGridProps {
   items: ComparisonItem[]
@@ -14,6 +16,21 @@ interface AnalysisGridProps {
 export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'matched' | 'pending' | 'unmatched' | 'savings'>('all')
+  const [hoveredCell, setHoveredCell] = useState<{ itemId: string; field: string } | null>(null)
+
+  // 무결성 검증 실행
+  const validations = useMemo(() => {
+    return validateItems(items)
+  }, [items])
+
+  // 검증 결과를 itemId로 매핑
+  const validationMap = useMemo(() => {
+    const map = new Map<string, ItemValidation>()
+    validations.forEach((validation) => {
+      map.set(validation.item.id, validation)
+    })
+    return map
+  }, [validations])
 
   // 필터링
   const filteredItems = items.filter((item) => {
@@ -37,6 +54,40 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
       case 'unmatched':
         return <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">미매칭</span>
     }
+  }
+
+  // 셀 하이라이트 스타일 및 툴팁 렌더링
+  const getCellHighlight = (itemId: string, field: string) => {
+    const validation = validationMap.get(itemId)
+    if (!validation) return { style: '', tooltip: null }
+
+    const fieldResults = validation.fields[field as keyof typeof validation.fields]
+    if (!fieldResults || fieldResults.length === 0) return { style: '', tooltip: null }
+
+    const level = getHighestLevel(fieldResults)
+    const style = getLevelStyles(level)
+
+    const isHovered = hoveredCell?.itemId === itemId && hoveredCell?.field === field
+    const tooltip = isHovered ? (
+      <div className="absolute z-50 mt-1 rounded-lg border bg-white p-2 shadow-lg">
+        {fieldResults.map((result, idx) => (
+          <div key={idx} className="flex items-start gap-2 text-xs">
+            {result.level === 'error' && <AlertTriangle size={12} className="mt-0.5 text-red-600" />}
+            {result.level === 'warning' && <AlertTriangle size={12} className="mt-0.5 text-yellow-600" />}
+            {result.level === 'info' && <Info size={12} className="mt-0.5 text-blue-600" />}
+            <span className={cn(
+              result.level === 'error' && 'text-red-700',
+              result.level === 'warning' && 'text-yellow-700',
+              result.level === 'info' && 'text-blue-700'
+            )}>
+              {result.message}
+            </span>
+          </div>
+        ))}
+      </div>
+    ) : null
+
+    return { style, tooltip }
   }
 
   // 가격 셀 렌더링 (CJ 또는 SSG)
@@ -133,7 +184,11 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
                   )}
                 >
                   {/* 품목명 */}
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div
+                    className={cn("flex items-center gap-2 min-w-0 relative rounded px-2 py-1 -mx-2 -my-1", getCellHighlight(item.id, 'name').style)}
+                    onMouseEnter={() => setHoveredCell({ itemId: item.id, field: 'name' })}
+                    onMouseLeave={() => setHoveredCell(null)}
+                  >
                     {getStatusBadge(item.match_status)}
                     <span className="truncate text-sm" title={item.extracted_name}>
                       {item.extracted_name}
@@ -141,13 +196,28 @@ export function AnalysisGrid({ items, onSearchClick }: AnalysisGridProps) {
                     {item.extracted_spec && (
                       <span className="hidden truncate text-xs text-gray-500 lg:inline">({item.extracted_spec})</span>
                     )}
+                    {getCellHighlight(item.id, 'name').tooltip}
                   </div>
 
                   {/* 수량 */}
-                  <div className="text-right text-sm">{item.extracted_quantity}</div>
+                  <div
+                    className={cn("text-right text-sm relative rounded px-2 py-1 -mx-2 -my-1", getCellHighlight(item.id, 'quantity').style)}
+                    onMouseEnter={() => setHoveredCell({ itemId: item.id, field: 'quantity' })}
+                    onMouseLeave={() => setHoveredCell(null)}
+                  >
+                    {item.extracted_quantity}
+                    {getCellHighlight(item.id, 'quantity').tooltip}
+                  </div>
 
                   {/* 내 단가 */}
-                  <div className="text-right text-sm font-medium">{formatCurrency(item.extracted_unit_price)}</div>
+                  <div
+                    className={cn("text-right text-sm font-medium relative rounded px-2 py-1 -mx-2 -my-1", getCellHighlight(item.id, 'unit_price').style)}
+                    onMouseEnter={() => setHoveredCell({ itemId: item.id, field: 'unit_price' })}
+                    onMouseLeave={() => setHoveredCell(null)}
+                  >
+                    {formatCurrency(item.extracted_unit_price)}
+                    {getCellHighlight(item.id, 'unit_price').tooltip}
+                  </div>
 
                   {/* CJ 가격 */}
                   <div className="flex items-center justify-center">
