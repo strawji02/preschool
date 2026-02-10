@@ -298,9 +298,11 @@ export function MatchingRow({
                             </span>
                             <span className="text-sm font-medium">{candidate.product_name}</span>
                           </div>
-                          <span className="text-xs text-gray-500">
-                            {Math.round(candidate.match_score * 100)}%
-                          </span>
+                          {candidate.match_score >= 0.9 && (
+                            <span className="text-xs text-green-600 font-medium">
+                              {Math.round(candidate.match_score * 100)}%
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 pl-7 space-y-1">
                           <div className="text-sm text-orange-600 font-medium">
@@ -375,9 +377,11 @@ export function MatchingRow({
                             </span>
                             <span className="text-sm font-medium">{candidate.product_name}</span>
                           </div>
-                          <span className="text-xs text-gray-500">
-                            {Math.round(candidate.match_score * 100)}%
-                          </span>
+                          {candidate.match_score >= 0.9 && (
+                            <span className="text-xs text-green-600 font-medium">
+                              {Math.round(candidate.match_score * 100)}%
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 pl-7 space-y-1">
                           <div className="text-sm text-purple-600 font-medium">

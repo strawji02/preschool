@@ -32,6 +32,13 @@ export function MatchingHeader({
   const isAllConfirmed = unconfirmed === 0
   const [showMissingCheck, setShowMissingCheck] = useState(false)
 
+  // 신뢰도 90% 이상 품목 수 계산
+  const highConfidenceCount = items.filter(item => {
+    const hasCjHighConfidence = item.cj_match && item.cj_match.match_score >= 0.9
+    const hasSsgHighConfidence = item.ssg_match && item.ssg_match.match_score >= 0.9
+    return (hasCjHighConfidence || hasSsgHighConfidence) && !item.is_confirmed
+  }).length
+
   // 누락점검 계산
   const totalExtractedAmount = items.reduce(
     (sum, item) => sum + (item.extracted_unit_price * item.extracted_quantity),
@@ -174,13 +181,13 @@ export function MatchingHeader({
             </span>
           </div>
 
-          {/* 자동매칭 전체 확정 버튼 */}
-          {unconfirmed > 0 && (
+          {/* 일괄 자동 확정 버튼 (90% 이상) */}
+          {highConfidenceCount > 0 && (
             <button
               onClick={onConfirmAllAutoMatched}
               className="rounded-lg bg-green-100 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-200"
             >
-              자동매칭 전체 확정
+              일괄 자동 확정 ({highConfidenceCount}개, 90% 이상)
             </button>
           )}
         </div>

@@ -296,7 +296,11 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
     case 'CONFIRM_ALL_AUTO_MATCHED': {
       const newItems = state.items.map((item) => {
-        if (item.match_status === 'auto_matched' || item.match_status === 'manual_matched') {
+        // 신뢰도 90% 이상인 매칭이 있는 경우에만 자동 확정
+        const hasCjHighConfidence = item.cj_match && item.cj_match.match_score >= 0.9
+        const hasSsgHighConfidence = item.ssg_match && item.ssg_match.match_score >= 0.9
+
+        if (hasCjHighConfidence || hasSsgHighConfidence) {
           return { ...item, is_confirmed: true }
         }
         return item
