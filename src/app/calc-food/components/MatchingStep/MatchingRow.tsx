@@ -165,35 +165,43 @@ export function MatchingRow({
           {formatCurrency(item.extracted_unit_price)}
         </div>
 
-        {/* 단위 수정 UI */}
-        <div className="flex items-center gap-2">
-          <select
-            value={userUnit}
-            onChange={(e) => setUserUnit(e.target.value as NormalizedUnit)}
-            disabled={item.is_confirmed}
-            className={cn(
-              'rounded border border-gray-300 px-2 py-1 text-sm',
-              item.is_confirmed && 'cursor-not-allowed bg-gray-100'
-            )}
-          >
-            <option value="g">g</option>
-            <option value="kg">kg</option>
-            <option value="ml">ml</option>
-            <option value="L">L</option>
-            <option value="EA">개</option>
-          </select>
-          <input
-            type="number"
-            value={userQuantity}
-            onChange={(e) => setUserQuantity(Number(e.target.value))}
-            disabled={item.is_confirmed}
-            className={cn(
-              'w-20 rounded border border-gray-300 px-2 py-1 text-sm',
-              item.is_confirmed && 'cursor-not-allowed bg-gray-100'
-            )}
-            min="0"
-            step="0.1"
-          />
+        {/* 단위 수정 UI + 실시간 환산 계산기 */}
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <select
+              value={userUnit}
+              onChange={(e) => setUserUnit(e.target.value as NormalizedUnit)}
+              disabled={item.is_confirmed}
+              className={cn(
+                'rounded border border-gray-300 px-2 py-1 text-sm',
+                item.is_confirmed && 'cursor-not-allowed bg-gray-100'
+              )}
+            >
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+              <option value="ml">ml</option>
+              <option value="L">L</option>
+              <option value="EA">개</option>
+            </select>
+            <input
+              type="number"
+              value={userQuantity}
+              onChange={(e) => setUserQuantity(Number(e.target.value))}
+              disabled={item.is_confirmed}
+              className={cn(
+                'w-20 rounded border border-gray-300 px-2 py-1 text-sm',
+                item.is_confirmed && 'cursor-not-allowed bg-gray-100'
+              )}
+              min="0"
+              step="0.1"
+            />
+          </div>
+          {/* 실시간 환산가 표시 */}
+          {userQuantity > 0 && (
+            <div className="text-xs text-gray-600">
+              {userQuantity}{userUnit} 기준 단가: {formatCurrency(item.extracted_unit_price / userQuantity)}/{userUnit}
+            </div>
+          )}
         </div>
 
         {/* CJ 선택 */}
