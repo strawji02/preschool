@@ -255,21 +255,77 @@ export function MatchingRow({
         </div>
       </div>
 
-      {/* 확장 영역 - 후보 카드 그리드 */}
+      {/* 확장 영역 - 3행 카드 UI */}
       {isExpanded && (
-        <div className="border-t bg-gray-50 px-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            {/* CJ 후보 목록 */}
+        <div className="border-t bg-gray-50 px-4 py-4 space-y-3">
+          {/* 1행: 거래명세서 데이터 */}
+          <div className="rounded-lg bg-white border border-gray-200 p-4">
+            <h4 className="mb-3 text-sm font-semibold text-gray-700">📄 거래명세서 원본 데이터</h4>
+            <div className="grid grid-cols-5 gap-4 text-sm">
+              <div>
+                <span className="text-gray-500 block mb-1">품명</span>
+                <span className="font-medium">{item.extracted_name}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block mb-1">규격</span>
+                <span className="font-medium">{item.extracted_spec || '-'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block mb-1">수량</span>
+                <span className="font-medium">{item.extracted_quantity}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block mb-1">단가</span>
+                <span className="font-medium">{formatCurrency(item.extracted_unit_price)}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block mb-1">금액</span>
+                <span className="font-medium text-blue-600">
+                  {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 2행: AI 추천 근거 */}
+          <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+            <h4 className="mb-2 text-sm font-semibold text-blue-800">🤖 AI 매칭 근거</h4>
+            <div className="space-y-2 text-sm text-blue-900">
+              {item.cj_match && (
+                <div>
+                  <span className="font-medium">CJ:</span>{' '}
+                  {item.cj_match.match_score >= 0.9
+                    ? `높은 신뢰도 (${Math.round(item.cj_match.match_score * 100)}%)로 "${item.cj_match.product_name}" 추천`
+                    : `"${item.cj_match.product_name}" 추천 (추가 검토 필요)`}
+                </div>
+              )}
+              {item.ssg_match && (
+                <div>
+                  <span className="font-medium">신세계:</span>{' '}
+                  {item.ssg_match.match_score >= 0.9
+                    ? `높은 신뢰도 (${Math.round(item.ssg_match.match_score * 100)}%)로 "${item.ssg_match.product_name}" 추천`
+                    : `"${item.ssg_match.product_name}" 추천 (추가 검토 필요)`}
+                </div>
+              )}
+              {!item.cj_match && !item.ssg_match && (
+                <div className="text-gray-600">매칭된 후보가 없습니다.</div>
+              )}
+            </div>
+          </div>
+
+          {/* 3행: CJ 매칭 패널 → CJ 확정 후 SSG 매칭 패널 */}
+          <div className="space-y-3">
+            {/* CJ 매칭 패널 */}
             <div>
               <h4 className="mb-2 flex items-center gap-2 text-sm font-medium">
                 <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
                   CJ
                 </span>
-                후보 ({item.cj_candidates.length}개)
+                후보 목록 ({item.cj_candidates.length}개)
               </h4>
               <div className="space-y-2">
                 {item.cj_candidates.length === 0 ? (
-                  <p className="text-sm text-gray-500">매칭 후보 없음</p>
+                  <p className="text-sm text-gray-500 py-2">매칭 후보 없음</p>
                 ) : (
                   item.cj_candidates.map((candidate, index) => {
                     const isSelected = item.cj_match?.id === candidate.id
@@ -338,84 +394,86 @@ export function MatchingRow({
               </div>
             </div>
 
-            {/* SSG 후보 목록 */}
-            <div>
-              <h4 className="mb-2 flex items-center gap-2 text-sm font-medium">
-                <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
-                  신세계
-                </span>
-                후보 ({item.ssg_candidates.length}개)
-              </h4>
-              <div className="space-y-2">
-                {item.ssg_candidates.length === 0 ? (
-                  <p className="text-sm text-gray-500">매칭 후보 없음</p>
-                ) : (
-                  item.ssg_candidates.map((candidate, index) => {
-                    const isSelected = item.ssg_match?.id === candidate.id
-                    return (
-                      <button
-                        key={candidate.id}
-                        onClick={() => !item.is_confirmed && onSelectCandidate(item.id, 'SHINSEGAE', candidate)}
-                        disabled={item.is_confirmed}
-                        className={cn(
-                          'w-full rounded-lg border p-3 text-left transition-all',
-                          isSelected
-                            ? 'border-purple-500 bg-purple-50 ring-1 ring-purple-500'
-                            : 'border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50/50',
-                          item.is_confirmed && 'cursor-not-allowed opacity-60'
-                        )}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              'flex h-5 w-5 items-center justify-center rounded-full text-xs',
-                              isSelected
-                                ? 'bg-purple-500 text-white'
-                                : 'bg-gray-200 text-gray-600'
-                            )}>
-                              {isSelected ? <Check size={12} /> : index + 1}
-                            </span>
-                            <span className="text-sm font-medium">{candidate.product_name}</span>
-                          </div>
-                          {candidate.match_score >= 0.9 && (
-                            <span className="text-xs text-green-600 font-medium">
-                              {Math.round(candidate.match_score * 100)}%
-                            </span>
+            {/* SSG 매칭 패널 (CJ 선택 후 표시) */}
+            {item.cj_match && (
+              <div>
+                <h4 className="mb-2 flex items-center gap-2 text-sm font-medium">
+                  <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
+                    신세계
+                  </span>
+                  후보 목록 ({item.ssg_candidates.length}개)
+                </h4>
+                <div className="space-y-2">
+                  {item.ssg_candidates.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-2">매칭 후보 없음</p>
+                  ) : (
+                    item.ssg_candidates.map((candidate, index) => {
+                      const isSelected = item.ssg_match?.id === candidate.id
+                      return (
+                        <button
+                          key={candidate.id}
+                          onClick={() => !item.is_confirmed && onSelectCandidate(item.id, 'SHINSEGAE', candidate)}
+                          disabled={item.is_confirmed}
+                          className={cn(
+                            'w-full rounded-lg border p-3 text-left transition-all',
+                            isSelected
+                              ? 'border-purple-500 bg-purple-50 ring-1 ring-purple-500'
+                              : 'border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50/50',
+                            item.is_confirmed && 'cursor-not-allowed opacity-60'
                           )}
-                        </div>
-                        <div className="mt-1 pl-7 space-y-1">
-                          <div className="text-sm text-purple-600 font-medium">
-                            {formatCurrency(candidate.standard_price)}
-                            {candidate.unit_normalized && (
-                              <span className="text-purple-400">/{candidate.unit_normalized}</span>
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                'flex h-5 w-5 items-center justify-center rounded-full text-xs',
+                                isSelected
+                                  ? 'bg-purple-500 text-white'
+                                  : 'bg-gray-200 text-gray-600'
+                              )}>
+                                {isSelected ? <Check size={12} /> : index + 1}
+                              </span>
+                              <span className="text-sm font-medium">{candidate.product_name}</span>
+                            </div>
+                            {candidate.match_score >= 0.9 && (
+                              <span className="text-xs text-green-600 font-medium">
+                                {Math.round(candidate.match_score * 100)}%
+                              </span>
                             )}
                           </div>
-                          {candidate.unit_normalized && (() => {
-                            const result = conversionCache[`ssg_${candidate.id}`] || {
-                              success: false,
-                              convertedPrice: null,
-                              method: 'failed' as const,
-                              message: '계산중...'
-                            }
-                            return (
-                              <div className="text-xs text-purple-500">
-                                → {userQuantity}{userUnit} 기준: {
-                                  result.success
-                                    ? formatCurrency(result.convertedPrice!)
-                                    : result.message
-                                }
-                                {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
-                                {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
-                              </div>
-                            )
-                          })()}
-                        </div>
-                      </button>
-                    )
-                  })
-                )}
+                          <div className="mt-1 pl-7 space-y-1">
+                            <div className="text-sm text-purple-600 font-medium">
+                              {formatCurrency(candidate.standard_price)}
+                              {candidate.unit_normalized && (
+                                <span className="text-purple-400">/{candidate.unit_normalized}</span>
+                              )}
+                            </div>
+                            {candidate.unit_normalized && (() => {
+                              const result = conversionCache[`ssg_${candidate.id}`] || {
+                                success: false,
+                                convertedPrice: null,
+                                method: 'failed' as const,
+                                message: '계산중...'
+                              }
+                              return (
+                                <div className="text-xs text-purple-500">
+                                  → {userQuantity}{userUnit} 기준: {
+                                    result.success
+                                      ? formatCurrency(result.convertedPrice!)
+                                      : result.message
+                                  }
+                                  {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
+                                  {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
