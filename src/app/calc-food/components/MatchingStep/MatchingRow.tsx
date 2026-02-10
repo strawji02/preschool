@@ -76,6 +76,11 @@ export function MatchingRow({
   // 견적불가 여부 확인 (CJ와 SSG 모두 후보가 없는 경우)
   const noMatch = item.cj_candidates.length === 0 && item.ssg_candidates.length === 0
 
+  // 합계 검증: 수량 × 단가 = 금액 확인
+  const calculatedTotal = item.extracted_quantity * item.extracted_unit_price
+  const extractedTotal = item.extracted_total_price ?? calculatedTotal
+  const totalMismatch = Math.abs(calculatedTotal - extractedTotal) > 0.01 // 소수점 오차 허용
+
   // 비동기 환산 가격 계산
   useEffect(() => {
     const loadConversions = async () => {
@@ -139,7 +144,8 @@ export function MatchingRow({
       <div
         className={cn(
           'grid grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px] gap-2 px-4 py-3 transition-colors',
-          item.is_confirmed ? 'bg-green-50' : 'hover:bg-gray-50'
+          item.is_confirmed ? 'bg-green-50' : 'hover:bg-gray-50',
+          totalMismatch && 'bg-red-50 border-l-4 border-red-500'
         )}
       >
         {/* 품목명 */}
@@ -267,7 +273,10 @@ export function MatchingRow({
       {isExpanded && (
         <div className="border-t bg-gray-50 px-4 py-4 space-y-3">
           {/* 1행: 거래명세서 데이터 */}
-          <div className="rounded-lg bg-white border border-gray-200 p-4">
+          <div className={cn(
+            "rounded-lg border p-4",
+            totalMismatch ? "bg-red-50 border-red-300" : "bg-white border-gray-200"
+          )}>
             <h4 className="mb-3 text-sm font-semibold text-gray-700">📄 거래명세서 원본 데이터</h4>
             <div className="grid grid-cols-5 gap-4 text-sm">
               <div>
@@ -288,11 +297,24 @@ export function MatchingRow({
               </div>
               <div>
                 <span className="text-gray-500 block mb-1">금액</span>
-                <span className="font-medium text-blue-600">
-                  {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}
+                <span className={cn(
+                  "font-medium",
+                  totalMismatch ? "text-red-600" : "text-blue-600"
+                )}>
+                  {formatCurrency(extractedTotal)}
                 </span>
+                {totalMismatch && (
+                  <div className="text-xs text-red-600 mt-1">
+                    ⚠️ 계산값: {formatCurrency(calculatedTotal)}
+                  </div>
+                )}
               </div>
             </div>
+            {totalMismatch && (
+              <div className="mt-3 rounded bg-red-100 border border-red-300 p-2 text-xs text-red-700">
+                <strong>합계 불일치:</strong> 수량({item.extracted_quantity}) × 단가({formatCurrency(item.extracted_unit_price)}) = {formatCurrency(calculatedTotal)} ≠ 금액({formatCurrency(extractedTotal)})
+              </div>
+            )}
           </div>
 
           {/* 2행: AI 추천 근거 */}

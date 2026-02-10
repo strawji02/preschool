@@ -39,6 +39,16 @@ export function MatchingHeader({
     return (hasCjHighConfidence || hasSsgHighConfidence) && !item.is_confirmed
   }).length
 
+  // 합계 검증: 수량 × 단가 ≠ 금액인 품목 수 계산
+  const totalMismatchCount = items.filter(item => {
+    const calculatedTotal = item.extracted_quantity * item.extracted_unit_price
+    const extractedTotal = item.extracted_total_price ?? calculatedTotal
+    return Math.abs(calculatedTotal - extractedTotal) > 0.01
+  }).length
+
+  // 검증 완료 가능 여부: 모두 확정 + 합계 불일치 없음
+  const canProceed = isAllConfirmed && totalMismatchCount === 0
+
   // 누락점검 계산
   const totalExtractedAmount = items.reduce(
     (sum, item) => sum + (item.extracted_unit_price * item.extracted_quantity),
@@ -152,12 +162,14 @@ export function MatchingHeader({
           {/* 분석 완료 버튼 */}
           <button
             onClick={onProceedToReport}
+            disabled={!canProceed}
             className={cn(
               'flex items-center gap-2 rounded-lg px-5 py-2.5 font-medium transition-colors',
-              isAllConfirmed
+              canProceed
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             )}
+            title={!canProceed && totalMismatchCount > 0 ? `합계 불일치 ${totalMismatchCount}개 품목 확인 필요` : undefined}
           >
             분석 완료
             <ArrowRight size={18} />
@@ -169,15 +181,17 @@ export function MatchingHeader({
       <div className="rounded-lg bg-gray-50 p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {isAllConfirmed ? (
+            {canProceed ? (
               <CheckCircle className="h-5 w-5 text-green-500" />
             ) : (
               <AlertCircle className="h-5 w-5 text-yellow-500" />
             )}
             <span className="font-medium text-gray-900">
-              {isAllConfirmed
-                ? '모든 품목 확정 완료'
-                : `${formatNumber(unconfirmed)}개 품목 확정 필요`}
+              {canProceed
+                ? '검증 완료 - 분석 진행 가능'
+                : totalMismatchCount > 0
+                  ? `${formatNumber(totalMismatchCount)}개 품목 합계 불일치 확인 필요`
+                  : `${formatNumber(unconfirmed)}개 품목 확정 필요`}
             </span>
           </div>
 
@@ -215,6 +229,13 @@ export function MatchingHeader({
             <span className="text-gray-600">미확정</span>
             <span className="font-medium">{formatNumber(unconfirmed)}</span>
           </div>
+          {totalMismatchCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-full bg-red-500" />
+              <span className="text-red-600">합계 불일치</span>
+              <span className="font-medium text-red-600">{formatNumber(totalMismatchCount)}</span>
+            </div>
+          )}
           <div className="ml-auto text-gray-500">
             총 {formatNumber(total)}개 품목
           </div>

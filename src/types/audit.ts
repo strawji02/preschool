@@ -38,6 +38,7 @@ export interface ComparisonItem {
   extracted_spec?: string
   extracted_quantity: number
   extracted_unit_price: number
+  extracted_total_price?: number  // 합계 검증용 추가
 
   // 현재 선택된 매칭 (Top 1 또는 사용자 선택)
   cj_match?: SupplierMatch
