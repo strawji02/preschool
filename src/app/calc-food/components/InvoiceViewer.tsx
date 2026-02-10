@@ -20,6 +20,7 @@ export function InvoiceViewer({ pages, currentPage, onPageSelect, onReanalyze, i
   const [isDragging, setIsDragging] = useState(false)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [lastTouchDistance, setLastTouchDistance] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const currentPageData = pages.find((p) => p.pageNumber === currentPage)
@@ -47,6 +48,57 @@ export function InvoiceViewer({ pages, currentPage, onPageSelect, onReanalyze, i
   }
 
   const handleMouseUp = () => setIsDragging(false)
+
+  // 핀치 줌 기능
+  const getTouchDistance = (touches: React.TouchList) => {
+    const touch1 = touches[0]
+    const touch2 = touches[1]
+    const dx = touch1.clientX - touch2.clientX
+    const dy = touch1.clientY - touch2.clientY
+    return Math.sqrt(dx * dx + dy * dy)
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      // 두 손가락: 핀치 줌
+      const distance = getTouchDistance(e.touches)
+      setLastTouchDistance(distance)
+    } else if (e.touches.length === 1) {
+      // 한 손가락: 드래그
+      const touch = e.touches[0]
+      setIsDragging(true)
+      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y })
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && lastTouchDistance !== null) {
+      // 핀치 줌
+      const distance = getTouchDistance(e.touches)
+      const scale = distance / lastTouchDistance
+      setZoom((z) => Math.max(0.5, Math.min(3, z * scale)))
+      setLastTouchDistance(distance)
+    } else if (e.touches.length === 1 && isDragging) {
+      // 드래그
+      const touch = e.touches[0]
+      setPosition({
+        x: touch.clientX - dragStart.x,
+        y: touch.clientY - dragStart.y,
+      })
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setIsDragging(false)
+    setLastTouchDistance(null)
+  }
+
+  // 마우스 휠로 줌
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.1 : 0.1
+    setZoom((z) => Math.max(0.5, Math.min(3, z + delta)))
+  }
 
   // 페이지 변경 시 뷰 초기화 - 의도적인 상태 리셋 패턴
   const prevPageRef = useRef(currentPage)
@@ -145,6 +197,10 @@ export function InvoiceViewer({ pages, currentPage, onPageSelect, onReanalyze, i
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onWheel={handleWheel}
       >
         <div
           className="flex h-full w-full items-center justify-center p-4"
