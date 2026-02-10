@@ -17,6 +17,10 @@ export interface SupplierMatch {
   unit_normalized?: string
   ppu?: number              // Price Per Unit (단가당 가격)
   standard_unit?: string    // 표준 단위 (e.g., "100g", "1kg")
+  tax_type?: '과세' | '면세'
+  category?: string
+  spec_quantity?: number
+  spec_unit?: string
 }
 
 // 절감액 계산 결과

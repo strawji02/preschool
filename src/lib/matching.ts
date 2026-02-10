@@ -23,6 +23,8 @@ interface RpcResult {
   similarity?: number // For semantic search (search_products_vector)
   ppu: number | null
   standard_unit: string | null
+  tax_type: string | null
+  category: string | null
 }
 
 /**
@@ -282,6 +284,10 @@ export async function findComparisonMatches(
       standard_price: item.standard_price,
       match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
       unit_normalized: item.unit_normalized,
+      tax_type: item.tax_type as '과세' | '면세' | undefined,
+      category: item.category ?? undefined,
+      spec_quantity: item.spec_quantity ?? undefined,
+      spec_unit: item.spec_unit ?? undefined,
     }))
 
     const ssg_candidates: SupplierMatch[] = (ssgData || []).map(item => ({
@@ -290,6 +296,10 @@ export async function findComparisonMatches(
       standard_price: item.standard_price,
       match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
       unit_normalized: item.unit_normalized,
+      tax_type: item.tax_type as '과세' | '면세' | undefined,
+      category: item.category ?? undefined,
+      spec_quantity: item.spec_quantity ?? undefined,
+      spec_unit: item.spec_unit ?? undefined,
     }))
 
     // Top 1 = 자동 선택
@@ -317,22 +327,34 @@ export async function findComparisonMatches(
 }
 
 /**
- * Side-by-Side 절감액 계산
+ * Side-by-Side 절감액 계산 (VAT 정규화 적용)
  */
 export function calculateComparisonSavings(
   unitPrice: number,
   quantity: number,
   cjPrice?: number,
-  ssgPrice?: number
+  ssgPrice?: number,
+  cjTaxType?: '과세' | '면세',
+  ssgTaxType?: '과세' | '면세'
 ): SavingsResult {
+  // VAT 정규화: 모든 가격을 VAT 포함 기준으로 통일
+  // 과세 품목은 VAT 포함으로 정규화, 면세 품목은 그대로 사용
+  const normalizedCjPrice = cjPrice !== undefined && cjTaxType
+    ? cjTaxType === '과세' ? cjPrice * 1.1 : cjPrice
+    : cjPrice
+
+  const normalizedSsgPrice = ssgPrice !== undefined && ssgTaxType
+    ? ssgTaxType === '과세' ? ssgPrice * 1.1 : ssgPrice
+    : ssgPrice
+
   // 절감액 = (내 단가 - 공급사 단가) * 수량
   // 음수면 0으로 처리 (손해 안 보는 경우)
-  const cjSavings = cjPrice !== undefined
-    ? Math.max(0, (unitPrice - cjPrice) * quantity)
+  const cjSavings = normalizedCjPrice !== undefined
+    ? Math.max(0, (unitPrice - normalizedCjPrice) * quantity)
     : 0
 
-  const ssgSavings = ssgPrice !== undefined
-    ? Math.max(0, (unitPrice - ssgPrice) * quantity)
+  const ssgSavings = normalizedSsgPrice !== undefined
+    ? Math.max(0, (unitPrice - normalizedSsgPrice) * quantity)
     : 0
 
   const maxSavings = Math.max(cjSavings, ssgSavings)

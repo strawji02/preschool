@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ChevronDown, ChevronUp, Check, Circle } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, Supplier, SupplierMatch } from '@/types/audit'
 import { CandidateSelector } from './CandidateSelector'
-import { convertPrice, parseUnitString, type NormalizedUnit } from '@/lib/unitConversion'
+import { parseUnitString, type NormalizedUnit } from '@/lib/unitConversion'
+import { convertPriceUnified, type ConversionResult } from '@/lib/unitConversionUnified'
 
 // 추출된 spec 또는 name에서 단위와 수량 파싱
 function parseExtractedSpec(spec: string | null | undefined, name: string | null | undefined): { unit: NormalizedUnit; quantity: number } {
@@ -70,15 +71,49 @@ export function MatchingRow({
   const initialSpec = parseExtractedSpec(item.extracted_spec, item.extracted_name)
   const [userUnit, setUserUnit] = useState<NormalizedUnit>(initialSpec.unit)
   const [userQuantity, setUserQuantity] = useState<number>(initialSpec.quantity)
+  const [conversionCache, setConversionCache] = useState<Record<string, ConversionResult>>({})
 
   // 견적불가 여부 확인 (CJ와 SSG 모두 후보가 없는 경우)
   const noMatch = item.cj_candidates.length === 0 && item.ssg_candidates.length === 0
 
-  // 환산 가격 계산 함수
-  const getConvertedPrice = (supplierPrice: number, supplierUnit: string | undefined): number | null => {
-    if (!supplierUnit) return null
-    return convertPrice(supplierPrice, supplierUnit, userUnit, userQuantity)
-  }
+  // 비동기 환산 가격 계산
+  useEffect(() => {
+    const loadConversions = async () => {
+      const cache: Record<string, ConversionResult> = {}
+
+      // Convert CJ candidates
+      for (const candidate of item.cj_candidates) {
+        if (candidate.unit_normalized) {
+          const key = `cj_${candidate.id}`
+          cache[key] = await convertPriceUnified(
+            candidate.standard_price,
+            candidate.unit_normalized,
+            userUnit,
+            userQuantity,
+            candidate.category
+          )
+        }
+      }
+
+      // Convert SSG candidates
+      for (const candidate of item.ssg_candidates) {
+        if (candidate.unit_normalized) {
+          const key = `ssg_${candidate.id}`
+          cache[key] = await convertPriceUnified(
+            candidate.standard_price,
+            candidate.unit_normalized,
+            userUnit,
+            userQuantity,
+            candidate.category
+          )
+        }
+      }
+
+      setConversionCache(cache)
+    }
+
+    loadConversions()
+  }, [item.cj_candidates, item.ssg_candidates, userUnit, userQuantity])
 
   const getStatusBadge = () => {
     // 견적불가 우선 표시
@@ -275,10 +310,21 @@ export function MatchingRow({
                             )}
                           </div>
                           {candidate.unit_normalized && (() => {
-                            const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                            const result = conversionCache[`cj_${candidate.id}`] || {
+                              success: false,
+                              convertedPrice: null,
+                              method: 'failed' as const,
+                              message: '계산중...'
+                            }
                             return (
                               <div className="text-xs text-orange-500">
-                                → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                                → {userQuantity}{userUnit} 기준: {
+                                  result.success
+                                    ? formatCurrency(result.convertedPrice!)
+                                    : result.message
+                                }
+                                {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
+                                {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
                               </div>
                             )
                           })()}
@@ -341,10 +387,21 @@ export function MatchingRow({
                             )}
                           </div>
                           {candidate.unit_normalized && (() => {
-                            const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                            const result = conversionCache[`ssg_${candidate.id}`] || {
+                              success: false,
+                              convertedPrice: null,
+                              method: 'failed' as const,
+                              message: '계산중...'
+                            }
                             return (
                               <div className="text-xs text-purple-500">
-                                → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                                → {userQuantity}{userUnit} 기준: {
+                                  result.success
+                                    ? formatCurrency(result.convertedPrice!)
+                                    : result.message
+                                }
+                                {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
+                                {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
                               </div>
                             )
                           })()}

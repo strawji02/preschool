@@ -5,7 +5,8 @@ import { ChevronDown, Check, Search } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { SupplierMatch, Supplier } from '@/types/audit'
-import { convertPrice, type NormalizedUnit } from '@/lib/unitConversion'
+import { type NormalizedUnit } from '@/lib/unitConversion'
+import { convertPriceUnified, type ConversionResult } from '@/lib/unitConversionUnified'
 
 interface CandidateSelectorProps {
   supplier: Supplier
@@ -28,17 +29,43 @@ export function CandidateSelector({
   userUnit = 'g',
   userQuantity = 1,
 }: CandidateSelectorProps) {
-  // 환산가 계산 함수
-  const getConvertedPrice = (price: number, unitNormalized: string | undefined): number | null => {
-    if (!unitNormalized) return null
-    try {
-      return convertPrice(price, unitNormalized, userUnit, userQuantity)
-    } catch {
-      return null
-    }
-  }
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [conversionCache, setConversionCache] = useState<Record<string, ConversionResult>>({})
+
+  // 비동기 환산 가격 계산
+  useEffect(() => {
+    const loadConversions = async () => {
+      const cache: Record<string, ConversionResult> = {}
+
+      for (const candidate of candidates) {
+        if (candidate.unit_normalized) {
+          cache[candidate.id] = await convertPriceUnified(
+            candidate.standard_price,
+            candidate.unit_normalized,
+            userUnit,
+            userQuantity,
+            candidate.category
+          )
+        }
+      }
+
+      // Also convert selected match if it exists
+      if (selectedMatch && selectedMatch.unit_normalized) {
+        cache[selectedMatch.id] = await convertPriceUnified(
+          selectedMatch.standard_price,
+          selectedMatch.unit_normalized,
+          userUnit,
+          userQuantity,
+          selectedMatch.category
+        )
+      }
+
+      setConversionCache(cache)
+    }
+
+    loadConversions()
+  }, [candidates, selectedMatch, userUnit, userQuantity])
 
   // 외부 클릭 시 드롭다운 닫기
   useEffect(() => {
@@ -114,10 +141,21 @@ export function CandidateSelector({
         </div>
         {/* 환산가 표시 */}
         {selectedMatch && !isNoneSelected && selectedMatch.unit_normalized && (() => {
-          const converted = getConvertedPrice(selectedMatch.standard_price, selectedMatch.unit_normalized)
+          const result = conversionCache[selectedMatch.id] || {
+            success: false,
+            convertedPrice: null,
+            method: 'failed' as const,
+            message: '계산중...'
+          }
           return (
             <span className="text-xs text-gray-500">
-              → {userQuantity}{userUnit} 기준: {converted !== null ? formatCurrency(converted) : '환산불가'}
+              → {userQuantity}{userUnit} 기준: {
+                result.success
+                  ? formatCurrency(result.convertedPrice!)
+                  : result.message
+              }
+              {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
+              {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
             </span>
           )
         })()}
@@ -185,10 +223,21 @@ export function CandidateSelector({
                       </div>
                       {/* 환산가 표시 */}
                       {candidate.unit_normalized && (() => {
-                        const converted = getConvertedPrice(candidate.standard_price, candidate.unit_normalized)
+                        const result = conversionCache[candidate.id] || {
+                          success: false,
+                          convertedPrice: null,
+                          method: 'failed' as const,
+                          message: '계산중...'
+                        }
                         return (
                           <span className={cn('font-medium', isCJ ? 'text-orange-600' : 'text-purple-600')}>
-                            → {userQuantity}{userUnit}: {converted !== null ? formatCurrency(converted) : '환산불가'}
+                            → {userQuantity}{userUnit}: {
+                              result.success
+                                ? formatCurrency(result.convertedPrice!)
+                                : result.message
+                            }
+                            {result.method === 'db' && <span className="ml-1 text-green-600" title="DB 환산">✓</span>}
+                            {result.method === 'basic' && <span className="ml-1 text-blue-600" title="기본 환산">~</span>}
                           </span>
                         )
                       })()}

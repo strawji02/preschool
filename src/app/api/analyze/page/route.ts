@@ -101,12 +101,14 @@ export async function POST(request: NextRequest) {
     const processedItems = ocrResult.items.map((item, index) => {
       const match = matchResults[index]
 
-      // Calculate savings for both suppliers
+      // Calculate savings for both suppliers (with VAT normalization)
       const savings = calculateComparisonSavings(
         item.unit_price,
         item.quantity,
         match.cj_match?.standard_price,
-        match.ssg_match?.standard_price
+        match.ssg_match?.standard_price,
+        match.cj_match?.tax_type,
+        match.ssg_match?.tax_type
       )
 
       // For DB: 최고 절감 공급사의 매칭 정보 저장 (호환성)
