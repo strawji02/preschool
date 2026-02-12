@@ -15,7 +15,7 @@ export interface DBProduct {
   /** 상품명 */
   name: string
   /** 규격 */
-  spec?: string
+  spec: string
   /** 단가 */
   price: number
   /** 기타 속성 */
