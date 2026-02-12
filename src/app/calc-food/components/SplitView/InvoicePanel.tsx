@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { Check, AlertCircle, Clock } from 'lucide-react'
+import { Check, AlertCircle, Clock, FileText } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/format'
 import type { ComparisonItem } from '@/types/audit'
@@ -11,6 +11,8 @@ interface InvoicePanelProps {
   selectedIndex: number
   onSelectIndex: (index: number) => void
   isFocused: boolean
+  onViewPdf?: (itemIndex: number) => void // PDF 보기 콜백
+  hasPdfPages?: boolean // PDF 페이지가 있는지 여부
 }
 
 export function InvoicePanel({
@@ -18,6 +20,8 @@ export function InvoicePanel({
   selectedIndex,
   onSelectIndex,
   isFocused,
+  onViewPdf,
+  hasPdfPages = false,
 }: InvoicePanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const selectedRef = useRef<HTMLDivElement>(null)
@@ -79,10 +83,11 @@ export function InvoicePanel({
       </div>
 
       {/* 테이블 헤더 */}
-      <div className="grid grid-cols-[50px_1fr_100px_100px] gap-2 border-b bg-gray-100 px-4 py-2 text-sm font-medium text-gray-600">
+      <div className="grid grid-cols-[50px_1fr_100px_50px_50px] gap-2 border-b bg-gray-100 px-4 py-2 text-sm font-medium text-gray-600">
         <div className="text-center">No</div>
         <div>품명 / 규격</div>
         <div className="text-right">단가</div>
+        <div className="text-center">원본</div>
         <div className="text-center">상태</div>
       </div>
 
@@ -97,7 +102,7 @@ export function InvoicePanel({
               ref={isSelected ? selectedRef : null}
               onClick={() => onSelectIndex(index)}
               className={cn(
-                'grid cursor-pointer grid-cols-[50px_1fr_100px_100px] gap-2 border-b-2 px-4 py-3 transition-all',
+                'grid cursor-pointer grid-cols-[50px_1fr_100px_50px_50px] gap-2 border-b-2 px-4 py-3 transition-all',
                 getStatusBg(item, isSelected),
                 isSelected && 'ring-1 ring-inset',
                 !isSelected && 'hover:bg-gray-50'
@@ -146,6 +151,22 @@ export function InvoicePanel({
                 <span className="text-xs text-gray-500">
                   ×{item.extracted_quantity}
                 </span>
+              </div>
+
+              {/* 원본 보기 버튼 */}
+              <div className="flex items-center justify-center">
+                {onViewPdf && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onViewPdf(index)
+                    }}
+                    className="rounded p-1.5 text-gray-500 hover:bg-blue-100 hover:text-blue-600"
+                    title="원본 보기"
+                  >
+                    <FileText size={16} />
+                  </button>
+                )}
               </div>
 
               {/* 상태 */}

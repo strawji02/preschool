@@ -4,13 +4,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { CheckCircle, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
+import type { PageImage } from '@/lib/pdf-processor'
 import type { PanelFocus, ProgressStatus } from './types'
 import { InvoicePanel } from './InvoicePanel'
 import { SearchPanel } from './SearchPanel'
 import { ProgressBar } from './ProgressBar'
+import { PdfModal } from './PdfModal'
 
 interface SplitViewProps {
   items: ComparisonItem[]
+  pages?: PageImage[] // PDF 페이지 이미지 (선택적)
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
   onConfirmItem: (itemId: string) => void
   onConfirmAllAutoMatched: () => void
@@ -19,6 +22,7 @@ interface SplitViewProps {
 
 export function SplitView({
   items,
+  pages = [],
   onSelectCandidate,
   onConfirmItem,
   onConfirmAllAutoMatched,
@@ -27,6 +31,11 @@ export function SplitView({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [focusedPanel, setFocusedPanel] = useState<PanelFocus>('left')
   const [selectedResultIndex, setSelectedResultIndex] = useState(0)
+  
+  // PDF 모달 상태
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false)
+  const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+  const [pdfViewItemIndex, setPdfViewItemIndex] = useState<number | null>(null)
 
   // 현재 선택된 품목
   const currentItem = items[selectedIndex] || null
@@ -61,6 +70,16 @@ export function SplitView({
     onConfirmItem(currentItem.id)
     moveToNextUnconfirmed()
   }, [currentItem, onSelectCandidate, onConfirmItem, moveToNextUnconfirmed])
+
+  // PDF 보기 핸들러
+  const handleViewPdf = useCallback((itemIndex: number) => {
+    if (pages.length === 0) return
+    setPdfViewItemIndex(itemIndex)
+    // 해당 아이템의 페이지 번호 찾기 (페이지 정보가 있다면)
+    // 기본적으로 첫 페이지 표시
+    setPdfCurrentPage(1)
+    setIsPdfModalOpen(true)
+  }, [pages.length])
 
   // 키보드 이벤트 핸들러
   useEffect(() => {
@@ -151,6 +170,7 @@ export function SplitView({
             selectedIndex={selectedIndex}
             onSelectIndex={setSelectedIndex}
             isFocused={focusedPanel === 'left'}
+            onViewPdf={pages.length > 0 ? handleViewPdf : undefined}
           />
         </div>
 
@@ -215,6 +235,16 @@ export function SplitView({
           </button>
         </div>
       </div>
+
+      {/* PDF 모달 */}
+      <PdfModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        pages={pages}
+        currentPage={pdfCurrentPage}
+        onPageChange={setPdfCurrentPage}
+        highlightRowIndex={pdfViewItemIndex ?? undefined}
+      />
     </div>
   )
 }
