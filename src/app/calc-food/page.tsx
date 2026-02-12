@@ -21,6 +21,11 @@ const AnalysisDashboard = dynamic(() => import('./components/AnalysisDashboard')
   loading: () => <LoadingFallback />,
 })
 
+const SplitView = dynamic(() => import('./components/SplitView').then(mod => ({ default: mod.SplitView })), {
+  ssr: false,
+  loading: () => <LoadingFallback />,
+})
+
 function LoadingFallback() {
   return (
     <div className="flex min-h-[calc(100vh-200px)] items-center justify-center">
@@ -108,7 +113,22 @@ export default function CalcFoodPage() {
           />
         )}
 
-        {state.status === 'analysis' && (
+        {/* 매칭 단계: SplitView 사용 */}
+        {state.status === 'analysis' && state.currentStep === 'matching' && (
+          <div className="h-[calc(100vh-64px)]">
+            <SplitView
+              items={state.items}
+              pages={state.pages}
+              onSelectCandidate={selectCandidate}
+              onConfirmItem={confirmItem}
+              onConfirmAllAutoMatched={confirmAllAutoMatched}
+              onProceedToReport={proceedToReport}
+            />
+          </div>
+        )}
+
+        {/* 리포트 단계: AnalysisDashboard 사용 */}
+        {state.status === 'analysis' && state.currentStep === 'report' && (
           <AnalysisDashboard
             currentStep={state.currentStep}
             pages={state.pages}
