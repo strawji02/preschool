@@ -89,9 +89,9 @@ export async function POST(request: NextRequest) {
       `[${body.session_id}] OCR extracted ${ocrResult.items.length} items (${Date.now() - startTime}ms)`
     )
 
-    // 4. Side-by-Side Comparison Matching - CJ와 SSG 병렬 검색
+    // 4. Side-by-Side Comparison Matching - CJ와 SSG 병렬 검색 (깔때기 알고리즘 적용)
     const matchPromises = ocrResult.items.map((item) =>
-      findComparisonMatches(item.name, supabase)
+      findComparisonMatches(item.name, supabase, undefined, item) // extractedItem 전달
     )
     const matchResults = await Promise.all(matchPromises)
 

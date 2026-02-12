@@ -21,6 +21,7 @@ export interface SupplierMatch {
   category?: string
   spec_quantity?: number
   spec_unit?: string
+  _funnelReasons?: string[] // 깔때기 알고리즘 감점 사유 (선택적)
 }
 
 // 절감액 계산 결과

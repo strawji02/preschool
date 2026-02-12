@@ -153,7 +153,7 @@ export function matchWithFunnel(
 
     scores.set(product.id, finalScore)
 
-    // 감점 사유 수집
+    // 감점 사유 수집 (완벽 일치가 아닌 경우만)
     const productReasons: string[] = []
 
     if (!isInRange) {
@@ -164,6 +164,7 @@ export function matchWithFunnel(
       productReasons.push(`속성 불일치 (${100 - attributeScore}점 감점)`)
     }
 
+    // 감점 사유가 있는 경우에만 reasons에 추가
     if (productReasons.length > 0) {
       reasons.set(product.id, productReasons)
     }

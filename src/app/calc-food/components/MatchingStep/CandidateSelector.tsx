@@ -221,6 +221,16 @@ export function CandidateSelector({
                           {Math.round(candidate.match_score * 100)}% 일치
                         </span>
                       </div>
+                      {/* 깔때기 알고리즘 감점 사유 표시 */}
+                      {candidate._funnelReasons && candidate._funnelReasons.length > 0 && (
+                        <div className="flex flex-wrap gap-1 text-xs text-amber-600">
+                          {candidate._funnelReasons.map((reason, idx) => (
+                            <span key={idx} className="rounded bg-amber-50 px-1 py-0.5">
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {/* 환산가 표시 */}
                       {candidate.unit_normalized && (() => {
                         const result = conversionCache[candidate.id] || {

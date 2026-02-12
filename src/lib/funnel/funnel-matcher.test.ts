@@ -49,12 +49,14 @@ describe('matchWithFunnel', () => {
   })
 
   it('가격 범위 내 + 속성 일치 상품을 1차 추천으로 분류해야 함', () => {
-    const invoice = createInvoiceItem()
+    const invoice = createInvoiceItem({
+      itemName: '친환경 깻잎(국내산)', // 원산지 포함
+    })
 
     const candidates = [
-      createDBProduct('1', '친환경 깻잎', '100g', 5000), // 정확히 일치
+      createDBProduct('1', '친환경 깻잎(국내산)', '100g', 5000), // 완전히 일치
       createDBProduct('2', '깻잎', '100g', 5000), // 속성 누락
-      createDBProduct('3', '친환경 깻잎', '100g', 10000), // 가격 범위 외 (100원/g)
+      createDBProduct('3', '친환경 깻잎(국내산)', '100g', 10000), // 가격 범위 외 (100원/g)
     ]
 
     const result = matchWithFunnel(invoice, candidates)
@@ -68,14 +70,16 @@ describe('matchWithFunnel', () => {
   })
 
   it('Top 3 추천만 반환해야 함', () => {
-    const invoice = createInvoiceItem()
+    const invoice = createInvoiceItem({
+      itemName: '친환경 깻잎(국내산)',
+    })
 
     const candidates = [
-      createDBProduct('1', '친환경 깻잎', '100g', 5000),
-      createDBProduct('2', '친환경 깻잎', '100g', 5100),
-      createDBProduct('3', '친환경 깻잎', '100g', 5200),
-      createDBProduct('4', '친환경 깻잎', '100g', 5300),
-      createDBProduct('5', '친환경 깻잎', '100g', 5400),
+      createDBProduct('1', '친환경 깻잎(국내산)', '100g', 5000),
+      createDBProduct('2', '친환경 깻잎(국내산)', '100g', 5100),
+      createDBProduct('3', '친환경 깻잎(국내산)', '100g', 5200),
+      createDBProduct('4', '친환경 깻잎(국내산)', '100g', 5300),
+      createDBProduct('5', '친환경 깻잎(국내산)', '100g', 5400),
     ]
 
     const result = matchWithFunnel(invoice, candidates)
@@ -84,12 +88,14 @@ describe('matchWithFunnel', () => {
   })
 
   it('점수와 감점 사유를 올바르게 기록해야 함', () => {
-    const invoice = createInvoiceItem()
+    const invoice = createInvoiceItem({
+      itemName: '친환경 깻잎(국내산)',
+    })
 
     const candidates = [
-      createDBProduct('1', '친환경 깻잎', '100g', 5000), // 완벽 일치
+      createDBProduct('1', '친환경 깻잎(국내산)', '100g', 5000), // 완벽 일치
       createDBProduct('2', '깻잎', '100g', 5000), // 속성 누락
-      createDBProduct('3', '친환경 깻잎', '100g', 10000), // 가격 범위 외
+      createDBProduct('3', '친환경 깻잎(국내산)', '100g', 10000), // 가격 범위 외
     ]
 
     const result = matchWithFunnel(invoice, candidates)

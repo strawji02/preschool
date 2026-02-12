@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus } from '@/types/audit'
+import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
 import { preprocessKoreanFoodName, dualNormalize } from '@/lib/preprocessing'
 import { generateEmbedding } from '@/lib/embedding'
+import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
+import type { InvoiceItem } from '@/lib/funnel/excel-parser'
+import type { DBProduct } from '@/lib/funnel/price-cluster'
 
 // Matching thresholds
 const AUTO_MATCH_THRESHOLD = 0.8
@@ -171,6 +174,46 @@ export function calculateLoss(
 }
 
 // ========================================
+// Funnel Algorithm Integration
+// ========================================
+
+/**
+ * ExtractedItem을 InvoiceItem으로 변환
+ */
+function extractedItemToInvoiceItem(
+  item: ExtractedItem,
+  rowNumber: number = 1
+): InvoiceItem {
+  return {
+    rowNumber,
+    itemName: item.name,
+    spec: item.spec || '',
+    quantity: item.quantity,
+    unitPrice: item.unit_price,
+    amount: item.total_price || item.unit_price * item.quantity,
+  }
+}
+
+/**
+ * RpcResult를 DBProduct로 변환
+ */
+function rpcResultToDBProduct(result: RpcResult): DBProduct {
+  return {
+    id: result.id,
+    name: result.product_name,
+    spec: result.unit_normalized,
+    price: result.standard_price,
+    category: result.category || undefined,
+    // 추가 정보
+    supplier: result.supplier,
+    match_score: result.match_score,
+    tax_type: result.tax_type,
+    spec_quantity: result.spec_quantity,
+    spec_unit: result.spec_unit,
+  }
+}
+
+// ========================================
 // Side-by-Side Comparison Functions
 // ========================================
 
@@ -185,11 +228,13 @@ interface ComparisonMatchResult {
 /**
  * 공급사별 병렬 매칭 - CJ와 SSG 각각 Top 5 후보 검색
  * Phase 1: Hybrid Search 지원
+ * Phase 2: Funnel Algorithm 적용 (가격 군집화 + 속성 소거법)
  */
 export async function findComparisonMatches(
   itemName: string,
   supabase: SupabaseClient,
-  searchMode: SearchMode = SEARCH_MODE
+  searchMode: SearchMode = SEARCH_MODE,
+  extractedItem?: ExtractedItem // 깔때기 알고리즘 적용 시 필요
 ): Promise<ComparisonMatchResult> {
   try {
     const { forKeyword, forSemantic } = dualNormalize(itemName)
@@ -197,7 +242,8 @@ export async function findComparisonMatches(
     console.log(`  [Comparison] Raw: "${itemName}"`)
     console.log(`  [Comparison] Keyword: "${forKeyword}" | Semantic: "${forSemantic}"`)
 
-    // 병렬 실행: CJ와 SSG 동시 검색 (Top 5)
+    // 병렬 실행: CJ와 SSG 동시 검색 (Top 10으로 증가 - 깔때기 필터링을 위해)
+    const searchLimit = 10
     let cjResult: any
     let ssgResult: any
 
@@ -208,13 +254,13 @@ export async function findComparisonMatches(
         ;[cjResult, ssgResult] = await Promise.all([
           supabase.rpc('search_products_vector', {
             query_embedding: embedding,
-            limit_count: 5,
+            limit_count: searchLimit,
             supplier_filter: 'CJ',
             similarity_threshold: 0.3,
           }),
           supabase.rpc('search_products_vector', {
             query_embedding: embedding,
-            limit_count: 5,
+            limit_count: searchLimit,
             supplier_filter: 'SHINSEGAE',
             similarity_threshold: 0.3,
           }),
@@ -229,7 +275,7 @@ export async function findComparisonMatches(
         supabase.rpc('search_products_hybrid', {
           search_term_raw: itemName,
           search_term_clean: forKeyword,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'CJ',
           bm25_weight: 0.5,
           semantic_weight: 0.5,
@@ -237,7 +283,7 @@ export async function findComparisonMatches(
         supabase.rpc('search_products_hybrid', {
           search_term_raw: itemName,
           search_term_clean: forKeyword,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
           bm25_weight: 0.5,
           semantic_weight: 0.5,
@@ -247,12 +293,12 @@ export async function findComparisonMatches(
       [cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_bm25', {
           search_term: forKeyword,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'CJ',
         }),
         supabase.rpc('search_products_bm25', {
           search_term: forKeyword,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
         }),
       ])
@@ -262,45 +308,112 @@ export async function findComparisonMatches(
         supabase.rpc('search_products_fuzzy', {
           search_term_raw: itemName,
           search_term_clean: forSemantic,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'CJ',
         }),
         supabase.rpc('search_products_fuzzy', {
           search_term_raw: itemName,
           search_term_clean: forSemantic,
-          limit_count: 5,
+          limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
         }),
       ])
     }
 
-    // 결과 매핑 - 전체 후보 배열 생성
+    // 결과 매핑 - DBProduct로 변환
     const cjData = cjResult.data as RpcResult[] | null
     const ssgData = ssgResult.data as RpcResult[] | null
 
-    const cj_candidates: SupplierMatch[] = (cjData || []).map(item => ({
-      id: item.id,
-      product_name: item.product_name,
-      standard_price: item.standard_price,
-      match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
-      unit_normalized: item.unit_normalized,
-      tax_type: item.tax_type as '과세' | '면세' | undefined,
-      category: item.category ?? undefined,
-      spec_quantity: item.spec_quantity ?? undefined,
-      spec_unit: item.spec_unit ?? undefined,
-    }))
+    let cj_candidates: SupplierMatch[]
+    let ssg_candidates: SupplierMatch[]
 
-    const ssg_candidates: SupplierMatch[] = (ssgData || []).map(item => ({
-      id: item.id,
-      product_name: item.product_name,
-      standard_price: item.standard_price,
-      match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
-      unit_normalized: item.unit_normalized,
-      tax_type: item.tax_type as '과세' | '면세' | undefined,
-      category: item.category ?? undefined,
-      spec_quantity: item.spec_quantity ?? undefined,
-      spec_unit: item.spec_unit ?? undefined,
-    }))
+    // 깔때기 알고리즘 적용 (ExtractedItem이 제공된 경우)
+    if (extractedItem) {
+      const invoiceItem = extractedItemToInvoiceItem(extractedItem)
+      console.log(`  [Funnel] Applying funnel algorithm for: ${invoiceItem.itemName}`)
+
+      // CJ 후보에 대해 깔때기 적용
+      if (cjData && cjData.length > 0) {
+        const cjDBProducts = cjData.map(rpcResultToDBProduct)
+        const cjFunnelResult = matchWithFunnel(invoiceItem, cjDBProducts)
+
+        // primary (Top 3) + secondary에서 최대 5개까지
+        const cjFiltered = [
+          ...cjFunnelResult.primary,
+          ...cjFunnelResult.secondary,
+        ].slice(0, 5)
+
+        cj_candidates = cjFiltered.map(product => ({
+          id: product.id,
+          product_name: product.name,
+          standard_price: product.price,
+          match_score: cjFunnelResult.scores.get(product.id) ?? 0,
+          unit_normalized: product.spec || '',
+          tax_type: product.tax_type as '과세' | '면세' | undefined,
+          category: product.category,
+          spec_quantity: product.spec_quantity ?? undefined,
+          spec_unit: product.spec_unit ?? undefined,
+          _funnelReasons: cjFunnelResult.reasons.get(product.id), // 감점 사유 (디버깅용)
+        }))
+
+        console.log(`  [Funnel] CJ: ${cjFunnelResult.primary.length} primary, ${cjFunnelResult.secondary.length} secondary`)
+      } else {
+        cj_candidates = []
+      }
+
+      // SSG 후보에 대해 깔때기 적용
+      if (ssgData && ssgData.length > 0) {
+        const ssgDBProducts = ssgData.map(rpcResultToDBProduct)
+        const ssgFunnelResult = matchWithFunnel(invoiceItem, ssgDBProducts)
+
+        const ssgFiltered = [
+          ...ssgFunnelResult.primary,
+          ...ssgFunnelResult.secondary,
+        ].slice(0, 5)
+
+        ssg_candidates = ssgFiltered.map(product => ({
+          id: product.id,
+          product_name: product.name,
+          standard_price: product.price,
+          match_score: ssgFunnelResult.scores.get(product.id) ?? 0,
+          unit_normalized: product.spec || '',
+          tax_type: product.tax_type as '과세' | '면세' | undefined,
+          category: product.category,
+          spec_quantity: product.spec_quantity ?? undefined,
+          spec_unit: product.spec_unit ?? undefined,
+          _funnelReasons: ssgFunnelResult.reasons.get(product.id),
+        }))
+
+        console.log(`  [Funnel] SSG: ${ssgFunnelResult.primary.length} primary, ${ssgFunnelResult.secondary.length} secondary`)
+      } else {
+        ssg_candidates = []
+      }
+    } else {
+      // 깔때기 알고리즘 미적용 (기존 로직)
+      cj_candidates = (cjData || []).slice(0, 5).map(item => ({
+        id: item.id,
+        product_name: item.product_name,
+        standard_price: item.standard_price,
+        match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
+        unit_normalized: item.unit_normalized,
+        tax_type: item.tax_type as '과세' | '면세' | undefined,
+        category: item.category ?? undefined,
+        spec_quantity: item.spec_quantity ?? undefined,
+        spec_unit: item.spec_unit ?? undefined,
+      }))
+
+      ssg_candidates = (ssgData || []).slice(0, 5).map(item => ({
+        id: item.id,
+        product_name: item.product_name,
+        standard_price: item.standard_price,
+        match_score: searchMode === 'semantic' ? (item.similarity ?? 0) : item.match_score,
+        unit_normalized: item.unit_normalized,
+        tax_type: item.tax_type as '과세' | '면세' | undefined,
+        category: item.category ?? undefined,
+        spec_quantity: item.spec_quantity ?? undefined,
+        spec_unit: item.spec_unit ?? undefined,
+      }))
+    }
 
     // Top 1 = 자동 선택
     const cj_match = cj_candidates[0]
