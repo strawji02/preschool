@@ -26,6 +26,7 @@ export function SearchPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [results, setResults] = useState<MatchCandidate[]>([])
   const [sortBy, setSortBy] = useState<'score' | 'price' | 'pricePerGram'>('score')
+  const [supplier, setSupplier] = useState<'CJ' | 'SHINSEGAE'>('CJ')
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -67,15 +68,14 @@ export function SearchPanel({
   }
 
   // 검색 실행
-  const performSearch = async (searchQuery: string) => {
+  const performSearch = async (searchQuery: string, targetSupplier?: 'CJ' | 'SHINSEGAE') => {
     if (!searchQuery.trim() || !item) return
 
     setIsLoading(true)
     try {
-      // CJ만 검색 (현재 CJ 스마트 검색)
       const params = new URLSearchParams({
         q: searchQuery,
-        supplier: 'CJ',
+        supplier: targetSupplier || supplier,
         limit: '20',
       })
 
@@ -168,19 +168,65 @@ export function SearchPanel({
     )
   }
 
+  // 공급사 탭 변경
+  const handleSupplierChange = (newSupplier: 'CJ' | 'SHINSEGAE') => {
+    setSupplier(newSupplier)
+    if (query) {
+      performSearch(query, newSupplier)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
+      {/* 공급사 탭 */}
+      <div className="flex border-b">
+        <button
+          onClick={() => handleSupplierChange('CJ')}
+          className={cn(
+            'flex-1 py-3 text-center font-medium transition-colors',
+            supplier === 'CJ'
+              ? 'bg-orange-100 text-orange-800 border-b-2 border-orange-500'
+              : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+          )}
+        >
+          🏢 CJ
+        </button>
+        <button
+          onClick={() => handleSupplierChange('SHINSEGAE')}
+          className={cn(
+            'flex-1 py-3 text-center font-medium transition-colors',
+            supplier === 'SHINSEGAE'
+              ? 'bg-green-100 text-green-800 border-b-2 border-green-500'
+              : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+          )}
+        >
+          🛒 신세계
+        </button>
+      </div>
+
       {/* 헤더 */}
-      <div className="border-b bg-orange-50 px-4 py-3">
+      <div className={cn(
+        'border-b px-4 py-3',
+        supplier === 'CJ' ? 'bg-orange-50' : 'bg-green-50'
+      )}>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-orange-800">
-            🔍 CJ 스마트 검색
+          <h2 className={cn(
+            'text-lg font-semibold',
+            supplier === 'CJ' ? 'text-orange-800' : 'text-green-800'
+          )}>
+            🔍 {supplier === 'CJ' ? 'CJ' : '신세계'} 스마트 검색
           </h2>
-          <div className="text-sm text-orange-600">
+          <div className={cn(
+            'text-sm',
+            supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
+          )}>
             현재 단가: <span className="font-bold">{formatCurrency(item.extracted_unit_price)}</span>
           </div>
         </div>
-        <p className="mt-1 text-sm text-orange-600">
+        <p className={cn(
+          'mt-1 text-sm',
+          supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
+        )}>
           검색 대상: <span className="font-medium">{item.extracted_name}</span>
           {item.extracted_spec && ` (${item.extracted_spec})`}
         </p>
@@ -361,8 +407,13 @@ export function SearchPanel({
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700">
-                      CJ
+                    <span className={cn(
+                      'rounded px-1.5 py-0.5 text-xs font-medium',
+                      supplier === 'CJ'
+                        ? 'bg-orange-100 text-orange-700'
+                        : 'bg-green-100 text-green-700'
+                    )}>
+                      {supplier === 'CJ' ? 'CJ' : '신세계'}
                     </span>
                     <span className="truncate font-medium text-gray-900">
                       {product.product_name}
