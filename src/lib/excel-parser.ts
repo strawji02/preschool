@@ -41,7 +41,7 @@ const COLUMN_ALIASES: Record<string, string[]> = {
 function findColumnIndex(headers: string[], aliases: string[]): number {
   for (const alias of aliases) {
     const index = headers.findIndex(h => 
-      h.toLowerCase().includes(alias.toLowerCase())
+      h && typeof h === 'string' && h.toLowerCase().includes(alias.toLowerCase())
     )
     if (index !== -1) return index
   }
