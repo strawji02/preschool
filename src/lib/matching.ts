@@ -327,8 +327,10 @@ export async function findComparisonMatches(
     let cj_candidates: SupplierMatch[]
     let ssg_candidates: SupplierMatch[]
 
-    // 깔때기 알고리즘 적용 (ExtractedItem이 제공된 경우)
-    if (extractedItem) {
+    // 깔때기 알고리즘 임시 비활성화 (디버깅용)
+    // TODO: 에러 해결 후 재활성화
+    const FUNNEL_ENABLED = false
+    if (FUNNEL_ENABLED && extractedItem) {
       const invoiceItem = extractedItemToInvoiceItem(extractedItem)
       console.log(`  [Funnel] Applying funnel algorithm for: ${invoiceItem.itemName}`)
 
