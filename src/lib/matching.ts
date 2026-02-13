@@ -332,59 +332,91 @@ export async function findComparisonMatches(
       const invoiceItem = extractedItemToInvoiceItem(extractedItem)
       console.log(`  [Funnel] Applying funnel algorithm for: ${invoiceItem.itemName}`)
 
-      // CJ 후보에 대해 깔때기 적용
+      // CJ 후보에 대해 깔때기 적용 (에러 발생 시 fallback)
       if (cjData && cjData.length > 0) {
-        const cjDBProducts = cjData.map(rpcResultToDBProduct)
-        const cjFunnelResult = matchWithFunnel(invoiceItem, cjDBProducts)
+        try {
+          const cjDBProducts = cjData.map(rpcResultToDBProduct)
+          const cjFunnelResult = matchWithFunnel(invoiceItem, cjDBProducts)
 
-        // primary (Top 3) + secondary에서 최대 5개까지
-        const cjFiltered = [
-          ...cjFunnelResult.primary,
-          ...cjFunnelResult.secondary,
-        ].slice(0, 5)
+          // primary (Top 3) + secondary에서 최대 5개까지
+          const cjFiltered = [
+            ...cjFunnelResult.primary,
+            ...cjFunnelResult.secondary,
+          ].slice(0, 5)
 
-        cj_candidates = cjFiltered.map(product => ({
-          id: product.id,
-          product_name: product.name,
-          standard_price: product.price,
-          match_score: cjFunnelResult.scores.get(product.id) ?? 0,
-          unit_normalized: product.spec || '',
-          tax_type: product.tax_type as '과세' | '면세' | undefined,
-          category: product.category,
-          spec_quantity: product.spec_quantity ?? undefined,
-          spec_unit: product.spec_unit ?? undefined,
-          _funnelReasons: cjFunnelResult.reasons.get(product.id), // 감점 사유 (디버깅용)
-        }))
+          cj_candidates = cjFiltered.map(product => ({
+            id: product.id,
+            product_name: product.name,
+            standard_price: product.price,
+            match_score: cjFunnelResult.scores.get(product.id) ?? 0,
+            unit_normalized: product.spec || '',
+            tax_type: product.tax_type as '과세' | '면세' | undefined,
+            category: product.category,
+            spec_quantity: product.spec_quantity ?? undefined,
+            spec_unit: product.spec_unit ?? undefined,
+            _funnelReasons: cjFunnelResult.reasons.get(product.id), // 감점 사유 (디버깅용)
+          }))
 
-        console.log(`  [Funnel] CJ: ${cjFunnelResult.primary.length} primary, ${cjFunnelResult.secondary.length} secondary`)
+          console.log(`  [Funnel] CJ: ${cjFunnelResult.primary.length} primary, ${cjFunnelResult.secondary.length} secondary`)
+        } catch (funnelError) {
+          console.error('  [Funnel] CJ funnel error, falling back to raw results:', funnelError)
+          // Fallback: 깔때기 없이 원본 결과 사용
+          cj_candidates = cjData.slice(0, 5).map(item => ({
+            id: item.id,
+            product_name: item.product_name,
+            standard_price: item.standard_price,
+            match_score: item.match_score,
+            unit_normalized: item.unit_normalized,
+            tax_type: item.tax_type as '과세' | '면세' | undefined,
+            category: item.category ?? undefined,
+            spec_quantity: item.spec_quantity ?? undefined,
+            spec_unit: item.spec_unit ?? undefined,
+          }))
+        }
       } else {
         cj_candidates = []
       }
 
-      // SSG 후보에 대해 깔때기 적용
+      // SSG 후보에 대해 깔때기 적용 (에러 발생 시 fallback)
       if (ssgData && ssgData.length > 0) {
-        const ssgDBProducts = ssgData.map(rpcResultToDBProduct)
-        const ssgFunnelResult = matchWithFunnel(invoiceItem, ssgDBProducts)
+        try {
+          const ssgDBProducts = ssgData.map(rpcResultToDBProduct)
+          const ssgFunnelResult = matchWithFunnel(invoiceItem, ssgDBProducts)
 
-        const ssgFiltered = [
-          ...ssgFunnelResult.primary,
-          ...ssgFunnelResult.secondary,
-        ].slice(0, 5)
+          const ssgFiltered = [
+            ...ssgFunnelResult.primary,
+            ...ssgFunnelResult.secondary,
+          ].slice(0, 5)
 
-        ssg_candidates = ssgFiltered.map(product => ({
-          id: product.id,
-          product_name: product.name,
-          standard_price: product.price,
-          match_score: ssgFunnelResult.scores.get(product.id) ?? 0,
-          unit_normalized: product.spec || '',
-          tax_type: product.tax_type as '과세' | '면세' | undefined,
-          category: product.category,
-          spec_quantity: product.spec_quantity ?? undefined,
-          spec_unit: product.spec_unit ?? undefined,
-          _funnelReasons: ssgFunnelResult.reasons.get(product.id),
-        }))
+          ssg_candidates = ssgFiltered.map(product => ({
+            id: product.id,
+            product_name: product.name,
+            standard_price: product.price,
+            match_score: ssgFunnelResult.scores.get(product.id) ?? 0,
+            unit_normalized: product.spec || '',
+            tax_type: product.tax_type as '과세' | '면세' | undefined,
+            category: product.category,
+            spec_quantity: product.spec_quantity ?? undefined,
+            spec_unit: product.spec_unit ?? undefined,
+            _funnelReasons: ssgFunnelResult.reasons.get(product.id),
+          }))
 
-        console.log(`  [Funnel] SSG: ${ssgFunnelResult.primary.length} primary, ${ssgFunnelResult.secondary.length} secondary`)
+          console.log(`  [Funnel] SSG: ${ssgFunnelResult.primary.length} primary, ${ssgFunnelResult.secondary.length} secondary`)
+        } catch (funnelError) {
+          console.error('  [Funnel] SSG funnel error, falling back to raw results:', funnelError)
+          // Fallback: 깔때기 없이 원본 결과 사용
+          ssg_candidates = ssgData.slice(0, 5).map(item => ({
+            id: item.id,
+            product_name: item.product_name,
+            standard_price: item.standard_price,
+            match_score: item.match_score,
+            unit_normalized: item.unit_normalized,
+            tax_type: item.tax_type as '과세' | '면세' | undefined,
+            category: item.category ?? undefined,
+            spec_quantity: item.spec_quantity ?? undefined,
+            spec_unit: item.spec_unit ?? undefined,
+          }))
+        }
       } else {
         ssg_candidates = []
       }
