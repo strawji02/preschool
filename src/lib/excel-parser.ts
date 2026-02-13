@@ -58,8 +58,8 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
     
-    // 시트를 JSON으로 변환 (헤더 포함)
-    const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 })
+    // 시트를 2D 배열로 변환 (헤더 포함)
+    const rawData: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
     
     if (rawData.length < 2) {
       return {
@@ -75,7 +75,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     let headers: string[] = []
     
     for (let i = 0; i < Math.min(10, rawData.length); i++) {
-      const row = rawData[i] as unknown[]
+      const row = rawData[i]
       if (!row || row.length < 3) continue
       
       const rowStrings = row.map(cell => String(cell || '').trim())
@@ -122,7 +122,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     const items: ExtractedExcelItem[] = []
     
     for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-      const row = rawData[i] as unknown[]
+      const row = rawData[i]
       if (!row || row.length === 0) continue
       
       const name = String(row[nameIdx] || '').trim()
