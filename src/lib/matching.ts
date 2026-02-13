@@ -329,10 +329,11 @@ export async function findComparisonMatches(
 
     // 깔때기 알고리즘 임시 비활성화 (디버깅용)
     // TODO: 에러 해결 후 재활성화
-    const FUNNEL_ENABLED = false  // 임시 비활성화 - 디버깅 필요
+    const FUNNEL_ENABLED = true  // 활성화 (에러 시 fallback 사용)
     if (FUNNEL_ENABLED && extractedItem) {
       const invoiceItem = extractedItemToInvoiceItem(extractedItem)
       console.log(`  [Funnel] Applying funnel algorithm for: ${invoiceItem.itemName}`)
+      console.log(`  [Funnel] Invoice item:`, JSON.stringify(invoiceItem))
 
       // CJ 후보에 대해 깔때기 적용 (에러 발생 시 fallback)
       if (cjData && cjData.length > 0) {
