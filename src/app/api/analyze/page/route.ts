@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[${body.session_id}] Processing page ${body.page_number}...`)
+    console.log(`[${body.session_id}] Step 1: Session verified (${Date.now() - startTime}ms)`)
 
     // 2. Upload image to Storage
     const imagePath = `${body.session_id}/${body.page_number}.jpg`
@@ -66,12 +67,15 @@ export async function POST(request: NextRequest) {
       // Continue even if upload fails - we can still process OCR
     }
 
-    console.log(`[${body.session_id}] Image uploaded (${Date.now() - startTime}ms)`)
+    console.log(`[${body.session_id}] Step 2: Image uploaded (${Date.now() - startTime}ms)`)
 
     // 3. Run Gemini OCR (supplier 제거)
+    console.log(`[${body.session_id}] Step 3: Starting Gemini OCR...`)
+    const ocrStartTime = Date.now()
     const ocrResult = await extractItemsFromImage({
       image: body.image,
     })
+    console.log(`[${body.session_id}] Step 3: Gemini OCR completed in ${Date.now() - ocrStartTime}ms`)
 
     if (!ocrResult.success) {
       return NextResponse.json<ComparisonPageResponse>(
@@ -90,12 +94,15 @@ export async function POST(request: NextRequest) {
     )
 
     // 4. Side-by-Side Comparison Matching - CJ와 SSG 병렬 검색 (깔때기 알고리즘 적용)
-    const matchPromises = ocrResult.items.map((item) =>
-      findComparisonMatches(item.name, supabase, undefined, item) // extractedItem 전달
-    )
+    console.log(`[${body.session_id}] Step 4: Starting matching for ${ocrResult.items.length} items...`)
+    const matchStartTime = Date.now()
+    const matchPromises = ocrResult.items.map((item, idx) => {
+      console.log(`[${body.session_id}] Matching item ${idx + 1}: ${item.name}`)
+      return findComparisonMatches(item.name, supabase, undefined, item) // extractedItem 전달
+    })
     const matchResults = await Promise.all(matchPromises)
 
-    console.log(`[${body.session_id}] Comparison matching completed (${Date.now() - startTime}ms)`)
+    console.log(`[${body.session_id}] Step 4: Matching completed in ${Date.now() - matchStartTime}ms (total: ${Date.now() - startTime}ms)`)
 
     // 5. Prepare items for DB insert and response
     const processedItems = ocrResult.items.map((item, index) => {
