@@ -46,27 +46,17 @@ export async function GET(request: NextRequest) {
 
     // Choose search strategy based on mode
     if (searchMode === 'hybrid') {
-      // Hybrid Search: BM25 + Vector (Recommended)
-      try {
-        const embedding = await generateEmbedding(query)
-        const { data, error: rpcError } = await supabase.rpc('search_products_hybrid_bm25_vector', {
-          search_term: query,
-          query_embedding: embedding,
-          limit_count: Math.min(limit, 50),
-          supplier_filter: supplier || undefined,
-          bm25_weight: 0.5,
-          vector_weight: 0.5,
-          similarity_threshold: 0.3,
-        })
-        results = data as RpcResult[] || []
-        error = rpcError
-      } catch (embedError) {
-        console.error('Embedding generation failed:', embedError)
-        return NextResponse.json<SearchProductsResponse>(
-          { success: false, products: [], error: 'Embedding generation failed' },
-          { status: 500 }
-        )
-      }
+      // Hybrid Search: BM25 + Trigram (matching.ts와 동일한 함수 사용)
+      const { data, error: rpcError } = await supabase.rpc('search_products_hybrid', {
+        search_term_raw: query,
+        search_term_clean: query.replace(/[^가-힣a-zA-Z0-9\s]/g, '').trim(),
+        limit_count: Math.min(limit, 50),
+        supplier_filter: supplier || undefined,
+        bm25_weight: 0.5,
+        semantic_weight: 0.5,
+      })
+      results = data as RpcResult[] || []
+      error = rpcError
     } else if (searchMode === 'semantic') {
       // Semantic-only Search: Vector similarity
       try {
