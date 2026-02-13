@@ -4,6 +4,7 @@ import { useReducer, useCallback, useMemo } from 'react'
 import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, extractPagesFromImages, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
+import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 
 // 상태 타입
 export type AuditStatus = 'empty' | 'processing' | 'analysis' | 'error'
@@ -353,6 +354,12 @@ export function useAuditSession() {
         throw new Error('파일을 선택해주세요.')
       }
 
+      // 엑셀 파일인 경우 별도 처리
+      if (isExcelFile(files[0])) {
+        await processExcelFile(files[0])
+        return
+      }
+
       // 1. 파일 타입에 따라 페이지 추출
       let pages: PageImage[]
       let fileName: string
@@ -366,7 +373,7 @@ export function useAuditSession() {
         pages = await extractPagesFromImages(files)
         fileName = files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}장`
       } else {
-        throw new Error('지원하지 않는 파일 형식입니다. PDF 또는 이미지 파일을 업로드하세요.')
+        throw new Error('지원하지 않는 파일 형식입니다. PDF, 이미지 또는 엑셀 파일을 업로드하세요.')
       }
 
       dispatch({ type: 'START_PROCESSING', fileName, totalPages: pages.length })
@@ -416,6 +423,73 @@ export function useAuditSession() {
         if (analyzeData.success && analyzeData.items) {
           dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
         }
+      }
+
+      // 4. 분석 완료
+      dispatch({ type: 'COMPLETE_ANALYSIS' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '알 수 없는 오류'
+      dispatch({ type: 'SET_ERROR', error: message })
+    }
+  }, [])
+
+  // 엑셀 파일 처리
+  const processExcelFile = useCallback(async (file: File) => {
+    try {
+      dispatch({ type: 'START_PROCESSING', fileName: file.name, totalPages: 1 })
+
+      // 1. 클라이언트에서 엑셀 파싱
+      const parseResult = await parseInvoiceExcel(file)
+      
+      if (!parseResult.success) {
+        throw new Error(parseResult.error || '엑셀 파싱 실패')
+      }
+
+      console.log(`엑셀에서 ${parseResult.items.length}개 품목 추출`)
+
+      // 2. 세션 초기화
+      const initRes = await fetch('/api/session/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: file.name,
+          total_pages: 1,
+        }),
+      })
+
+      if (!initRes.ok) {
+        throw new Error('세션 초기화 실패')
+      }
+
+      const initData = await initRes.json()
+      if (!initData.success) {
+        throw new Error(initData.message || '세션 초기화 실패')
+      }
+
+      dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
+
+      // 3. 엑셀 분석 API 호출 (매칭 수행)
+      dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: 1 })
+
+      const analyzeRes = await fetch('/api/analyze/excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: initData.session_id,
+          items: parseResult.items,
+        }),
+      })
+
+      if (!analyzeRes.ok) {
+        const errorData = await analyzeRes.json().catch(() => ({}))
+        throw new Error(errorData.error || '품목 매칭 실패')
+      }
+
+      const analyzeData = await analyzeRes.json()
+      if (analyzeData.success && analyzeData.items) {
+        dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+      } else {
+        throw new Error(analyzeData.error || '분석 결과가 없습니다.')
       }
 
       // 4. 분석 완료

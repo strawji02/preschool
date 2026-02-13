@@ -1,11 +1,21 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Upload, FileText, Image } from 'lucide-react'
+import { Upload, FileText, Image, Table } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 interface UploadZoneProps {
   onFileSelect: (files: File[]) => void
+}
+
+// 엑셀 파일 타입 체크
+function isExcel(file: File): boolean {
+  return (
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    file.type === 'application/vnd.ms-excel' ||
+    file.name.endsWith('.xlsx') ||
+    file.name.endsWith('.xls')
+  )
 }
 
 export function UploadZone({ onFileSelect }: UploadZoneProps) {
@@ -28,10 +38,17 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
 
       const droppedFiles = Array.from(e.dataTransfer.files)
       const validFiles = droppedFiles.filter(
-        file => file.type === 'application/pdf' || file.type.startsWith('image/')
+        file => file.type === 'application/pdf' || file.type.startsWith('image/') || isExcel(file)
       )
 
       if (validFiles.length > 0) {
+        // 엑셀 파일 우선 처리
+        const excelFile = validFiles.find(f => isExcel(f))
+        if (excelFile) {
+          onFileSelect([excelFile])
+          return
+        }
+
         // PDF는 단일 파일만, 이미지는 여러 장 허용
         const hasPDF = validFiles.some(f => f.type === 'application/pdf')
         if (hasPDF) {
@@ -53,6 +70,14 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
       if (!selectedFiles || selectedFiles.length === 0) return
 
       const filesArray = Array.from(selectedFiles)
+      
+      // 엑셀 파일 우선 처리
+      const excelFile = filesArray.find(f => isExcel(f))
+      if (excelFile) {
+        onFileSelect([excelFile])
+        return
+      }
+
       const hasPDF = filesArray.some(f => f.type === 'application/pdf')
 
       if (hasPDF) {
@@ -84,7 +109,7 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
       >
         <input
           type="file"
-          accept="application/pdf,image/*"
+          accept="application/pdf,image/*,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           multiple
           className="hidden"
           onChange={handleFileChange}
@@ -117,6 +142,10 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
           <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-600">
             <Image size={16} />
             <span>JPG, PNG</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-green-100 px-4 py-2 text-sm text-green-700">
+            <Table size={16} />
+            <span>Excel</span>
           </div>
         </div>
       </label>
