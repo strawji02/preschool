@@ -30,10 +30,11 @@ function parseNumber(value: unknown): number {
 
 // 컬럼 이름 매핑 (다양한 형식 지원)
 const COLUMN_ALIASES: Record<string, string[]> = {
+  no: ['no', 'NO', '번호', '순번', '#'],
   name: ['품명', '품목명', '상품명', '제품명', '품목', '상품', '제품', 'name', 'item', 'product'],
   spec: ['규격', '단위', '용량', '사양', 'spec', 'unit', 'size'],
   quantity: ['수량', '갯수', '개수', 'qty', 'quantity', 'count'],
-  unit_price: ['단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price'],
+  unit_price: ['단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행'],
   total_price: ['금액', '합계', '총액', '공급가', 'total', 'amount', 'total_price'],
 }
 
