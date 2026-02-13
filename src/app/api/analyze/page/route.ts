@@ -8,6 +8,19 @@ import type {
   ComparisonItem,
 } from '@/types/audit'
 
+// Edge Runtime 사용 (타임아웃: 30초 CPU 시간, I/O 대기는 미포함)
+export const runtime = 'edge'
+
+// Edge 호환 base64 디코딩 함수
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+  return bytes
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
 
@@ -53,11 +66,11 @@ export async function POST(request: NextRequest) {
 
     // 2. Upload image to Storage
     const imagePath = `${body.session_id}/${body.page_number}.jpg`
-    const imageBuffer = Buffer.from(body.image, 'base64')
+    const imageBytes = base64ToUint8Array(body.image)
 
     const { error: uploadError } = await supabase.storage
       .from('invoice-images')
-      .upload(imagePath, imageBuffer, {
+      .upload(imagePath, imageBytes, {
         contentType: 'image/jpeg',
         upsert: true,
       })
