@@ -70,7 +70,7 @@ export default function CalcFoodPage() {
 
             <div className="h-6 w-px bg-gray-300" />
 
-            <h1 className="text-lg font-semibold text-gray-900">식자재 단가 감사</h1>
+            <h1 className="text-lg font-semibold text-gray-900">식자재 단가 비교</h1>
 
             {/* 현재 단계 표시 */}
             {state.status === 'analysis' && (
