@@ -108,6 +108,11 @@ export async function POST(request: NextRequest) {
         : savings.best_supplier === 'SHINSEGAE' ? match.ssg_match
         : match.cj_match ?? match.ssg_match
 
+      // match_score를 0~9.9999 범위로 제한 (NUMERIC(5,4) 호환)
+      const safeMatchScore = bestMatch?.match_score 
+        ? Math.min(9.9999, Math.max(0, bestMatch.match_score))
+        : null
+
       return {
         dbRecord: {
           session_id: body.session_id,
@@ -117,7 +122,7 @@ export async function POST(request: NextRequest) {
           extracted_unit_price: item.unit_price,
           extracted_total_price: item.total_price,
           matched_product_id: bestMatch?.id,
-          match_score: bestMatch?.match_score,
+          match_score: safeMatchScore,
           match_candidates: null,
           match_status: match.status,
           standard_price: bestMatch?.standard_price,
