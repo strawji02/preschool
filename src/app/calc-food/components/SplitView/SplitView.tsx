@@ -62,14 +62,18 @@ export function SplitView({
     }
   }, [items, selectedIndex])
 
-  // 상품 선택 핸들러
+  // 상품 선택 핸들러 (선택만, 확정은 별도)
   const handleSelectProduct = useCallback((product: SupplierMatch) => {
     if (!currentItem) return
     onSelectCandidate(currentItem.id, 'CJ', product)
-    // 선택 후 자동 확정 + 다음 이동
+  }, [currentItem, onSelectCandidate])
+
+  // 현재 품목 확정 핸들러
+  const handleConfirmCurrentItem = useCallback(() => {
+    if (!currentItem) return
     onConfirmItem(currentItem.id)
     moveToNextUnconfirmed()
-  }, [currentItem, onSelectCandidate, onConfirmItem, moveToNextUnconfirmed])
+  }, [currentItem, onConfirmItem, moveToNextUnconfirmed])
 
   // PDF 보기 핸들러
   const handleViewPdf = useCallback((itemIndex: number) => {
@@ -188,6 +192,7 @@ export function SplitView({
             item={currentItem}
             isFocused={focusedPanel === 'right'}
             onSelectProduct={handleSelectProduct}
+            onConfirmItem={handleConfirmCurrentItem}
             selectedResultIndex={selectedResultIndex}
             onSelectResultIndex={setSelectedResultIndex}
           />
