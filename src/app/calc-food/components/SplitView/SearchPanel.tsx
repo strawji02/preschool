@@ -14,6 +14,7 @@ interface SearchPanelProps {
   onConfirmItem?: () => void // 확정 콜백 추가
   selectedResultIndex: number
   onSelectResultIndex: (index: number) => void
+  invoiceSupplierName?: string // 파일명에서 추출한 공급업체명
 }
 
 // 단위를 g으로 변환
@@ -78,6 +79,7 @@ export function SearchPanel({
   onConfirmItem,
   selectedResultIndex,
   onSelectResultIndex,
+  invoiceSupplierName = '업체',
 }: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -285,7 +287,7 @@ export function SearchPanel({
           'mt-1 text-sm',
           supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
         )}>
-          검색 대상: <span className="font-medium">동행 - {item.extracted_name}</span>
+          검색 대상: <span className="font-medium">{invoiceSupplierName} - {item.extracted_name}</span>
           {' : '}
           {formatCurrency(item.extracted_unit_price)} x {item.extracted_quantity}
           {' = '}

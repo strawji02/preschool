@@ -74,6 +74,7 @@ interface InvoicePanelProps {
   isFocused: boolean
   onViewPdf?: (itemIndex: number) => void // PDF 보기 콜백
   hasPdfPages?: boolean // PDF 페이지가 있는지 여부
+  invoiceSupplierName?: string // 파일명에서 추출한 공급업체명
 }
 
 export function InvoicePanel({
@@ -82,6 +83,7 @@ export function InvoicePanel({
   onSelectIndex,
   isFocused,
   onViewPdf,
+  invoiceSupplierName = '업체',
   hasPdfPages = false,
 }: InvoicePanelProps) {
   const listRef = useRef<HTMLDivElement>(null)
@@ -261,9 +263,9 @@ export function InvoicePanel({
 
                 return (
                   <div className="ml-12 mt-2 space-y-1 text-sm">
-                    {/* 동행 (원본) */}
+                    {/* 원본 (파일명에서 추출한 공급업체) */}
                     <p className="text-gray-700">
-                      <span className="font-medium text-gray-900">동행</span>
+                      <span className="font-medium text-gray-900">{invoiceSupplierName}</span>
                       {' - '}
                       {item.extracted_name}
                       {' : '}

@@ -119,6 +119,7 @@ export default function CalcFoodPage() {
             <SplitView
               items={state.items}
               pages={state.pages}
+              supplierName={state.supplierName || '업체'}
               onSelectCandidate={selectCandidate}
               onConfirmItem={confirmItem}
               onConfirmAllAutoMatched={confirmAllAutoMatched}

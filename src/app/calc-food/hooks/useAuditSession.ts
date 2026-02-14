@@ -40,13 +40,38 @@ export interface AuditState {
   totalPages: number
   error: string | null
   fileName: string | null
+  supplierName: string | null  // 파일명에서 추출한 공급업체명
   isReanalyzing: boolean
   reanalyzingPage: number | null
 }
 
+// 파일명에서 공급업체명 추출
+function extractSupplierName(fileName: string): string {
+  // 확장자 제거
+  const nameWithoutExt = fileName.replace(/\.(pdf|xlsx|xls)$/i, '')
+  
+  // "거래명세서", "거래명세", "명세서" 등을 제거하고 앞부분 추출
+  const patterns = [
+    /^(.+?)거래명세서/,
+    /^(.+?)거래명세/,
+    /^(.+?)명세서/,
+    /^(.+?)명세/,
+  ]
+  
+  for (const pattern of patterns) {
+    const match = nameWithoutExt.match(pattern)
+    if (match && match[1]) {
+      return match[1].trim()
+    }
+  }
+  
+  // 패턴 매칭 실패 시 파일명 그대로 사용 (확장자 제외)
+  return nameWithoutExt
+}
+
 // 액션 타입
 type AuditAction =
-  | { type: 'START_PROCESSING'; fileName: string; totalPages: number }
+  | { type: 'START_PROCESSING'; fileName: string; totalPages: number; supplierName: string }
   | { type: 'SET_SESSION_ID'; sessionId: string }
   | { type: 'SET_PAGES'; pages: PageImage[] }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
@@ -93,6 +118,7 @@ const initialState: AuditState = {
   totalPages: 0,
   error: null,
   fileName: null,
+  supplierName: null,
   isReanalyzing: false,
   reanalyzingPage: null,
 }
@@ -177,6 +203,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         ...initialState,
         status: 'processing',
         fileName: action.fileName,
+        supplierName: action.supplierName,
         totalPages: action.totalPages,
         processingPage: 0,
       }
@@ -376,7 +403,8 @@ export function useAuditSession() {
         throw new Error('지원하지 않는 파일 형식입니다. PDF, 이미지 또는 엑셀 파일을 업로드하세요.')
       }
 
-      dispatch({ type: 'START_PROCESSING', fileName, totalPages: pages.length })
+      const supplierName = extractSupplierName(fileName)
+      dispatch({ type: 'START_PROCESSING', fileName, totalPages: pages.length, supplierName })
       dispatch({ type: 'SET_PAGES', pages })
 
       // 2. 세션 초기화 API 호출
@@ -436,7 +464,8 @@ export function useAuditSession() {
   // 엑셀 파일 처리
   const processExcelFile = useCallback(async (file: File) => {
     try {
-      dispatch({ type: 'START_PROCESSING', fileName: file.name, totalPages: 1 })
+      const supplierName = extractSupplierName(file.name)
+      dispatch({ type: 'START_PROCESSING', fileName: file.name, totalPages: 1, supplierName })
 
       // 1. 클라이언트에서 엑셀 파싱
       const parseResult = await parseInvoiceExcel(file)

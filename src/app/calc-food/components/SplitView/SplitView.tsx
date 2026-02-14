@@ -14,6 +14,7 @@ import { PdfModal } from './PdfModal'
 interface SplitViewProps {
   items: ComparisonItem[]
   pages?: PageImage[] // PDF 페이지 이미지 (선택적)
+  supplierName?: string // 파일명에서 추출한 공급업체명
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
   onConfirmItem: (itemId: string) => void
   onConfirmAllAutoMatched: () => void
@@ -23,6 +24,7 @@ interface SplitViewProps {
 export function SplitView({
   items,
   pages = [],
+  supplierName = '업체',
   onSelectCandidate,
   onConfirmItem,
   onConfirmAllAutoMatched,
@@ -175,6 +177,7 @@ export function SplitView({
             onSelectIndex={setSelectedIndex}
             isFocused={focusedPanel === 'left'}
             onViewPdf={pages.length > 0 ? handleViewPdf : undefined}
+            invoiceSupplierName={supplierName}
           />
         </div>
 
@@ -195,6 +198,7 @@ export function SplitView({
             onConfirmItem={handleConfirmCurrentItem}
             selectedResultIndex={selectedResultIndex}
             onSelectResultIndex={setSelectedResultIndex}
+            invoiceSupplierName={supplierName}
           />
         </div>
       </div>
