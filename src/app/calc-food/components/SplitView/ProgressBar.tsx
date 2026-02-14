@@ -29,27 +29,27 @@ export function ProgressBar({ status }: ProgressBarProps) {
 
       {/* 상태 배지 */}
       <div className="flex items-center gap-4">
-        {/* 자동 확정 */}
+        {/* 확정 */}
         <div className="flex items-center gap-1.5">
           <CheckCircle size={16} className="text-green-500" />
           <span className="text-sm text-gray-600">
-            자동확정 <span className="font-semibold text-green-600">{status.autoConfirmed}</span>
+            확정 <span className="font-semibold text-green-600">{status.completed}</span>
           </span>
         </div>
 
-        {/* 수동 검토 필요 */}
-        <div className="flex items-center gap-1.5">
-          <AlertCircle size={16} className="text-amber-500" />
-          <span className="text-sm text-gray-600">
-            수동검토 <span className="font-semibold text-amber-600">{status.manualReview}</span>
-          </span>
-        </div>
-
-        {/* 남은 항목 */}
+        {/* 미확정 */}
         <div className="flex items-center gap-1.5">
           <Clock size={16} className="text-gray-400" />
           <span className="text-sm text-gray-600">
-            미완료 <span className="font-semibold text-gray-700">{status.total - status.completed}</span>
+            미확정 <span className="font-semibold text-gray-700">{status.total - status.completed}</span>
+          </span>
+        </div>
+
+        {/* 확정비율 */}
+        <div className="flex items-center gap-1.5">
+          <AlertCircle size={16} className="text-blue-500" />
+          <span className="text-sm text-gray-600">
+            확정비율 <span className="font-semibold text-blue-600">{percent}%</span>
           </span>
         </div>
       </div>

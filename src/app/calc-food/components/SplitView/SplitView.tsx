@@ -77,6 +77,28 @@ export function SplitView({
     moveToNextUnconfirmed()
   }, [currentItem, onConfirmItem, moveToNextUnconfirmed])
 
+  // 매칭 제거 핸들러 (변경 버튼)
+  const handleClearMatch = useCallback(() => {
+    if (!currentItem) return
+    // CJ와 신세계 매칭 모두 제거
+    const emptyMatch: SupplierMatch = {
+      id: '',
+      product_name: '',
+      standard_price: 0,
+      match_score: 0,
+      unit_normalized: undefined,
+      spec_quantity: undefined,
+      spec_unit: undefined,
+    }
+    // 현재 선택된 매칭을 빈 값으로 덮어쓰기
+    if (currentItem.cj_match) {
+      onSelectCandidate(currentItem.id, 'CJ', emptyMatch)
+    }
+    if (currentItem.ssg_match) {
+      onSelectCandidate(currentItem.id, 'SHINSEGAE', emptyMatch)
+    }
+  }, [currentItem, onSelectCandidate])
+
   // PDF 보기 핸들러
   const handleViewPdf = useCallback((itemIndex: number) => {
     if (pages.length === 0) return
@@ -196,6 +218,7 @@ export function SplitView({
             isFocused={focusedPanel === 'right'}
             onSelectProduct={handleSelectProduct}
             onConfirmItem={handleConfirmCurrentItem}
+            onClearMatch={handleClearMatch}
             selectedResultIndex={selectedResultIndex}
             onSelectResultIndex={setSelectedResultIndex}
             invoiceSupplierName={supplierName}

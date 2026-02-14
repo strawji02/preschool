@@ -373,22 +373,15 @@ export function SearchPanel({
               'mt-2 rounded-lg border-2 bg-white p-3',
               supplier === 'CJ' ? 'border-orange-300' : 'border-green-300'
             )}>
-              <div className="flex items-center justify-between gap-2">
-                <p className={cn(
-                  'font-medium',
-                  supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-                )}>
-                  {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
-                </p>
-                <p className={cn(
-                  'text-sm whitespace-nowrap',
-                  supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-                )}>
-                  {formatCurrency(currentMatch.standard_price)} x {supplierQty}
-                  {' = '}
-                  <span className="font-semibold">{formatCurrency(supplierTotal)}원</span>
-                </p>
-              </div>
+              <p className={cn(
+                'font-medium',
+                supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+              )}>
+                {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}{' '}
+                <span className="text-sm">
+                  {formatCurrency(currentMatch.standard_price)} x {supplierQty} = <span className="font-semibold">{formatCurrency(supplierTotal)}원</span>
+                </span>
+              </p>
             </div>
           </div>
         )
