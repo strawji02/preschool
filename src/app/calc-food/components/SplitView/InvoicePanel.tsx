@@ -4,7 +4,68 @@ import { useEffect, useRef } from 'react'
 import { Check, AlertCircle, Clock, FileText } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/format'
-import type { ComparisonItem } from '@/types/audit'
+import type { ComparisonItem, SupplierMatch } from '@/types/audit'
+
+// 단위를 g으로 변환
+function unitToGrams(unit: string): number {
+  const u = unit.toUpperCase()
+  if (u === 'KG') return 1000
+  if (u === 'G') return 1
+  if (u === 'L') return 1000 // 1L ≈ 1kg
+  if (u === 'ML') return 1
+  return 1
+}
+
+// 규격에서 수량과 단위 파싱 (예: "2KG/상" → { quantity: 2, unit: "KG" })
+function parseSpec(spec: string | undefined): { quantity: number; unit: string } | null {
+  if (!spec) return null
+  
+  // 패턴: 숫자 + 단위 (KG, G, L, ML 등)
+  const match = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
+  if (match) {
+    return {
+      quantity: parseFloat(match[1]),
+      unit: match[2].toUpperCase(),
+    }
+  }
+  return null
+}
+
+// 동행 총 수량(g) 계산
+function calculateInvoiceTotalGrams(item: ComparisonItem): number {
+  const specParsed = parseSpec(item.extracted_spec)
+  if (specParsed) {
+    return specParsed.quantity * unitToGrams(specParsed.unit) * item.extracted_quantity
+  }
+  // 파싱 실패 시 CJ나 신세계 규격 기준으로 추정
+  const match = item.cj_match || item.ssg_match
+  if (match?.spec_quantity && match?.spec_unit) {
+    return match.spec_quantity * unitToGrams(match.spec_unit) * item.extracted_quantity
+  }
+  return item.extracted_quantity // fallback
+}
+
+// 공급사 필요 수량 계산 (올림)
+function calculateSupplierQuantity(invoiceTotalGrams: number, match: SupplierMatch): number {
+  if (!match.spec_quantity || !match.spec_unit) return 1
+  const matchGrams = match.spec_quantity * unitToGrams(match.spec_unit)
+  return Math.ceil(invoiceTotalGrams / matchGrams)
+}
+
+// 동행 총 수량 포맷팅 (예: "2kg")
+function formatInvoiceTotalQuantity(item: ComparisonItem): string {
+  const specParsed = parseSpec(item.extracted_spec)
+  if (specParsed) {
+    const total = specParsed.quantity * item.extracted_quantity
+    return `${total}${specParsed.unit.toLowerCase()}`
+  }
+  const match = item.cj_match || item.ssg_match
+  if (match?.spec_quantity && match?.spec_unit) {
+    const total = match.spec_quantity * item.extracted_quantity
+    return `${total}${match.spec_unit.toLowerCase()}`
+  }
+  return '-'
+}
 
 interface InvoicePanelProps {
   items: ComparisonItem[]
@@ -160,9 +221,7 @@ export function InvoicePanel({
 
                 {/* 총수량 */}
                 <div className="flex items-center justify-center text-sm text-gray-600">
-                  {item.cj_match?.spec_quantity && item.cj_match?.spec_unit
-                    ? `(${item.cj_match.spec_quantity * item.extracted_quantity}${item.cj_match.spec_unit.toLowerCase()})`
-                    : '-'}
+                  ({formatInvoiceTotalQuantity(item)})
                 </div>
 
                 {/* 원본 보기 버튼 */}
@@ -188,67 +247,80 @@ export function InvoicePanel({
               </div>
 
               {/* 3줄 비교 표시 (상세 내용) */}
-              <div className="ml-12 mt-2 space-y-1 text-sm">
-                {/* 동행 (원본) */}
-                <p className="text-gray-700">
-                  <span className="font-medium text-gray-900">동행</span>
-                  {' - '}
-                  {item.extracted_name}
-                  {' : '}
-                  {formatCurrency(item.extracted_unit_price)} x {item.extracted_quantity}
-                  {' = '}
-                  {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}원
-                  {item.cj_match?.spec_quantity && item.cj_match?.spec_unit && (
-                    <span className="text-gray-500">
-                      {' '}({item.cj_match.spec_quantity * item.extracted_quantity}{item.cj_match.spec_unit.toLowerCase()})
-                    </span>
-                  )}
-                </p>
+              {(() => {
+                const invoiceTotalGrams = calculateInvoiceTotalGrams(item)
+                const invoiceTotalFormatted = formatInvoiceTotalQuantity(item)
+                
+                const cjQty = item.cj_match ? calculateSupplierQuantity(invoiceTotalGrams, item.cj_match) : 0
+                const cjTotal = item.cj_match ? item.cj_match.standard_price * cjQty : 0
+                const cjTotalQty = item.cj_match?.spec_quantity ? item.cj_match.spec_quantity * cjQty : 0
+                
+                const ssgQty = item.ssg_match ? calculateSupplierQuantity(invoiceTotalGrams, item.ssg_match) : 0
+                const ssgTotal = item.ssg_match ? item.ssg_match.standard_price * ssgQty : 0
+                const ssgTotalQty = item.ssg_match?.spec_quantity ? item.ssg_match.spec_quantity * ssgQty : 0
 
-                {/* CJ */}
-                {item.cj_match ? (
-                  <p className="text-orange-600">
-                    <span className="font-medium">CJ</span>
-                    {' - '}
-                    {item.cj_match.product_name}
-                    {' : '}
-                    {formatCurrency(item.cj_match.standard_price)}
-                    {' x '}
-                    {Math.ceil((item.cj_match.spec_quantity || 1) * item.extracted_quantity / (item.cj_match.spec_quantity || 1))}
-                    {' = '}
-                    {formatCurrency(item.cj_match.standard_price * Math.ceil((item.cj_match.spec_quantity || 1) * item.extracted_quantity / (item.cj_match.spec_quantity || 1)))}원
-                    {item.cj_match.spec_quantity && item.cj_match.spec_unit && (
-                      <span className="text-orange-400">
-                        {' '}({item.cj_match.spec_quantity * item.extracted_quantity}{item.cj_match.spec_unit.toLowerCase()})
+                return (
+                  <div className="ml-12 mt-2 space-y-1 text-sm">
+                    {/* 동행 (원본) */}
+                    <p className="text-gray-700">
+                      <span className="font-medium text-gray-900">동행</span>
+                      {' - '}
+                      {item.extracted_name}
+                      {' : '}
+                      {formatCurrency(item.extracted_unit_price)} x {item.extracted_quantity}
+                      {' = '}
+                      {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}원
+                      <span className="text-gray-500">
+                        {' '}({invoiceTotalFormatted})
                       </span>
-                    )}
-                  </p>
-                ) : (
-                  <p className="text-gray-400">CJ - 매칭 없음</p>
-                )}
+                    </p>
 
-                {/* 신세계 */}
-                {item.ssg_match ? (
-                  <p className="text-green-600">
-                    <span className="font-medium">신세계</span>
-                    {' - '}
-                    {item.ssg_match.product_name}
-                    {' : '}
-                    {formatCurrency(item.ssg_match.standard_price)}
-                    {' x '}
-                    {Math.ceil((item.ssg_match.spec_quantity || 1) * item.extracted_quantity / (item.ssg_match.spec_quantity || 1))}
-                    {' = '}
-                    {formatCurrency(item.ssg_match.standard_price * Math.ceil((item.ssg_match.spec_quantity || 1) * item.extracted_quantity / (item.ssg_match.spec_quantity || 1)))}원
-                    {item.ssg_match.spec_quantity && item.ssg_match.spec_unit && (
-                      <span className="text-green-400">
-                        {' '}({item.ssg_match.spec_quantity * item.extracted_quantity}{item.ssg_match.spec_unit.toLowerCase()})
-                      </span>
+                    {/* CJ */}
+                    {item.cj_match ? (
+                      <p className="text-orange-600">
+                        <span className="font-medium">CJ</span>
+                        {' - '}
+                        {item.cj_match.product_name}
+                        {' : '}
+                        {formatCurrency(item.cj_match.standard_price)}
+                        {' x '}
+                        {cjQty}
+                        {' = '}
+                        {formatCurrency(cjTotal)}원
+                        {item.cj_match.spec_unit && (
+                          <span className="text-orange-400">
+                            {' '}({cjTotalQty}{item.cj_match.spec_unit.toLowerCase()})
+                          </span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-gray-400">CJ - 매칭 없음</p>
                     )}
-                  </p>
-                ) : (
-                  <p className="text-gray-400">신세계 - 매칭 없음</p>
-                )}
-              </div>
+
+                    {/* 신세계 */}
+                    {item.ssg_match ? (
+                      <p className="text-green-600">
+                        <span className="font-medium">신세계</span>
+                        {' - '}
+                        {item.ssg_match.product_name}
+                        {' : '}
+                        {formatCurrency(item.ssg_match.standard_price)}
+                        {' x '}
+                        {ssgQty}
+                        {' = '}
+                        {formatCurrency(ssgTotal)}원
+                        {item.ssg_match.spec_unit && (
+                          <span className="text-green-400">
+                            {' '}({ssgTotalQty}{item.ssg_match.spec_unit.toLowerCase()})
+                          </span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-gray-400">신세계 - 매칭 없음</p>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )
         })}
