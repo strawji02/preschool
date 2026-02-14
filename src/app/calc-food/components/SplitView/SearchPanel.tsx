@@ -10,8 +10,9 @@ import type { ComparisonItem, SupplierMatch, MatchCandidate } from '@/types/audi
 interface SearchPanelProps {
   item: ComparisonItem | null
   isFocused: boolean
-  onSelectProduct: (product: SupplierMatch) => void
+  onSelectProduct: (product: SupplierMatch, supplier: 'CJ' | 'SHINSEGAE') => void
   onConfirmItem?: () => void // 확정 콜백 추가
+  onClearMatch?: () => void // 변경(매칭 제거) 콜백 추가
   selectedResultIndex: number
   onSelectResultIndex: (index: number) => void
   invoiceSupplierName?: string // 파일명에서 추출한 공급업체명
@@ -50,17 +51,39 @@ function calculateInvoiceTotalGrams(item: ComparisonItem): number {
   return item.extracted_quantity
 }
 
-// 동행 총 수량 포맷팅
+// 동행 총 수량 포맷팅 (1kg 미만은 g으로 표시)
 function formatInvoiceTotalQuantity(item: ComparisonItem): string {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
     const total = specParsed.quantity * item.extracted_quantity
-    return `${total}${specParsed.unit.toLowerCase()}`
+    const unit = specParsed.unit.toUpperCase()
+
+    // KG이고 1 미만이면 g으로 변환
+    if (unit === 'KG' && total < 1) {
+      return `${total * 1000}g`
+    }
+    // L이고 1 미만이면 ml로 변환
+    if (unit === 'L' && total < 1) {
+      return `${total * 1000}ml`
+    }
+
+    return `${total}${unit.toLowerCase()}`
   }
   const match = item.cj_match || item.ssg_match
   if (match?.spec_quantity && match?.spec_unit) {
     const total = match.spec_quantity * item.extracted_quantity
-    return `${total}${match.spec_unit.toLowerCase()}`
+    const unit = match.spec_unit.toUpperCase()
+
+    // KG이고 1 미만이면 g으로 변환
+    if (unit === 'KG' && total < 1) {
+      return `${total * 1000}g`
+    }
+    // L이고 1 미만이면 ml로 변환
+    if (unit === 'L' && total < 1) {
+      return `${total * 1000}ml`
+    }
+
+    return `${total}${unit.toLowerCase()}`
   }
   return `${item.extracted_quantity}`
 }
@@ -77,6 +100,7 @@ export function SearchPanel({
   isFocused,
   onSelectProduct,
   onConfirmItem,
+  onClearMatch,
   selectedResultIndex,
   onSelectResultIndex,
   invoiceSupplierName = '업체',
@@ -177,7 +201,7 @@ export function SearchPanel({
       spec_quantity: product.spec_quantity,
       spec_unit: product.spec_unit,
     }
-    onSelectProduct(supplierMatch)
+    onSelectProduct(supplierMatch, supplier)
   }
 
   // g당 단가 계산
@@ -316,45 +340,55 @@ export function SearchPanel({
                 <CheckCircle size={18} className={supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'} />
                 <span className="font-semibold text-gray-800">선택된 품목</span>
               </div>
-              {onConfirmItem && !item.is_confirmed && (
-                <button
-                  onClick={onConfirmItem}
-                  className={cn(
-                    'rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors',
-                    supplier === 'CJ'
-                      ? 'bg-orange-600 hover:bg-orange-700'
-                      : 'bg-green-600 hover:bg-green-700'
-                  )}
-                >
-                  ✓ 확정
-                </button>
-              )}
-              {item.is_confirmed && (
-                <span className="rounded-lg bg-green-500 px-3 py-1 text-sm font-medium text-white">
-                  ✓ 확정됨
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {onClearMatch && (
+                  <button
+                    onClick={onClearMatch}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    변경
+                  </button>
+                )}
+                {onConfirmItem && !item.is_confirmed && (
+                  <button
+                    onClick={onConfirmItem}
+                    className={cn(
+                      'rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors',
+                      supplier === 'CJ'
+                        ? 'bg-orange-600 hover:bg-orange-700'
+                        : 'bg-green-600 hover:bg-green-700'
+                    )}
+                  >
+                    ✓ 확정
+                  </button>
+                )}
+                {item.is_confirmed && (
+                  <span className="rounded-lg bg-green-500 px-3 py-1 text-sm font-medium text-white">
+                    ✓ 확정됨
+                  </span>
+                )}
+              </div>
             </div>
             <div className={cn(
               'mt-2 rounded-lg border-2 bg-white p-3',
               supplier === 'CJ' ? 'border-orange-300' : 'border-green-300'
             )}>
-              <p className={cn(
-                'font-medium',
-                supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-              )}>
-                {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
-              </p>
-              <p className="mt-1 text-sm text-gray-600">
-                {formatCurrency(currentMatch.standard_price)} x {supplierQty}
-                {' = '}
-                <span className="font-semibold">{formatCurrency(supplierTotal)}원</span>
-                {currentMatch.spec_unit && (
-                  <span className="text-gray-500">
-                    {' '}({supplierTotalQty}{currentMatch.spec_unit.toLowerCase()})
-                  </span>
-                )}
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className={cn(
+                  'font-medium',
+                  supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+                )}>
+                  {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
+                </p>
+                <p className={cn(
+                  'text-sm whitespace-nowrap',
+                  supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+                )}>
+                  {formatCurrency(currentMatch.standard_price)} x {supplierQty}
+                  {' = '}
+                  <span className="font-semibold">{formatCurrency(supplierTotal)}원</span>
+                </p>
+              </div>
             </div>
           </div>
         )
@@ -546,6 +580,11 @@ export function SearchPanel({
                     <span className="truncate font-medium text-gray-900">
                       {product.product_name}
                     </span>
+                    {product.spec_quantity && product.spec_unit && (
+                      <span className="text-xs text-gray-500">
+                        ({product.spec_quantity}{product.spec_unit.toLowerCase()})
+                      </span>
+                    )}
                     <span className="text-xs text-gray-400">
                       ({Math.round(product.match_score * 100)}%)
                     </span>

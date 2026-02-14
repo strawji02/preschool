@@ -65,9 +65,9 @@ export function SplitView({
   }, [items, selectedIndex])
 
   // 상품 선택 핸들러 (선택만, 확정은 별도)
-  const handleSelectProduct = useCallback((product: SupplierMatch) => {
+  const handleSelectProduct = useCallback((product: SupplierMatch, supplier: Supplier) => {
     if (!currentItem) return
-    onSelectCandidate(currentItem.id, 'CJ', product)
+    onSelectCandidate(currentItem.id, supplier, product)
   }, [currentItem, onSelectCandidate])
 
   // 현재 품목 확정 핸들러
