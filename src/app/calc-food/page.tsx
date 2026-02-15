@@ -70,7 +70,12 @@ export default function CalcFoodPage() {
 
             <div className="h-6 w-px bg-gray-300" />
 
-            <h1 className="text-lg font-semibold text-gray-900">식자재 단가 비교</h1>
+            <h1 className="text-lg font-semibold text-gray-900">
+              식자재 단가 비교
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                ({process.env.NEXT_PUBLIC_BUILD_TIME || '빌드 시간'})
+              </span>
+            </h1>
 
             {/* 현재 단계 표시 */}
             {state.status === 'analysis' && (
