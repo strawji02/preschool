@@ -399,11 +399,15 @@ export function SearchPanel({
               )}>
                 {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
               </p>
-              {/* 수량 계산 수식 표시 */}
+              {/* 수량 계산 수식 표시 - 그램 기준으로 상세히 */}
               <div className="mt-2 space-y-1 text-sm text-gray-600">
-                <p>• 동행 총 수량: <span className="font-medium text-gray-800">{invoiceUnit}</span></p>
+                <p>• 동행 총 수량: <span className="font-medium text-gray-800">
+                  {item.extracted_quantity}개 × {matchUnit} = {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`}
+                </span></p>
                 <p>• 공급사 규격: <span className="font-medium text-gray-800">{matchUnit}/EA</span></p>
-                <p>• 필요 수량: <span className="font-medium text-blue-600">{invoiceUnit} ÷ {matchUnit} = {supplierQty}개</span></p>
+                <p>• 필요 수량: <span className="font-medium text-blue-600">
+                  {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`} ÷ {matchUnit} = {supplierQty}개
+                </span></p>
               </div>
               {/* 총액 */}
               <div className="mt-2 pt-2 border-t border-gray-200">
