@@ -335,18 +335,76 @@ export function SearchPanel({
             현재 단가: <span className="font-bold">{formatCurrency(item.extracted_unit_price)}</span>
           </div>
         </div>
-        {/* 검색 대상: 동행 정보 표시 */}
-        <p className={cn(
-          'mt-1 text-sm',
-          supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
-        )}>
-          검색 대상: <span className="font-medium">{invoiceSupplierName} - {item.extracted_name}</span>
-          {' : '}
-          {formatCurrency(item.extracted_unit_price)} x {item.extracted_quantity}
-          {' = '}
-          {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}원
-          {' '}({formatInvoiceTotalQuantity(item)})
-        </p>
+        {/* 검색 대상: 동행 거래명세서 정보 표시 */}
+        <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className={cn(
+              'text-xs font-semibold',
+              supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+            )}>
+              📋 검색 대상 (거래명세서)
+            </span>
+            <span className="text-xs text-gray-500">
+              {invoiceSupplierName}
+            </span>
+          </div>
+
+          {/* 정보 그리드 */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            {/* 품명 */}
+            <div className="col-span-2">
+              <span className="text-gray-600">품명:</span>
+              <span className="ml-2 font-semibold text-gray-900">
+                {item.extracted_name}
+              </span>
+            </div>
+
+            {/* 규격 */}
+            {item.extracted_spec && (
+              <div>
+                <span className="text-gray-600">규격:</span>
+                <span className="ml-2 font-medium text-gray-800">
+                  {item.extracted_spec}
+                </span>
+              </div>
+            )}
+
+            {/* 총 수량 */}
+            <div>
+              <span className="text-gray-600">총 수량:</span>
+              <span className="ml-2 font-medium text-blue-600">
+                {formatInvoiceTotalQuantity(item)}
+              </span>
+            </div>
+
+            {/* 수량 */}
+            <div>
+              <span className="text-gray-600">수량:</span>
+              <span className="ml-2 font-medium text-gray-800">
+                {item.extracted_quantity}
+              </span>
+            </div>
+
+            {/* 단가 */}
+            <div>
+              <span className="text-gray-600">단가:</span>
+              <span className="ml-2 font-semibold text-gray-900">
+                {formatCurrency(item.extracted_unit_price)}
+              </span>
+            </div>
+
+            {/* 금액 */}
+            <div className="col-span-2 border-t border-gray-200 pt-2">
+              <span className="text-gray-600">금액:</span>
+              <span className={cn(
+                'ml-2 text-base font-bold',
+                supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
+              )}>
+                {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}원
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 선택된 품목 영역 */}
