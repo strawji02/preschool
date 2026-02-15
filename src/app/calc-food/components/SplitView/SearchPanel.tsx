@@ -90,11 +90,12 @@ function formatInvoiceTotalQuantity(item: ComparisonItem): string {
   return `${item.extracted_quantity}`
 }
 
-// 공급사 필요 수량 계산 (올림)
-function calculateSupplierQuantity(invoiceTotalGrams: number, match: SupplierMatch): number {
+// 공급사 필요 수량 계산 (소수점 1자리까지 - 올림 안함)
+function calculateSupplierQuantityExact(invoiceTotalGrams: number, match: SupplierMatch): number {
   if (!match.spec_quantity || !match.spec_unit) return 1
   const matchGrams = match.spec_quantity * unitToGrams(match.spec_unit)
-  return Math.ceil(invoiceTotalGrams / matchGrams)
+  // 소수점 1자리까지 반올림
+  return Math.round((invoiceTotalGrams / matchGrams) * 10) / 10
 }
 
 export function SearchPanel({
@@ -331,9 +332,16 @@ export function SearchPanel({
         if (!currentMatch) return null
 
         const invoiceTotalGrams = calculateInvoiceTotalGrams(item, supplier)
-        const supplierQty = calculateSupplierQuantity(invoiceTotalGrams, currentMatch)
+        const supplierQty = calculateSupplierQuantityExact(invoiceTotalGrams, currentMatch)
         const supplierTotal = currentMatch.standard_price * supplierQty
-        const supplierTotalQty = (currentMatch.spec_quantity || 1) * supplierQty
+        
+        // 수량 계산에 필요한 정보
+        const matchGrams = (currentMatch.spec_quantity || 1) * unitToGrams(currentMatch.spec_unit || 'G')
+        const invoiceSpec = parseSpec(item.extracted_spec)
+        const invoiceUnit = invoiceSpec ? `${invoiceSpec.quantity * item.extracted_quantity}${invoiceSpec.unit.toLowerCase()}` : `${item.extracted_quantity}개`
+        const matchUnit = currentMatch.spec_quantity && currentMatch.spec_unit 
+          ? `${currentMatch.spec_quantity}${currentMatch.spec_unit.toLowerCase()}`
+          : '1개'
 
         // 공급사별 확정 상태 체크
         const isConfirmed = supplier === 'CJ' ? item.cj_confirmed : item.ssg_confirmed
@@ -384,15 +392,31 @@ export function SearchPanel({
               'mt-2 rounded-lg border-2 bg-white p-3',
               supplier === 'CJ' ? 'border-orange-300' : 'border-green-300'
             )}>
+              {/* 상품명 */}
               <p className={cn(
                 'font-medium',
                 supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
               )}>
-                {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}{' '}
-                <span className="text-sm">
-                  {formatCurrency(currentMatch.standard_price)} x {supplierQty} = <span className="font-semibold">{formatCurrency(supplierTotal)}원</span>
-                </span>
+                {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
               </p>
+              {/* 수량 계산 수식 표시 */}
+              <div className="mt-2 space-y-1 text-sm text-gray-600">
+                <p>• 동행 총 수량: <span className="font-medium text-gray-800">{invoiceUnit}</span></p>
+                <p>• 공급사 규격: <span className="font-medium text-gray-800">{matchUnit}/EA</span></p>
+                <p>• 필요 수량: <span className="font-medium text-blue-600">{invoiceUnit} ÷ {matchUnit} = {supplierQty}개</span></p>
+              </div>
+              {/* 총액 */}
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <p className="text-sm">
+                  총액: {formatCurrency(currentMatch.standard_price)} × {supplierQty} = 
+                  <span className={cn(
+                    'ml-1 font-bold text-base',
+                    supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+                  )}>
+                    {formatCurrency(supplierTotal)}원
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
         )
@@ -589,9 +613,6 @@ export function SearchPanel({
                         ({product.spec_quantity}{product.spec_unit.toLowerCase()})
                       </span>
                     )}
-                    <span className="text-xs text-gray-400">
-                      ({Math.round(product.match_score * 100)}%)
-                    </span>
                   </div>
 
                   <div className="mt-1 flex items-center gap-4 text-sm text-gray-500">
