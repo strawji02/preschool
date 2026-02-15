@@ -335,79 +335,31 @@ export function SearchPanel({
             현재 단가: <span className="font-bold">{formatCurrency(item.extracted_unit_price)}</span>
           </div>
         </div>
-        {/* 검색 대상: 동행 거래명세서 정보 표시 */}
-        <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
-          <div className="mb-2 flex items-center gap-2">
-            <span className={cn(
-              'text-xs font-semibold',
-              supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-            )}>
-              📋 검색 대상 (거래명세서)
+        {/* 검색 대상: 동행 거래명세서 정보 표시 - 초컴팩트 버전 (1줄) */}
+        <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500">📋</span>
+            <span className="font-semibold text-gray-900 truncate max-w-[180px]" title={item.extracted_name}>
+              {item.extracted_name}
             </span>
-            <span className="text-xs text-gray-500">
-              {invoiceSupplierName}
+            <span className="text-gray-400">|</span>
+            <span className="text-gray-600">
+              {item.extracted_spec && `${item.extracted_spec} × `}{item.extracted_quantity}개
+              {formatInvoiceTotalQuantity(item) !== `${item.extracted_quantity}` && (
+                <span className="ml-1 text-blue-600">({formatInvoiceTotalQuantity(item)})</span>
+              )}
             </span>
           </div>
-
-          {/* 정보 그리드 */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            {/* 품명 */}
-            <div className="col-span-2">
-              <span className="text-gray-600">품명:</span>
-              <span className="ml-2 font-semibold text-gray-900">
-                {item.extracted_name}
-              </span>
-            </div>
-
-            {/* 규격 */}
-            {item.extracted_spec && (
-              <div>
-                <span className="text-gray-600">규격:</span>
-                <span className="ml-2 font-medium text-gray-800">
-                  {item.extracted_spec}
-                </span>
-              </div>
-            )}
-
-            {/* 총 수량 */}
-            <div>
-              <span className="text-gray-600">총 수량:</span>
-              <span className="ml-2 font-medium text-blue-600">
-                {formatInvoiceTotalQuantity(item)}
-              </span>
-            </div>
-
-            {/* 수량 */}
-            <div>
-              <span className="text-gray-600">수량:</span>
-              <span className="ml-2 font-medium text-gray-800">
-                {item.extracted_quantity}
-              </span>
-            </div>
-
-            {/* 단가 */}
-            <div>
-              <span className="text-gray-600">단가:</span>
-              <span className="ml-2 font-semibold text-gray-900">
-                {formatCurrency(item.extracted_unit_price)}
-              </span>
-            </div>
-
-            {/* 금액 */}
-            <div className="col-span-2 border-t border-gray-200 pt-2">
-              <span className="text-gray-600">금액:</span>
-              <span className={cn(
-                'ml-2 text-base font-bold',
-                supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
-              )}>
-                {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}원
-              </span>
-            </div>
-          </div>
+          <span className={cn(
+            'text-sm font-bold whitespace-nowrap',
+            supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'
+          )}>
+            {formatCurrency(item.extracted_unit_price * item.extracted_quantity)}
+          </span>
         </div>
       </div>
 
-      {/* 선택된 품목 영역 */}
+      {/* 선택된 품목 영역 - 초컴팩트 버전 */}
       {(() => {
         const currentMatch = supplier === 'CJ' ? item.cj_match : item.ssg_match
         if (!currentMatch) return null
@@ -415,16 +367,6 @@ export function SearchPanel({
         const invoiceTotalGrams = calculateInvoiceTotalGrams(item, supplier)
         const supplierQty = calculateSupplierQuantityExact(invoiceTotalGrams, currentMatch)
         const supplierTotal = currentMatch.standard_price * supplierQty
-        
-        // 수량 계산에 필요한 정보
-        const matchGrams = (currentMatch.spec_quantity || 1) * unitToGrams(currentMatch.spec_unit || 'G')
-        const invoiceSpec = parseSpec(item.extracted_spec)
-        const packSize = getPackSize(item.extracted_spec)
-        
-        // 동행 규격 표시용 (파싱 가능하면 동행 규격, 아니면 원본 spec 그대로)
-        const invoiceUnitDisplay = invoiceSpec 
-          ? `${invoiceSpec.quantity}${invoiceSpec.unit.toLowerCase()}${packSize > 1 ? ` × ${packSize}묶음` : ''}`
-          : (item.extracted_spec || '(규격 없음)')
         
         // 공급사 규격 표시용
         const matchUnit = currentMatch.spec_quantity && currentMatch.spec_unit 
@@ -436,19 +378,45 @@ export function SearchPanel({
 
         return (
           <div className={cn(
-            'border-b p-4',
+            'border-b px-4 py-2',
             supplier === 'CJ' ? 'bg-orange-100' : 'bg-green-100'
           )}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckCircle size={18} className={supplier === 'CJ' ? 'text-orange-600' : 'text-green-600'} />
-                <span className="font-semibold text-gray-800">선택된 품목</span>
+            {/* 한 줄에 모든 정보 + 버튼 */}
+            <div className="flex items-center gap-3">
+              <CheckCircle size={16} className={cn('flex-shrink-0', supplier === 'CJ' ? 'text-orange-600' : 'text-green-600')} />
+              
+              {/* 품목 정보 (유연하게 확장) */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className={cn(
+                    'font-medium truncate max-w-[200px]',
+                    supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+                  )} title={currentMatch.product_name}>
+                    {currentMatch.product_name}
+                  </span>
+                  <span className="text-gray-400">·</span>
+                  <span className="text-gray-600 whitespace-nowrap">
+                    {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${Math.round(invoiceTotalGrams)}g`}
+                    <span className="mx-1">→</span>
+                    <span className="font-medium text-blue-600">{supplierQty}개</span>
+                    <span className="text-gray-400 mx-1">({matchUnit})</span>
+                  </span>
+                  <span className="text-gray-400">=</span>
+                  <span className={cn(
+                    'font-bold whitespace-nowrap',
+                    supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
+                  )}>
+                    {formatCurrency(supplierTotal)}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* 버튼들 */}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
                 {onClearMatch && (
                   <button
                     onClick={() => onClearMatch(supplier)}
-                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                    className="rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                   >
                     변경
                   </button>
@@ -460,7 +428,7 @@ export function SearchPanel({
                       onMoveToNext?.()
                     }}
                     className={cn(
-                      'rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors',
+                      'rounded px-2.5 py-1 text-xs font-medium text-white',
                       supplier === 'CJ'
                         ? 'bg-orange-600 hover:bg-orange-700'
                         : 'bg-green-600 hover:bg-green-700'
@@ -470,44 +438,10 @@ export function SearchPanel({
                   </button>
                 )}
                 {isConfirmed && (
-                  <span className="rounded-lg bg-green-500 px-3 py-1 text-sm font-medium text-white">
+                  <span className="rounded bg-green-500 px-2 py-1 text-xs font-medium text-white">
                     ✓ 확정됨
                   </span>
                 )}
-              </div>
-            </div>
-            <div className={cn(
-              'mt-2 rounded-lg border-2 bg-white p-3',
-              supplier === 'CJ' ? 'border-orange-300' : 'border-green-300'
-            )}>
-              {/* 상품명 */}
-              <p className={cn(
-                'font-medium',
-                supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-              )}>
-                {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
-              </p>
-              {/* 수량 계산 수식 표시 - 그램 기준으로 상세히 */}
-              <div className="mt-2 space-y-1 text-sm text-gray-600">
-                <p>• 동행 총 수량: <span className="font-medium text-gray-800">
-                  {item.extracted_quantity}개 × {invoiceUnitDisplay} = {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${Math.round(invoiceTotalGrams)}g`}
-                </span></p>
-                <p>• 공급사 규격: <span className="font-medium text-gray-800">{matchUnit}/EA</span></p>
-                <p>• 필요 수량: <span className="font-medium text-blue-600">
-                  {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${Math.round(invoiceTotalGrams)}g`} ÷ {matchUnit} = {supplierQty}개
-                </span></p>
-              </div>
-              {/* 총액 */}
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <p className="text-sm">
-                  총액: {formatCurrency(currentMatch.standard_price)} × {supplierQty} = 
-                  <span className={cn(
-                    'ml-1 font-bold text-base',
-                    supplier === 'CJ' ? 'text-orange-700' : 'text-green-700'
-                  )}>
-                    {formatCurrency(supplierTotal)}원
-                  </span>
-                </p>
               </div>
             </div>
           </div>
