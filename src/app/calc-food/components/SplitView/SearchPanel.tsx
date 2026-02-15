@@ -39,11 +39,22 @@ function parseSpec(spec: string | undefined): { quantity: number; unit: string }
   return null
 }
 
+// 묶음 수량 추출 (별도 함수 - 기존 로직에 영향 없음)
+// 예: "65ML*5EA" → 5, "2KG/상" → 1
+function getPackSize(spec: string | undefined): number {
+  if (!spec) return 1
+  // 패턴: *5EA, ×5, *5입, *5개, X5 등
+  const packMatch = spec.match(/[*×xX]\s*(\d+)\s*(EA|입|개)?/i)
+  return packMatch ? parseInt(packMatch[1]) : 1
+}
+
 // 동행 총 수량(g) 계산 - supplier 파라미터 추가
 function calculateInvoiceTotalGrams(item: ComparisonItem, supplier: 'CJ' | 'SHINSEGAE'): number {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    return specParsed.quantity * unitToGrams(specParsed.unit) * item.extracted_quantity
+    const packSize = getPackSize(item.extracted_spec)
+    // 묶음 수량이 있으면 적용, 없으면 기존 로직 (packSize = 1)
+    return specParsed.quantity * unitToGrams(specParsed.unit) * packSize * item.extracted_quantity
   }
   // 현재 supplier에 맞는 match 사용
   const match = supplier === 'CJ' ? item.cj_match : item.ssg_match
@@ -57,7 +68,8 @@ function calculateInvoiceTotalGrams(item: ComparisonItem, supplier: 'CJ' | 'SHIN
 function formatInvoiceTotalQuantity(item: ComparisonItem): string {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    const total = specParsed.quantity * item.extracted_quantity
+    const packSize = getPackSize(item.extracted_spec)
+    const total = specParsed.quantity * packSize * item.extracted_quantity
     const unit = specParsed.unit.toUpperCase()
 
     // KG이고 1 미만이면 g으로 변환
