@@ -327,9 +327,10 @@ export async function findComparisonMatches(
     let cj_candidates: SupplierMatch[]
     let ssg_candidates: SupplierMatch[]
 
-    // 깔때기 알고리즘 임시 비활성화 (디버깅용)
-    // TODO: 에러 해결 후 재활성화
-    const FUNNEL_ENABLED = true  // 활성화 (에러 시 fallback 사용)
+    // 깔때기 알고리즘 비활성화 - 상품명 관련성 무시 문제로 인해 비활성화
+    // 문제: 깻잎 검색 시 "국내산명엽채"가 선택되는 등 엉뚱한 상품이 매칭됨
+    // TODO: 상품명 유사도를 반영하도록 깔때기 알고리즘 개선 후 재활성화
+    const FUNNEL_ENABLED = false  // 비활성화 - 원본 검색 결과 사용
     if (FUNNEL_ENABLED && extractedItem) {
       const invoiceItem = extractedItemToInvoiceItem(extractedItem)
       console.log(`  [Funnel] Applying funnel algorithm for: ${invoiceItem.itemName}`)
