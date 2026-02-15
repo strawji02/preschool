@@ -16,18 +16,24 @@ function unitToGrams(unit: string): number {
   return 1
 }
 
-// 규격에서 수량과 단위 파싱 (예: "2KG/상" → { quantity: 2, unit: "KG" })
+// 규격에서 수량과 단위 파싱
+// 예: "2KG/상" → { quantity: 2, unit: 'KG' }
+// 예: "KG/톡" → { quantity: 1, unit: 'KG' } (숫자 없으면 1로 간주)
 function parseSpec(spec: string | undefined): { quantity: number; unit: string } | null {
   if (!spec) return null
   
-  // 패턴: 숫자 + 단위 (KG, G, L, ML 등)
-  const match = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
-  if (match) {
-    return {
-      quantity: parseFloat(match[1]),
-      unit: match[2].toUpperCase(),
-    }
+  // 먼저 숫자+단위 패턴 시도 (예: 2KG, 500G)
+  const matchWithNumber = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
+  if (matchWithNumber) {
+    return { quantity: parseFloat(matchWithNumber[1]), unit: matchWithNumber[2].toUpperCase() }
   }
+  
+  // 숫자 없이 단위만 있는 경우 (예: KG/톡, KG) → quantity = 1
+  const matchUnitOnly = spec.match(/^(KG|G|L|ML)(?:\/|$|\s)/i)
+  if (matchUnitOnly) {
+    return { quantity: 1, unit: matchUnitOnly[1].toUpperCase() }
+  }
+  
   return null
 }
 
