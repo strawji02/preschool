@@ -84,7 +84,7 @@ type AuditAction =
   // 2-Step Workflow 액션 (새로 추가)
   | { type: 'SET_STEP'; step: AnalysisStep }
   | { type: 'SELECT_CANDIDATE'; itemId: string; supplier: Supplier; candidate: SupplierMatch }
-  | { type: 'CONFIRM_ITEM'; itemId: string }
+  | { type: 'CONFIRM_ITEM'; itemId: string; supplier?: Supplier }  // supplier 추가
   | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
   | { type: 'PROCEED_TO_REPORT' }
   | { type: 'BACK_TO_MATCHING' }
@@ -218,7 +218,13 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
       return { ...state, processingPage: action.page }
 
     case 'ADD_PAGE_ITEMS': {
-      const newItems = [...state.items, ...action.items]
+      // 새 아이템에 공급사별 확정 필드 초기화
+      const itemsWithConfirmation = action.items.map(item => ({
+        ...item,
+        cj_confirmed: item.cj_confirmed ?? false,
+        ssg_confirmed: item.ssg_confirmed ?? false,
+      }))
+      const newItems = [...state.items, ...itemsWithConfirmation]
       return {
         ...state,
         items: newItems,
@@ -307,10 +313,27 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'CONFIRM_ITEM': {
       const newItems = state.items.map((item) => {
         if (item.id !== action.itemId) return item
-        // 토글: 이미 확정되어 있으면 해제, 아니면 확정
+
+        // 공급사별 확정 처리
+        if (action.supplier) {
+          const updatedItem = { ...item }
+          if (action.supplier === 'CJ') {
+            updatedItem.cj_confirmed = !item.cj_confirmed
+          } else {
+            updatedItem.ssg_confirmed = !item.ssg_confirmed
+          }
+          // 전체 확정 여부: 둘 중 하나라도 확정되면 true
+          updatedItem.is_confirmed = updatedItem.cj_confirmed || updatedItem.ssg_confirmed
+          updatedItem.match_status = updatedItem.is_confirmed ? 'manual_matched' as const : item.match_status
+          return updatedItem
+        }
+
+        // supplier가 없으면 기존 방식 (전체 토글)
         return {
           ...item,
           is_confirmed: !item.is_confirmed,
+          cj_confirmed: !item.is_confirmed,
+          ssg_confirmed: !item.is_confirmed,
           match_status: item.is_confirmed ? item.match_status : 'manual_matched' as const
         }
       })
@@ -560,8 +583,8 @@ export function useAuditSession() {
     []
   )
 
-  const confirmItem = useCallback((itemId: string) => {
-    dispatch({ type: 'CONFIRM_ITEM', itemId })
+  const confirmItem = useCallback((itemId: string, supplier?: Supplier) => {
+    dispatch({ type: 'CONFIRM_ITEM', itemId, supplier })
   }, [])
 
   const confirmAllAutoMatched = useCallback(() => {

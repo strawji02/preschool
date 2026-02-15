@@ -16,7 +16,7 @@ interface SplitViewProps {
   pages?: PageImage[] // PDF 페이지 이미지 (선택적)
   supplierName?: string // 파일명에서 추출한 공급업체명
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
-  onConfirmItem: (itemId: string) => void
+  onConfirmItem: (itemId: string, supplier?: Supplier) => void
   onConfirmAllAutoMatched: () => void
   onProceedToReport: () => void
 }
@@ -70,17 +70,9 @@ export function SplitView({
     onSelectCandidate(currentItem.id, supplier, product)
   }, [currentItem, onSelectCandidate])
 
-  // 현재 품목 확정 핸들러
-  const handleConfirmCurrentItem = useCallback(() => {
+  // 매칭 제거 핸들러 (변경 버튼) - supplier 파라미터 추가
+  const handleClearMatch = useCallback((supplier: Supplier) => {
     if (!currentItem) return
-    onConfirmItem(currentItem.id)
-    moveToNextUnconfirmed()
-  }, [currentItem, onConfirmItem, moveToNextUnconfirmed])
-
-  // 매칭 제거 핸들러 (변경 버튼)
-  const handleClearMatch = useCallback(() => {
-    if (!currentItem) return
-    // CJ와 신세계 매칭 모두 제거
     const emptyMatch: SupplierMatch = {
       id: '',
       product_name: '',
@@ -90,13 +82,8 @@ export function SplitView({
       spec_quantity: undefined,
       spec_unit: undefined,
     }
-    // 현재 선택된 매칭을 빈 값으로 덮어쓰기
-    if (currentItem.cj_match) {
-      onSelectCandidate(currentItem.id, 'CJ', emptyMatch)
-    }
-    if (currentItem.ssg_match) {
-      onSelectCandidate(currentItem.id, 'SHINSEGAE', emptyMatch)
-    }
+    // 해당 supplier의 매칭만 제거
+    onSelectCandidate(currentItem.id, supplier, emptyMatch)
   }, [currentItem, onSelectCandidate])
 
   // PDF 보기 핸들러
@@ -135,7 +122,7 @@ export function SplitView({
             break
           case 'Enter':
             e.preventDefault()
-            if (currentItem && !currentItem.is_confirmed) {
+            if (currentItem) {
               onConfirmItem(currentItem.id)
               moveToNextUnconfirmed()
             }
@@ -217,8 +204,9 @@ export function SplitView({
             item={currentItem}
             isFocused={focusedPanel === 'right'}
             onSelectProduct={handleSelectProduct}
-            onConfirmItem={handleConfirmCurrentItem}
+            onConfirmItem={onConfirmItem}
             onClearMatch={handleClearMatch}
+            onMoveToNext={moveToNextUnconfirmed}
             selectedResultIndex={selectedResultIndex}
             onSelectResultIndex={setSelectedResultIndex}
             invoiceSupplierName={supplierName}

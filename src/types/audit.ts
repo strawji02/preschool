@@ -49,8 +49,10 @@ export interface ComparisonItem {
   cj_candidates: SupplierMatch[]
   ssg_candidates: SupplierMatch[]
 
-  // 확정 여부 (새로 추가)
-  is_confirmed: boolean
+  // 확정 여부 (새로 추가 - 공급사별)
+  is_confirmed: boolean  // 전체 확정 (하위 호환성)
+  cj_confirmed: boolean   // CJ 공급사 확정
+  ssg_confirmed: boolean  // 신세계 공급사 확정
 
   savings: SavingsResult
 

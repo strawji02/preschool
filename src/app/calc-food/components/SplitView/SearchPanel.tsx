@@ -11,8 +11,9 @@ interface SearchPanelProps {
   item: ComparisonItem | null
   isFocused: boolean
   onSelectProduct: (product: SupplierMatch, supplier: 'CJ' | 'SHINSEGAE') => void
-  onConfirmItem?: () => void // 확정 콜백 추가
-  onClearMatch?: () => void // 변경(매칭 제거) 콜백 추가
+  onConfirmItem?: (itemId: string, supplier?: 'CJ' | 'SHINSEGAE') => void // 확정 콜백 (supplier 추가)
+  onClearMatch?: (supplier: 'CJ' | 'SHINSEGAE') => void // 변경(매칭 제거) 콜백 (supplier 추가)
+  onMoveToNext?: () => void // 다음 품목으로 이동
   selectedResultIndex: number
   onSelectResultIndex: (index: number) => void
   invoiceSupplierName?: string // 파일명에서 추출한 공급업체명
@@ -38,13 +39,14 @@ function parseSpec(spec: string | undefined): { quantity: number; unit: string }
   return null
 }
 
-// 동행 총 수량(g) 계산
-function calculateInvoiceTotalGrams(item: ComparisonItem): number {
+// 동행 총 수량(g) 계산 - supplier 파라미터 추가
+function calculateInvoiceTotalGrams(item: ComparisonItem, supplier: 'CJ' | 'SHINSEGAE'): number {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
     return specParsed.quantity * unitToGrams(specParsed.unit) * item.extracted_quantity
   }
-  const match = item.cj_match || item.ssg_match
+  // 현재 supplier에 맞는 match 사용
+  const match = supplier === 'CJ' ? item.cj_match : item.ssg_match
   if (match?.spec_quantity && match?.spec_unit) {
     return match.spec_quantity * unitToGrams(match.spec_unit) * item.extracted_quantity
   }
@@ -101,6 +103,7 @@ export function SearchPanel({
   onSelectProduct,
   onConfirmItem,
   onClearMatch,
+  onMoveToNext,
   selectedResultIndex,
   onSelectResultIndex,
   invoiceSupplierName = '업체',
@@ -325,10 +328,13 @@ export function SearchPanel({
         const currentMatch = supplier === 'CJ' ? item.cj_match : item.ssg_match
         if (!currentMatch) return null
 
-        const invoiceTotalGrams = calculateInvoiceTotalGrams(item)
+        const invoiceTotalGrams = calculateInvoiceTotalGrams(item, supplier)
         const supplierQty = calculateSupplierQuantity(invoiceTotalGrams, currentMatch)
         const supplierTotal = currentMatch.standard_price * supplierQty
         const supplierTotalQty = (currentMatch.spec_quantity || 1) * supplierQty
+
+        // 공급사별 확정 상태 체크
+        const isConfirmed = supplier === 'CJ' ? item.cj_confirmed : item.ssg_confirmed
 
         return (
           <div className={cn(
@@ -343,15 +349,18 @@ export function SearchPanel({
               <div className="flex items-center gap-2">
                 {onClearMatch && (
                   <button
-                    onClick={onClearMatch}
+                    onClick={() => onClearMatch(supplier)}
                     className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
                   >
                     변경
                   </button>
                 )}
-                {onConfirmItem && !item.is_confirmed && (
+                {onConfirmItem && !isConfirmed && (
                   <button
-                    onClick={onConfirmItem}
+                    onClick={() => {
+                      onConfirmItem(item.id, supplier)
+                      onMoveToNext?.()
+                    }}
                     className={cn(
                       'rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors',
                       supplier === 'CJ'
@@ -362,7 +371,7 @@ export function SearchPanel({
                     ✓ 확정
                   </button>
                 )}
-                {item.is_confirmed && (
+                {isConfirmed && (
                   <span className="rounded-lg bg-green-500 px-3 py-1 text-sm font-medium text-white">
                     ✓ 확정됨
                   </span>

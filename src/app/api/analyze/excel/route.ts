@@ -172,6 +172,8 @@ export async function POST(request: NextRequest) {
       cj_candidates: item.cj_candidates,
       ssg_candidates: item.ssg_candidates,
       is_confirmed: false,
+      cj_confirmed: false,
+      ssg_confirmed: false,
       savings: item.savings,
       match_status: item.dbRecord.match_status,
     }))
