@@ -10,7 +10,7 @@ import type { ComparisonItem, SupplierMatch, MatchCandidate } from '@/types/audi
 interface SearchPanelProps {
   item: ComparisonItem | null
   isFocused: boolean
-  onSelectProduct: (product: SupplierMatch, supplier: 'CJ' | 'SHINSEGAE') => void
+  onSelectProduct: (product: SupplierMatch, supplier: 'CJ' | 'SHINSEGAE', itemId: string) => void // itemId 추가
   onConfirmItem?: (itemId: string, supplier?: 'CJ' | 'SHINSEGAE') => void // 확정 콜백 (supplier 추가)
   onClearMatch?: (supplier: 'CJ' | 'SHINSEGAE') => void // 변경(매칭 제거) 콜백 (supplier 추가)
   onMoveToNext?: () => void // 다음 품목으로 이동
@@ -193,8 +193,9 @@ export function SearchPanel({
     }
   }
 
-  // 상품 선택
+  // 상품 선택 - item prop의 id를 직접 사용하여 비동기 문제 방지
   const handleSelect = (product: MatchCandidate) => {
+    if (!item) return  // item이 없으면 무시
     const supplierMatch: SupplierMatch = {
       id: product.id,
       product_name: product.product_name,
@@ -204,7 +205,8 @@ export function SearchPanel({
       spec_quantity: product.spec_quantity,
       spec_unit: product.spec_unit,
     }
-    onSelectProduct(supplierMatch, supplier)
+    // item.id를 직접 사용 (currentItem이 아닌 props의 item)
+    onSelectProduct(supplierMatch, supplier, item.id)
   }
 
   // g당 단가 계산

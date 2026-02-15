@@ -65,10 +65,10 @@ export function SplitView({
   }, [items, selectedIndex])
 
   // 상품 선택 핸들러 (선택만, 확정은 별도)
-  const handleSelectProduct = useCallback((product: SupplierMatch, supplier: Supplier) => {
-    if (!currentItem) return
-    onSelectCandidate(currentItem.id, supplier, product)
-  }, [currentItem, onSelectCandidate])
+  // itemId를 직접 받아서 비동기 문제 방지 (검색 중 아이템 변경 시 잘못된 아이템에 저장되는 버그 수정)
+  const handleSelectProduct = useCallback((product: SupplierMatch, supplier: Supplier, itemId: string) => {
+    onSelectCandidate(itemId, supplier, product)
+  }, [onSelectCandidate])
 
   // 매칭 제거 핸들러 (변경 버튼) - supplier 파라미터 추가
   const handleClearMatch = useCallback((supplier: Supplier) => {
