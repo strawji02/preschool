@@ -350,7 +350,14 @@ export function SearchPanel({
         // 수량 계산에 필요한 정보
         const matchGrams = (currentMatch.spec_quantity || 1) * unitToGrams(currentMatch.spec_unit || 'G')
         const invoiceSpec = parseSpec(item.extracted_spec)
-        const invoiceUnit = invoiceSpec ? `${invoiceSpec.quantity * item.extracted_quantity}${invoiceSpec.unit.toLowerCase()}` : `${item.extracted_quantity}개`
+        const packSize = getPackSize(item.extracted_spec)
+        
+        // 동행 규격 표시용 (파싱 가능하면 동행 규격, 아니면 원본 spec 그대로)
+        const invoiceUnitDisplay = invoiceSpec 
+          ? `${invoiceSpec.quantity}${invoiceSpec.unit.toLowerCase()}${packSize > 1 ? ` × ${packSize}묶음` : ''}`
+          : (item.extracted_spec || '(규격 없음)')
+        
+        // 공급사 규격 표시용
         const matchUnit = currentMatch.spec_quantity && currentMatch.spec_unit 
           ? `${currentMatch.spec_quantity}${currentMatch.spec_unit.toLowerCase()}`
           : '1개'
@@ -414,11 +421,11 @@ export function SearchPanel({
               {/* 수량 계산 수식 표시 - 그램 기준으로 상세히 */}
               <div className="mt-2 space-y-1 text-sm text-gray-600">
                 <p>• 동행 총 수량: <span className="font-medium text-gray-800">
-                  {item.extracted_quantity}개 × {matchUnit} = {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`}
+                  {item.extracted_quantity}개 × {invoiceUnitDisplay} = {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${Math.round(invoiceTotalGrams)}g`}
                 </span></p>
                 <p>• 공급사 규격: <span className="font-medium text-gray-800">{matchUnit}/EA</span></p>
                 <p>• 필요 수량: <span className="font-medium text-blue-600">
-                  {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`} ÷ {matchUnit} = {supplierQty}개
+                  {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${Math.round(invoiceTotalGrams)}g`} ÷ {matchUnit} = {supplierQty}개
                 </span></p>
               </div>
               {/* 총액 */}
