@@ -29,21 +29,34 @@ function unitToGrams(unit: string): number {
   return 1
 }
 
-// 규격에서 수량과 단위 파싱
-function parseSpec(spec: string | undefined): { quantity: number; unit: string } | null {
+// 규격에서 수량, 단위, 묶음수량 파싱
+// 예: "65ML*5EA" → { quantity: 65, unit: 'ML', packSize: 5 }
+// 예: "2KG/상" → { quantity: 2, unit: 'KG', packSize: 1 }
+function parseSpec(spec: string | undefined): { quantity: number; unit: string; packSize: number } | null {
   if (!spec) return null
-  const match = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
-  if (match) {
-    return { quantity: parseFloat(match[1]), unit: match[2].toUpperCase() }
-  }
-  return null
+  
+  // 기본 용량과 단위 파싱
+  const baseMatch = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
+  if (!baseMatch) return null
+  
+  const quantity = parseFloat(baseMatch[1])
+  const unit = baseMatch[2].toUpperCase()
+  
+  // 묶음 수량 파싱 (패턴: *5EA, ×5, *5입, *5개, X5 등)
+  // spec 전체에서 묶음 패턴 찾기
+  const packMatch = spec.match(/[*×xX]\s*(\d+)\s*(EA|입|개)?/i)
+  const packSize = packMatch ? parseInt(packMatch[1]) : 1
+  
+  return { quantity, unit, packSize }
 }
 
 // 동행 총 수량(g) 계산 - supplier 파라미터 추가
+// 계산식: 용량 × 묶음수량 × 구매수량
 function calculateInvoiceTotalGrams(item: ComparisonItem, supplier: 'CJ' | 'SHINSEGAE'): number {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    return specParsed.quantity * unitToGrams(specParsed.unit) * item.extracted_quantity
+    // 용량 × 묶음수량 × 구매수량
+    return specParsed.quantity * unitToGrams(specParsed.unit) * specParsed.packSize * item.extracted_quantity
   }
   // 현재 supplier에 맞는 match 사용
   const match = supplier === 'CJ' ? item.cj_match : item.ssg_match
@@ -53,11 +66,12 @@ function calculateInvoiceTotalGrams(item: ComparisonItem, supplier: 'CJ' | 'SHIN
   return item.extracted_quantity
 }
 
-// 동행 총 수량 포맷팅 (1kg 미만은 g으로 표시)
+// 동행 총 수량 포맷팅 (묶음 수량 포함, 1kg 미만은 g으로 표시)
 function formatInvoiceTotalQuantity(item: ComparisonItem): string {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    const total = specParsed.quantity * item.extracted_quantity
+    // 총량 = 용량 × 묶음수량 × 구매수량
+    const total = specParsed.quantity * specParsed.packSize * item.extracted_quantity
     const unit = specParsed.unit.toUpperCase()
 
     // KG이고 1 미만이면 g으로 변환
@@ -338,7 +352,17 @@ export function SearchPanel({
         // 수량 계산에 필요한 정보
         const matchGrams = (currentMatch.spec_quantity || 1) * unitToGrams(currentMatch.spec_unit || 'G')
         const invoiceSpec = parseSpec(item.extracted_spec)
-        const invoiceUnit = invoiceSpec ? `${invoiceSpec.quantity * item.extracted_quantity}${invoiceSpec.unit.toLowerCase()}` : `${item.extracted_quantity}개`
+        
+        // 묶음 수량 정보 추출
+        const packSize = invoiceSpec?.packSize || 1
+        const baseQty = invoiceSpec?.quantity || 1
+        const baseUnit = invoiceSpec?.unit?.toLowerCase() || 'g'
+        
+        // 총량 포맷팅 (ml/g 단위로)
+        const totalGramsFormatted = invoiceTotalGrams >= 1000 
+          ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` 
+          : `${Math.round(invoiceTotalGrams)}${baseUnit === 'ml' || baseUnit === 'l' ? 'ml' : 'g'}`
+        
         const matchUnit = currentMatch.spec_quantity && currentMatch.spec_unit 
           ? `${currentMatch.spec_quantity}${currentMatch.spec_unit.toLowerCase()}`
           : '1개'
@@ -399,14 +423,16 @@ export function SearchPanel({
               )}>
                 {supplier === 'CJ' ? 'CJ' : '신세계'} - {currentMatch.product_name}
               </p>
-              {/* 수량 계산 수식 표시 - 그램 기준으로 상세히 */}
+              {/* 수량 계산 수식 표시 - 묶음 수량 포함 */}
               <div className="mt-2 space-y-1 text-sm text-gray-600">
                 <p>• 동행 총 수량: <span className="font-medium text-gray-800">
-                  {item.extracted_quantity}개 × {matchUnit} = {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`}
+                  {item.extracted_quantity}개 × {baseQty}{baseUnit}
+                  {packSize > 1 && <span className="text-orange-600"> × {packSize}개묶음</span>}
+                  {' = '}{totalGramsFormatted}
                 </span></p>
                 <p>• 공급사 규격: <span className="font-medium text-gray-800">{matchUnit}/EA</span></p>
                 <p>• 필요 수량: <span className="font-medium text-blue-600">
-                  {invoiceTotalGrams >= 1000 ? `${(invoiceTotalGrams/1000).toFixed(1)}kg` : `${invoiceTotalGrams}g`} ÷ {matchUnit} = {supplierQty}개
+                  {totalGramsFormatted} ÷ {matchUnit} = {supplierQty}개
                 </span></p>
               </div>
               {/* 총액 */}
