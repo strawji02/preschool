@@ -16,33 +16,26 @@ function unitToGrams(unit: string): number {
   return 1
 }
 
-// 규격에서 수량, 단위, 묶음수량 파싱
-// 예: "65ML*5EA" → { quantity: 65, unit: 'ML', packSize: 5 }
-// 예: "2KG/상" → { quantity: 2, unit: 'KG', packSize: 1 }
-function parseSpec(spec: string | undefined): { quantity: number; unit: string; packSize: number } | null {
+// 규격에서 수량과 단위 파싱 (예: "2KG/상" → { quantity: 2, unit: "KG" })
+function parseSpec(spec: string | undefined): { quantity: number; unit: string } | null {
   if (!spec) return null
   
-  // 기본 용량과 단위 파싱
-  const baseMatch = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
-  if (!baseMatch) return null
-  
-  const quantity = parseFloat(baseMatch[1])
-  const unit = baseMatch[2].toUpperCase()
-  
-  // 묶음 수량 파싱 (패턴: *5EA, ×5, *5입, *5개, X5 등)
-  const packMatch = spec.match(/[*×xX]\s*(\d+)\s*(EA|입|개)?/i)
-  const packSize = packMatch ? parseInt(packMatch[1]) : 1
-  
-  return { quantity, unit, packSize }
+  // 패턴: 숫자 + 단위 (KG, G, L, ML 등)
+  const match = spec.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML)/i)
+  if (match) {
+    return {
+      quantity: parseFloat(match[1]),
+      unit: match[2].toUpperCase(),
+    }
+  }
+  return null
 }
 
 // 동행 총 수량(g) 계산
-// 계산식: 용량 × 묶음수량 × 구매수량
 function calculateInvoiceTotalGrams(item: ComparisonItem): number {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    // 용량 × 묶음수량 × 구매수량
-    return specParsed.quantity * unitToGrams(specParsed.unit) * specParsed.packSize * item.extracted_quantity
+    return specParsed.quantity * unitToGrams(specParsed.unit) * item.extracted_quantity
   }
   // 파싱 실패 시 CJ나 신세계 규격 기준으로 추정
   const match = item.cj_match || item.ssg_match
@@ -60,12 +53,11 @@ function calculateSupplierQuantity(invoiceTotalGrams: number, match: SupplierMat
   return Math.round((invoiceTotalGrams / matchGrams) * 10) / 10
 }
 
-// 동행 총 수량 포맷팅 (묶음 수량 포함)
+// 동행 총 수량 포맷팅 (예: "2kg")
 function formatInvoiceTotalQuantity(item: ComparisonItem): string {
   const specParsed = parseSpec(item.extracted_spec)
   if (specParsed) {
-    // 총량 = 용량 × 묶음수량 × 구매수량
-    const total = specParsed.quantity * specParsed.packSize * item.extracted_quantity
+    const total = specParsed.quantity * item.extracted_quantity
     return `${total}${specParsed.unit.toLowerCase()}`
   }
   const match = item.cj_match || item.ssg_match
