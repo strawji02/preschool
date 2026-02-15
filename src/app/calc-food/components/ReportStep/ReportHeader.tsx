@@ -2,14 +2,17 @@
 
 import { ArrowLeft, FileText, Download } from 'lucide-react'
 import { formatNumber } from '@/lib/format'
+import { downloadReportAsExcel } from '@/lib/excel-utils'
+import type { ComparisonItem } from '@/types/audit'
 
 interface ReportHeaderProps {
   fileName: string
   totalItems: number
+  items: ComparisonItem[]
   onBackToMatching: () => void
 }
 
-export function ReportHeader({ fileName, totalItems, onBackToMatching }: ReportHeaderProps) {
+export function ReportHeader({ fileName, totalItems, items, onBackToMatching }: ReportHeaderProps) {
   return (
     <div className="border-b bg-white p-4">
       <div className="flex items-center justify-between">
@@ -34,14 +37,13 @@ export function ReportHeader({ fileName, totalItems, onBackToMatching }: ReportH
         </div>
 
         <button
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
           onClick={() => {
-            // TODO: PDF 리포트 다운로드 기능
-            alert('리포트 다운로드 기능은 추후 구현 예정입니다.')
+            downloadReportAsExcel(items, fileName.replace(/\.[^/.]+$/, ''))
           }}
         >
           <Download size={16} />
-          리포트 다운로드
+          엑셀로 다운로드
         </button>
       </div>
     </div>

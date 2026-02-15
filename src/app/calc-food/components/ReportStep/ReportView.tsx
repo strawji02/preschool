@@ -41,6 +41,7 @@ export function ReportView({
         <ReportHeader
           fileName={fileName}
           totalItems={items.length}
+          items={items}
           onBackToMatching={onBackToMatching}
         />
 
