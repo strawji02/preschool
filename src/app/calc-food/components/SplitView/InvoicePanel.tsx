@@ -45,11 +45,12 @@ function calculateInvoiceTotalGrams(item: ComparisonItem): number {
   return item.extracted_quantity // fallback
 }
 
-// 공급사 필요 수량 계산 (올림)
+// 공급사 필요 수량 계산 (소수점 1자리까지 - 올림 안함, SearchPanel과 동일)
 function calculateSupplierQuantity(invoiceTotalGrams: number, match: SupplierMatch): number {
   if (!match.spec_quantity || !match.spec_unit) return 1
   const matchGrams = match.spec_quantity * unitToGrams(match.spec_unit)
-  return Math.ceil(invoiceTotalGrams / matchGrams)
+  // 소수점 1자리까지 반올림 (SearchPanel의 calculateSupplierQuantityExact와 동일)
+  return Math.round((invoiceTotalGrams / matchGrams) * 10) / 10
 }
 
 // 동행 총 수량 포맷팅 (예: "2kg")
