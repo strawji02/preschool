@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
 import { preprocessKoreanFoodName, dualNormalize } from '@/lib/preprocessing'
+import { expandWithSynonyms } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
 import type { InvoiceItem } from '@/lib/funnel/excel-parser'
@@ -9,6 +10,144 @@ import type { DBProduct } from '@/lib/funnel/price-cluster'
 // Matching thresholds
 const AUTO_MATCH_THRESHOLD = 0.8
 const PENDING_THRESHOLD = 0.3
+
+// ========================================
+// Domain-Specific Matching Rules
+// ========================================
+
+/**
+ * 정육(축산) 카테고리 판별
+ */
+function isMeatItem(name: string): boolean {
+  return /돈|돼지|소고기|우육|닭|계육|정육|등심|안심|삼겹|목살|갈비|사태|전지|후지|민찌|다짐/.test(name)
+}
+
+/**
+ * 농산물 카테고리 판별
+ */
+function isProduceItem(name: string): boolean {
+  return /양파|감자|당근|배추|무|파|고추|마늘|깻잎|시금치|오이|호박|가지|콩나물|브로콜리|상추/.test(name)
+}
+
+/**
+ * 냉장/냉동 상태 추출
+ */
+function extractStorageType(name: string): '냉장' | '냉동' | null {
+  if (name.includes('냉장')) return '냉장'
+  if (name.includes('냉동')) return '냉동'
+  return null
+}
+
+/**
+ * 계란 등급 매칭: 왕란 없으면 → 특란, "특" 없으면 → "상"
+ */
+function getEggGradeSubstitutes(name: string): string[] {
+  if (name.includes('왕란')) return ['왕란', '특란']
+  if (name.includes('특란')) return ['특란', '왕란']
+  if (name.includes('특')) return ['특', '상']
+  if (name.includes('상')) return ['상', '특']
+  return []
+}
+
+/**
+ * 스파게티소스 기본값 규칙: 무수식어 → 토마토 스파게티소스
+ */
+function expandSauceQuery(name: string): string[] {
+  if (/스파게티소스|스파게티\s*소스/.test(name) && !/토마토|크림|로제|볼로네즈|미트/.test(name)) {
+    return ['토마토스파게티소스', '토마토 스파게티소스', name]
+  }
+  return [name]
+}
+
+/**
+ * 후보 목록에 대해 도메인별 재순위 적용
+ *
+ * - 정육: 냉장/냉동 일치 우선, 이후 부위 매칭
+ * - 농산물: 같은 원산지(국내산)일 때 중량 근접성
+ * - 계란: 등급 대체 (왕란→특란, 특→상)
+ * - 스파게티소스: 무수식어 → 토마토 기본
+ * - 브랜드 다를 때: 저가 우선
+ */
+function reRankCandidates<T extends { product_name: string; standard_price: number; match_score: number }>(
+  itemName: string,
+  candidates: T[]
+): T[] {
+  if (candidates.length <= 1) return candidates
+
+  const scored = candidates.map(c => ({
+    candidate: c,
+    bonus: 0,
+  }))
+
+  // Rule 1: 정육 - 냉장/냉동 일치 우선
+  if (isMeatItem(itemName)) {
+    const storageType = extractStorageType(itemName)
+    if (storageType) {
+      for (const s of scored) {
+        const candidateStorage = extractStorageType(s.candidate.product_name)
+        if (candidateStorage === storageType) {
+          s.bonus += 0.05 // 보너스 점수
+        } else if (candidateStorage !== null && candidateStorage !== storageType) {
+          s.bonus -= 0.03 // 불일치 페널티
+        }
+      }
+    }
+  }
+
+  // Rule 2: 농산물 - 같은 원산지 시 중량 근접 우선 (점수가 비슷한 경우)
+  // (중량 정보가 product_name에 포함된 경우에만 적용)
+  if (isProduceItem(itemName)) {
+    const isItemDomestic = itemName.includes('국내산') || itemName.includes('국산')
+    if (isItemDomestic) {
+      for (const s of scored) {
+        if (s.candidate.product_name.includes('국내산') || s.candidate.product_name.includes('국산')) {
+          s.bonus += 0.02
+        }
+      }
+    }
+  }
+
+  // Rule 3: 계란 등급 대체
+  const eggGrades = getEggGradeSubstitutes(itemName)
+  if (eggGrades.length > 0) {
+    for (const s of scored) {
+      const pname = s.candidate.product_name
+      // 첫 번째 등급(정확 매치)에 더 높은 보너스
+      if (pname.includes(eggGrades[0])) {
+        s.bonus += 0.04
+      } else if (eggGrades[1] && pname.includes(eggGrades[1])) {
+        s.bonus += 0.02 // 대체 등급
+      }
+    }
+  }
+
+  // Rule 4: 브랜드 다를 때 저가 우선 (점수가 비슷한 후보들 사이에서)
+  // 상위 후보들의 점수가 0.05 이내로 비슷하면 저가 우선
+  const topScore = scored[0]?.candidate.match_score ?? 0
+  const similarScored = scored.filter(s =>
+    Math.abs(s.candidate.match_score - topScore) <= 0.05
+  )
+  if (similarScored.length > 1) {
+    const minPrice = Math.min(...similarScored.map(s => s.candidate.standard_price))
+    for (const s of similarScored) {
+      if (s.candidate.standard_price === minPrice) {
+        s.bonus += 0.01
+      }
+    }
+  }
+
+  // 보너스 적용 후 재정렬
+  scored.sort((a, b) => {
+    const scoreA = a.candidate.match_score + a.bonus
+    const scoreB = b.candidate.match_score + b.bonus
+    return scoreB - scoreA
+  })
+
+  return scored.map(s => ({
+    ...s.candidate,
+    match_score: Math.min(1, s.candidate.match_score + s.bonus),
+  }))
+}
 
 // Search mode
 type SearchMode = 'trigram' | 'hybrid' | 'bm25' | 'semantic'
@@ -58,9 +197,20 @@ export async function findMatches(
   try {
     // Dual Normalization: BM25용 vs Semantic용
     const { forKeyword, forSemantic } = dualNormalize(itemName)
+
+    // Synonym expansion for better recall
+    const synonymTerms = expandWithSynonyms(forKeyword)
+    const expandedKeyword = synonymTerms.length > 1
+      ? synonymTerms.slice(0, 3).join(' ')
+      : forKeyword
+
+    // Sauce default rule
+    const sauceExpanded = expandSauceQuery(itemName)
+    const searchRaw = sauceExpanded.length > 1 ? sauceExpanded[0] : itemName
+
     console.log(`  [Matching] Mode: ${searchMode}`)
     console.log(`  [Matching] Raw: "${itemName}"`)
-    console.log(`  [Matching] Keyword: "${forKeyword}" | Semantic: "${forSemantic}"`)
+    console.log(`  [Matching] Keyword: "${forKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
 
     let candidates: RpcResult[] = []
     let error: any = null
@@ -68,7 +218,7 @@ export async function findMatches(
     if (searchMode === 'semantic') {
       // Phase 2: Semantic Search (Vector Similarity)
       try {
-        const embedding = await generateEmbedding(itemName)
+        const embedding = await generateEmbedding(searchRaw)
         const result = await supabase.rpc('search_products_vector', {
           query_embedding: embedding,
           limit_count: 5,
@@ -86,8 +236,8 @@ export async function findMatches(
     } else if (searchMode === 'hybrid') {
       // Phase 1: Hybrid Search (BM25 + Trigram with RRF)
       const result = await supabase.rpc('search_products_hybrid', {
-        search_term_raw: itemName,
-        search_term_clean: forKeyword, // BM25용
+        search_term_raw: searchRaw,
+        search_term_clean: expandedKeyword, // Synonym-expanded for better trigram recall
         limit_count: 5,
         bm25_weight: 0.5, // 50% BM25
         semantic_weight: 0.5, // 50% Semantic
@@ -97,7 +247,7 @@ export async function findMatches(
     } else if (searchMode === 'bm25') {
       // BM25 only (키워드 검색)
       const result = await supabase.rpc('search_products_bm25', {
-        search_term: forKeyword,
+        search_term: expandedKeyword,
         limit_count: 5,
       })
       candidates = result.data as RpcResult[]
@@ -105,8 +255,8 @@ export async function findMatches(
     } else {
       // Legacy: Trigram only (기존 방식)
       const result = await supabase.rpc('search_products_fuzzy', {
-        search_term_raw: itemName,
-        search_term_clean: forSemantic,
+        search_term_raw: searchRaw,
+        search_term_clean: expandedKeyword,
         limit_count: 5,
       })
       candidates = result.data as RpcResult[]
@@ -122,7 +272,7 @@ export async function findMatches(
       return { status: 'unmatched' }
     }
 
-    const matchCandidates: MatchCandidate[] = candidates.map((c) => ({
+    let matchCandidates: MatchCandidate[] = candidates.map((c) => ({
       id: c.id,
       product_name: c.product_name,
       standard_price: c.standard_price,
@@ -134,6 +284,9 @@ export async function findMatches(
       ppu: c.ppu ?? undefined,
       standard_unit: c.standard_unit ?? undefined,
     }))
+
+    // Domain-specific re-ranking
+    matchCandidates = reRankCandidates(itemName, matchCandidates)
 
     const topScore = matchCandidates[0].match_score
 
@@ -238,9 +391,20 @@ export async function findComparisonMatches(
 ): Promise<ComparisonMatchResult> {
   try {
     const { forKeyword, forSemantic } = dualNormalize(itemName)
+
+    // Synonym-expanded search terms for better recall
+    const synonymTerms = expandWithSynonyms(forKeyword)
+    // Sauce default rule: 스파게티소스 → 토마토 스파게티소스
+    const expandedTerms = expandSauceQuery(itemName)
+
+    // Build expanded search term (join top synonyms for broader search)
+    const expandedKeyword = synonymTerms.length > 1
+      ? synonymTerms.slice(0, 3).join(' ')
+      : forKeyword
+
     console.log(`  [Comparison] Mode: ${searchMode}`)
     console.log(`  [Comparison] Raw: "${itemName}"`)
-    console.log(`  [Comparison] Keyword: "${forKeyword}" | Semantic: "${forSemantic}"`)
+    console.log(`  [Comparison] Keyword: "${forKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
 
     // 병렬 실행: CJ와 SSG 동시 검색 (Top 10으로 증가 - 깔때기 필터링을 위해)
     const searchLimit = 10
@@ -271,18 +435,23 @@ export async function findComparisonMatches(
         ssgResult = { data: null, error: embedError }
       }
     } else if (searchMode === 'hybrid') {
-      [cjResult, ssgResult] = await Promise.all([
+      // Use expanded keyword (with synonyms) for better trigram recall
+      // and original itemName for BM25 (token overlap)
+      const sauceExpandedH = expandSauceQuery(itemName)
+      const searchRawH: string = sauceExpandedH.length > 1 ? sauceExpandedH[0] : itemName
+
+      ;[cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_hybrid', {
-          search_term_raw: itemName,
-          search_term_clean: forKeyword,
+          search_term_raw: searchRawH,
+          search_term_clean: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'CJ',
           bm25_weight: 0.5,
           semantic_weight: 0.5,
         }),
         supabase.rpc('search_products_hybrid', {
-          search_term_raw: itemName,
-          search_term_clean: forKeyword,
+          search_term_raw: searchRawH,
+          search_term_clean: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
           bm25_weight: 0.5,
@@ -292,28 +461,28 @@ export async function findComparisonMatches(
     } else if (searchMode === 'bm25') {
       [cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_bm25', {
-          search_term: forKeyword,
+          search_term: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'CJ',
         }),
         supabase.rpc('search_products_bm25', {
-          search_term: forKeyword,
+          search_term: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
         }),
       ])
     } else {
-      // Legacy: Trigram
+      // Legacy: Trigram - use expanded keyword for better recall
       [cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_fuzzy', {
           search_term_raw: itemName,
-          search_term_clean: forSemantic,
+          search_term_clean: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'CJ',
         }),
         supabase.rpc('search_products_fuzzy', {
           search_term_raw: itemName,
-          search_term_clean: forSemantic,
+          search_term_clean: expandedKeyword,
           limit_count: searchLimit,
           supplier_filter: 'SHINSEGAE',
         }),
@@ -450,6 +619,10 @@ export async function findComparisonMatches(
         spec_unit: item.spec_unit ?? undefined,
       }))
     }
+
+    // Domain-specific re-ranking
+    cj_candidates = reRankCandidates(itemName, cj_candidates)
+    ssg_candidates = reRankCandidates(itemName, ssg_candidates)
 
     // Top 1 = 자동 선택
     const cj_match = cj_candidates[0]

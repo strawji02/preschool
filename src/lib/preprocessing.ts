@@ -11,6 +11,9 @@
 
 import { normalizeText as normalizeSynonyms, expandWithSynonyms } from './synonyms'
 
+// Re-export normalizeText for convenience
+export { normalizeText } from './synonyms'
+
 // 맞춤법 통일 매핑
 const SPELLING_NORMALIZATION: Record<string, string> = {
   // 초콜릿 계열
@@ -49,19 +52,135 @@ const SPELLING_NORMALIZATION: Record<string, string> = {
   고추쟝: '고추장',
 }
 
-// 브랜드명 정규화 (선택적 - 필요시 활성화)
+// 브랜드명 정규화 (대폭 확장)
 const BRAND_NORMALIZATION: Record<string, string> = {
+  // 식품 대기업
   삼양: '삼양',
   '삼양라면': '삼양',
   농심: '농심',
   오뚜기: '오뚜기',
   CJ: 'CJ',
   씨제이: 'CJ',
+  '씨제이제일제당': 'CJ',
+  제일제당: 'CJ',
   풀무원: '풀무원',
+  대상: '대상',
+  샘표: '샘표',
+  청정원: '대상',
+  종가집: '대상',
+  해찬들: '해찬들',
+  // 유제품
+  남양: '남양',
+  매일: '매일',
+  서울우유: '서울우유',
+  빙그레: '빙그레',
+  // 육가공
+  사조: '사조',
+  동원: '동원',
+  동원참치: '동원',
+  롯데: '롯데',
+  // 라면/스낵
+  팔도: '팔도',
+  삼양식품: '삼양',
+  농심라면: '농심',
+  // 음료
+  코카콜라: '코카콜라',
+  펩시: '펩시',
+  칠성: '칠성',
+  롯데칠성: '롯데',
+  // 기타
+  오뚜기식품: '오뚜기',
+  대상청정원: '대상',
+  청정원대상: '대상',
+  오뚜기케찹: '오뚜기',
 }
+
+// 브랜드 감지용 키워드 (괄호 분리에 사용)
+const BRAND_KEYWORDS = [
+  '오뚜기', 'CJ', '제일제당', '삼양', '농심', '대상', '샘표', '청정원', '종가집', '해찬들',
+  '풀무원', '동원', '사조', '롯데', '빙그레', '매일', '남양', '서울우유',
+  '팔도', '코카콜라', '펩시', '칠성'
+]
+
+// 가공 지시어 (괄호 분리에 사용)
+const PROCESSING_KEYWORDS = [
+  '피제거', '시제거', '깍뚝썰기', '슬라이스', '다진', '채썬', '손질',
+  '냉동', '냉장', '실온', '생', '익힌', '데친', '볶은', '튀긴',
+  '중간맛', '순한맛', '매운맛', '단맛', '짠맛',
+  '국내산', '수입산', '미국산', '호주산', '칠레산', '국산', '수입',
+  '기피', '탈피', '거피',
+]
 
 // 조사 패턴 (제거할 조사들)
 const PARTICLES = ['은', '는', '이', '가', '을', '를', '의', '도', '만', '까지', '부터', '에서', '으로', '로']
+
+/**
+ * 괄호 내용 분리 (브랜드, 원산지, 가공상태 추출)
+ *
+ * @param name - 원본 품목명
+ * @returns { core: 핵심 품목명, metadata: 메타정보 }
+ *
+ * @example
+ * separateBrackets('오뚜기 카레(중간맛)') // { core: '카레', metadata: { brand: ['오뚜기'], processing: ['중간맛'] } }
+ * separateBrackets('깻잎(국내산) 100g') // { core: '깻잎', metadata: { origin: ['국내산'] } }
+ */
+export function separateBrackets(name: string): {
+  core: string
+  metadata: {
+    brand?: string[]
+    origin?: string[]
+    processing?: string[]
+  }
+} {
+  const metadata: {
+    brand?: string[]
+    origin?: string[]
+    processing?: string[]
+  } = {}
+
+  let core = name.trim()
+
+  // 1. 괄호 내용 추출 및 분류
+  const bracketPattern = /[\(\[](.*?)[\)\]]/g
+  const matches = [...core.matchAll(bracketPattern)]
+
+  for (const match of matches) {
+    const content = match[1].trim()
+
+    // 원산지 판별
+    if (content.includes('산') || content.includes('국내') || content.includes('수입')) {
+      metadata.origin = metadata.origin || []
+      metadata.origin.push(content)
+    }
+    // 가공 지시어 판별
+    else if (PROCESSING_KEYWORDS.some(kw => content.includes(kw))) {
+      metadata.processing = metadata.processing || []
+      metadata.processing.push(content)
+    }
+    // 그 외는 가공상태로 간주
+    else {
+      metadata.processing = metadata.processing || []
+      metadata.processing.push(content)
+    }
+  }
+
+  // 2. 괄호 제거
+  core = core.replace(/[\(\[](.*?)[\)\]]/g, ' ')
+
+  // 3. 브랜드명 추출
+  for (const brand of BRAND_KEYWORDS) {
+    if (core.includes(brand)) {
+      metadata.brand = metadata.brand || []
+      metadata.brand.push(brand)
+      // 브랜드명은 제거하지 않고 유지 (검색 시 유용할 수 있음)
+    }
+  }
+
+  // 4. 정리
+  core = core.replace(/\s+/g, ' ').trim()
+
+  return { core, metadata }
+}
 
 /**
  * 한국어 식품명 전처리 메인 함수
@@ -79,6 +198,7 @@ export function preprocessKoreanFoodName(
     removeNumbers?: boolean // 숫자 제거 (기본: true)
     removeSpecialChars?: boolean // 특수문자 제거 (기본: true)
     normalizeSynonyms?: boolean // 동의어 정규화 (기본: true)
+    separateBracketsFirst?: boolean // 괄호 분리 (기본: false)
   } = {}
 ): string {
   const {
@@ -88,24 +208,36 @@ export function preprocessKoreanFoodName(
     removeNumbers = true,
     removeSpecialChars = true,
     normalizeSynonyms: applySynonyms = true,
+    separateBracketsFirst = false,
   } = options
 
   let processed = name.trim()
 
-  // 0. 동의어 정규화 (가장 먼저 적용)
+  // 0-1. 괄호 분리 (선택적)
+  if (separateBracketsFirst) {
+    const { core } = separateBrackets(processed)
+    processed = core
+  }
+
+  // 0-2. 동의어 정규화 (가장 먼저 적용)
   if (applySynonyms) {
     processed = normalizeSynonyms(processed)
   }
 
-  // 1. 괄호/대괄호만 제거 (내용은 유지)
-  processed = processed.replace(/[()]/g, ' ').replace(/[\[\]]/g, ' ')
+  // 1. 괄호/대괄호만 제거 (내용은 유지) - 괄호 분리하지 않았을 때만
+  if (!separateBracketsFirst) {
+    processed = processed.replace(/[()]/g, ' ').replace(/[\[\]]/g, ' ')
+  }
 
-  // 2. 숫자+단위 패턴 제거 (1kg, 200g, 500ml 등)
+  // 2. 쉼표 제거 (예: "감자, 당근" → "감자 당근")
+  processed = processed.replace(/,/g, ' ')
+
+  // 3. 숫자+단위 패턴 제거 (1kg, 200g, 500ml 등)
   if (removeNumbers) {
     processed = processed.replace(/\d+(\.\d+)?\s*(kg|g|ml|l|ea|개|팩|봉|box|호|번|입)/gi, '')
   }
 
-  // 3. 맞춤법 통일
+  // 4. 맞춤법 통일
   if (normalizeSpelling) {
     for (const [wrong, correct] of Object.entries(SPELLING_NORMALIZATION)) {
       const regex = new RegExp(wrong, 'g')
@@ -113,7 +245,7 @@ export function preprocessKoreanFoodName(
     }
   }
 
-  // 4. 브랜드명 정규화 (선택적)
+  // 5. 브랜드명 정규화 (선택적)
   if (normalizeBrands) {
     for (const [variant, standard] of Object.entries(BRAND_NORMALIZATION)) {
       const regex = new RegExp(variant, 'g')
@@ -121,7 +253,7 @@ export function preprocessKoreanFoodName(
     }
   }
 
-  // 5. 조사 제거
+  // 6. 조사 제거
   if (removeParticles) {
     // 조사는 단어 끝에 붙으므로 공백 뒤에 오는 조사를 제거
     for (const particle of PARTICLES) {
@@ -131,17 +263,17 @@ export function preprocessKoreanFoodName(
     }
   }
 
-  // 6. 남은 숫자 제거
+  // 7. 남은 숫자 제거
   if (removeNumbers) {
     processed = processed.replace(/\d+/g, '')
   }
 
-  // 7. 특수문자 제거 (한글, 영문, 공백만 유지)
+  // 8. 특수문자 제거 (한글, 영문, 공백만 유지)
   if (removeSpecialChars) {
     processed = processed.replace(/[^\uAC00-\uD7A3a-zA-Z\s]/g, '')
   }
 
-  // 8. 연속 공백 정리 및 trim
+  // 9. 연속 공백 정리 및 trim
   processed = processed.replace(/\s+/g, ' ').trim()
 
   return processed

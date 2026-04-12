@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
+import { expandWithSynonyms } from '@/lib/synonyms'
+import { dualNormalize } from '@/lib/preprocessing'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -41,6 +43,13 @@ export async function GET(request: NextRequest) {
     const supabase = createAdminClient()
     const searchMode = process.env.NEXT_PUBLIC_SEARCH_MODE || 'hybrid'
 
+    // Synonym expansion for better search recall
+    const { forKeyword } = dualNormalize(query)
+    const synonymTerms = expandWithSynonyms(forKeyword)
+    const expandedQuery = synonymTerms.length > 1
+      ? synonymTerms.slice(0, 3).join(' ')
+      : forKeyword
+
     let results: RpcResult[] = []
     let error: any = null
 
@@ -49,7 +58,7 @@ export async function GET(request: NextRequest) {
       // Hybrid Search: BM25 + Trigram (matching.ts와 동일한 함수 사용)
       const { data, error: rpcError } = await supabase.rpc('search_products_hybrid', {
         search_term_raw: query,
-        search_term_clean: query.replace(/[^가-힣a-zA-Z0-9\s]/g, '').trim(),
+        search_term_clean: expandedQuery,
         limit_count: Math.min(limit, 50),
         supplier_filter: supplier || undefined,
         bm25_weight: 0.5,
