@@ -8,6 +8,7 @@ import type { ComparisonItem, Supplier, SupplierMatch } from '@/types/audit'
 import { CandidateSelector } from './CandidateSelector'
 import { parseUnitString, type NormalizedUnit } from '@/lib/unitConversion'
 import { convertPriceUnified, type ConversionResult } from '@/lib/unitConversionUnified'
+import { calculateVolumeMultiplier } from '@/lib/spec-parser'
 
 // 추출된 spec 또는 name에서 단위와 수량 파싱
 function parseExtractedSpec(spec: string | null | undefined, name: string | null | undefined): { unit: NormalizedUnit; quantity: number } {
@@ -342,6 +343,68 @@ export function MatchingRow({
               )}
             </div>
           </div>
+
+          {/* 수량 보정 정보 (자동감지 결과 표시) */}
+          {(item.cj_match || item.ssg_match) && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <h4 className="mb-2 text-sm font-semibold text-gray-700">수량 보정 감지</h4>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {item.cj_match && item.cj_match.unit_normalized && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">CJ</span>
+                      <span className="text-xs text-gray-500">
+                        {item.extracted_spec || '-'} vs {item.cj_match.unit_normalized}
+                      </span>
+                    </div>
+                    {(() => {
+                      const vol = calculateVolumeMultiplier(item.extracted_spec || '', item.cj_match.unit_normalized || '')
+                      return vol.autoDetected ? (
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs text-orange-600 font-medium">
+                            x{vol.multiplier}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            보정 단가: {formatCurrency(item.cj_match.standard_price * vol.multiplier)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-yellow-600">{vol.reason || '자동감지 불가'}</span>
+                      )
+                    })()}
+                  </div>
+                )}
+                {item.ssg_match && item.ssg_match.unit_normalized && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">신세계</span>
+                      <span className="text-xs text-gray-500">
+                        {item.extracted_spec || '-'} vs {item.ssg_match.unit_normalized}
+                      </span>
+                    </div>
+                    {(() => {
+                      const vol = calculateVolumeMultiplier(item.extracted_spec || '', item.ssg_match.unit_normalized || '')
+                      return vol.autoDetected ? (
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs text-purple-600 font-medium">
+                            x{vol.multiplier}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            보정 단가: {formatCurrency(item.ssg_match.standard_price * vol.multiplier)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-yellow-600">{vol.reason || '자동감지 불가'}</span>
+                      )
+                    })()}
+                  </div>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-gray-400">
+                리포트 단계에서 수량 보정 배수를 수동으로 조정할 수 있습니다.
+              </p>
+            </div>
+          )}
 
           {/* 3행: CJ 매칭 패널 → CJ 확정 후 SSG 매칭 패널 */}
           <div className="space-y-3">

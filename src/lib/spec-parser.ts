@@ -368,6 +368,45 @@ export function normalizeSpec(
 }
 
 /**
+ * 두 규격 간의 수량 보정 배수를 계산합니다.
+ *
+ * 거래명세표 규격과 공급사 규격의 단위 용량이 다를 때,
+ * 공정한 가격 비교를 위해 필요한 배수를 계산합니다.
+ *
+ * @param invoiceSpec 거래명세표 규격 문자열 (예: "2KG")
+ * @param supplierSpec 공급사 규격 문자열 (예: "1KG")
+ * @returns 배수 정보 객체
+ *
+ * @example
+ * calculateVolumeMultiplier("2KG", "1KG")   // { multiplier: 2, autoDetected: true }
+ * calculateVolumeMultiplier("500g", "1kg")   // { multiplier: 0.5, autoDetected: true }
+ * calculateVolumeMultiplier("1L", "500ml")   // { multiplier: 2, autoDetected: true }
+ * calculateVolumeMultiplier("2KG", "500ml")  // { multiplier: 1, autoDetected: false, reason: '단위 불일치' }
+ */
+export function calculateVolumeMultiplier(
+  invoiceSpec: string,
+  supplierSpec: string
+): { multiplier: number; autoDetected: boolean; reason?: string } {
+  const invoiceNorm = normalizeSpec(invoiceSpec)
+  const supplierNorm = normalizeSpec(supplierSpec)
+
+  if (!invoiceNorm || !supplierNorm) {
+    return { multiplier: 1, autoDetected: false, reason: '규격 파싱 불가' }
+  }
+
+  if (invoiceNorm.category !== supplierNorm.category) {
+    return { multiplier: 1, autoDetected: false, reason: '단위 불일치' }
+  }
+
+  if (supplierNorm.value === 0) {
+    return { multiplier: 1, autoDetected: false, reason: '공급사 규격값 0' }
+  }
+
+  const multiplier = Math.round((invoiceNorm.value / supplierNorm.value) * 100) / 100
+  return { multiplier, autoDetected: true }
+}
+
+/**
  * 규격 비교 (정규화된 값 기준)
  *
  * @param spec1 첫 번째 규격

@@ -1,21 +1,34 @@
 'use client'
 
-import { useState } from 'react'
-import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { VolumeAdjuster } from '@/components/ui/VolumeAdjuster'
 import type { ComparisonItem } from '@/types/audit'
 
 interface ItemBreakdownTableProps {
   items: ComparisonItem[]
+  onAdjustedSavingsChange?: (adjustedSavings: { cj: number; ssg: number }) => void
 }
 
 type SortField = 'name' | 'our_price' | 'cj_price' | 'ssg_price' | 'max_savings'
 type SortDirection = 'asc' | 'desc'
 
-export function ItemBreakdownTable({ items }: ItemBreakdownTableProps) {
+interface AdjustedPrices {
+  [itemId: string]: {
+    cjMultiplier: number
+    cjAdjustedPrice: number
+    ssgMultiplier: number
+    ssgAdjustedPrice: number
+  }
+}
+
+export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreakdownTableProps) {
   const [sortField, setSortField] = useState<SortField>('max_savings')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
+  const [adjustedPrices, setAdjustedPrices] = useState<AdjustedPrices>({})
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -24,6 +37,85 @@ export function ItemBreakdownTable({ items }: ItemBreakdownTableProps) {
       setSortField(field)
       setSortDirection('desc')
     }
+  }
+
+  const toggleExpand = (itemId: string) => {
+    setExpandedItems(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+  }
+
+  const handleCjAdjustment = useCallback((itemId: string, adjustedPrice: number, multiplier: number) => {
+    setAdjustedPrices(prev => {
+      const next = {
+        ...prev,
+        [itemId]: {
+          ...prev[itemId],
+          cjMultiplier: multiplier,
+          cjAdjustedPrice: adjustedPrice,
+          ssgMultiplier: prev[itemId]?.ssgMultiplier ?? 1,
+          ssgAdjustedPrice: prev[itemId]?.ssgAdjustedPrice ?? 0,
+        },
+      }
+      return next
+    })
+  }, [])
+
+  const handleSsgAdjustment = useCallback((itemId: string, adjustedPrice: number, multiplier: number) => {
+    setAdjustedPrices(prev => {
+      const next = {
+        ...prev,
+        [itemId]: {
+          ...prev[itemId],
+          cjMultiplier: prev[itemId]?.cjMultiplier ?? 1,
+          cjAdjustedPrice: prev[itemId]?.cjAdjustedPrice ?? 0,
+          ssgMultiplier: multiplier,
+          ssgAdjustedPrice: adjustedPrice,
+        },
+      }
+      return next
+    })
+  }, [])
+
+  // Get effective price (adjusted if available, original otherwise)
+  const getEffectiveCjPrice = (item: ComparisonItem): number | undefined => {
+    if (!item.cj_match) return undefined
+    const adj = adjustedPrices[item.id]
+    if (adj && adj.cjMultiplier !== 1) return adj.cjAdjustedPrice
+    return item.cj_match.standard_price
+  }
+
+  const getEffectiveSsgPrice = (item: ComparisonItem): number | undefined => {
+    if (!item.ssg_match) return undefined
+    const adj = adjustedPrices[item.id]
+    if (adj && adj.ssgMultiplier !== 1) return adj.ssgAdjustedPrice
+    return item.ssg_match.standard_price
+  }
+
+  // Calculate adjusted savings for an item
+  const getAdjustedSavings = (item: ComparisonItem) => {
+    const cjPrice = getEffectiveCjPrice(item)
+    const ssgPrice = getEffectiveSsgPrice(item)
+    const unitPrice = item.extracted_unit_price
+    const qty = item.extracted_quantity
+
+    const cjSavings = cjPrice !== undefined ? Math.max(0, (unitPrice - cjPrice) * qty) : 0
+    const ssgSavings = ssgPrice !== undefined ? Math.max(0, (unitPrice - ssgPrice) * qty) : 0
+    const maxSavings = Math.max(cjSavings, ssgSavings)
+
+    let bestSupplier: 'CJ' | 'SHINSEGAE' | undefined
+    if (maxSavings > 0) {
+      if (cjSavings >= ssgSavings && cjSavings > 0) bestSupplier = 'CJ'
+      else if (ssgSavings > 0) bestSupplier = 'SHINSEGAE'
+    }
+
+    return { cj: cjSavings, ssg: ssgSavings, max: maxSavings, bestSupplier }
   }
 
   const sortedItems = [...items].sort((a, b) => {
@@ -40,16 +132,16 @@ export function ItemBreakdownTable({ items }: ItemBreakdownTableProps) {
         bValue = b.extracted_unit_price
         break
       case 'cj_price':
-        aValue = a.cj_match?.standard_price ?? Infinity
-        bValue = b.cj_match?.standard_price ?? Infinity
+        aValue = getEffectiveCjPrice(a) ?? Infinity
+        bValue = getEffectiveCjPrice(b) ?? Infinity
         break
       case 'ssg_price':
-        aValue = a.ssg_match?.standard_price ?? Infinity
-        bValue = b.ssg_match?.standard_price ?? Infinity
+        aValue = getEffectiveSsgPrice(a) ?? Infinity
+        bValue = getEffectiveSsgPrice(b) ?? Infinity
         break
       case 'max_savings':
-        aValue = a.savings.max
-        bValue = b.savings.max
+        aValue = getAdjustedSavings(a).max
+        bValue = getAdjustedSavings(b).max
         break
       default:
         return 0
@@ -73,10 +165,22 @@ export function ItemBreakdownTable({ items }: ItemBreakdownTableProps) {
       : <ArrowDown size={14} className="text-blue-600" />
   }
 
+  // Check if any item has a non-1 multiplier
+  const hasAnyAdjustment = Object.values(adjustedPrices).some(
+    adj => adj.cjMultiplier !== 1 || adj.ssgMultiplier !== 1
+  )
+
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border bg-white">
+      {/* Info banner when adjustments are active */}
+      {hasAnyAdjustment && (
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-xs text-blue-700">
+          수량 보정이 적용된 품목이 있습니다. 보정된 단가 기준으로 절감액이 재계산됩니다.
+        </div>
+      )}
+
       {/* 테이블 헤더 */}
-      <div className="grid grid-cols-[1fr_100px_100px_100px_100px] border-b bg-gray-50">
+      <div className="grid grid-cols-[1fr_100px_100px_100px_100px_32px] border-b bg-gray-50">
         <button
           onClick={() => handleSort('name')}
           className="flex items-center gap-2 px-4 py-3 text-left text-sm font-medium text-gray-600 hover:bg-gray-100"
@@ -116,93 +220,224 @@ export function ItemBreakdownTable({ items }: ItemBreakdownTableProps) {
           최대 절감
           <SortIcon field="max_savings" />
         </button>
+        <div /> {/* expand button column */}
       </div>
 
       {/* 테이블 바디 */}
-      <div className="max-h-96 overflow-y-auto">
+      <div className="max-h-[600px] overflow-y-auto">
         {sortedItems.map((item) => {
-          const hasSavings = item.savings.max > 0
-          const bestSupplier = item.savings.best_supplier
+          const savings = getAdjustedSavings(item)
+          const hasSavings = savings.max > 0
+          const bestSupplier = savings.bestSupplier
+          const isExpanded = expandedItems.has(item.id)
+
+          const cjAdj = adjustedPrices[item.id]
+          const ssgAdj = adjustedPrices[item.id]
+          const hasCjAdjustment = cjAdj && cjAdj.cjMultiplier !== 1
+          const hasSsgAdjustment = ssgAdj && ssgAdj.ssgMultiplier !== 1
 
           return (
-            <div
-              key={item.id}
-              className={cn(
-                'grid grid-cols-[1fr_100px_100px_100px_100px] border-b py-3 transition-colors',
-                hasSavings ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
-              )}
-            >
-              {/* 품목명 */}
-              <div className="flex items-center gap-2 px-4">
-                <span className="truncate text-sm" title={item.extracted_name}>
-                  {item.extracted_name}
-                </span>
-                <span className="shrink-0 text-xs text-gray-500">
-                  x{item.extracted_quantity}
-                </span>
-              </div>
-
-              {/* 내 단가 */}
-              <div className="px-4 text-right text-sm">
-                {formatCurrency(item.extracted_unit_price)}
-              </div>
-
-              {/* CJ 단가 */}
-              <div className="px-4 text-right text-sm">
-                {item.cj_match ? (
-                  <span className={cn(
-                    'font-medium',
-                    bestSupplier === 'CJ' && 'text-orange-600'
-                  )}>
-                    {formatCurrency(item.cj_match.standard_price)}
-                    {item.cj_match.unit_normalized && (
-                      <span className="text-gray-500 font-normal">/{item.cj_match.unit_normalized}</span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-gray-400">-</span>
+            <div key={item.id}>
+              {/* Main row */}
+              <div
+                className={cn(
+                  'grid grid-cols-[1fr_100px_100px_100px_100px_32px] border-b py-3 transition-colors cursor-pointer',
+                  hasSavings ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
                 )}
-              </div>
-
-              {/* 신세계 단가 */}
-              <div className="px-4 text-right text-sm">
-                {item.ssg_match ? (
-                  <span className={cn(
-                    'font-medium',
-                    bestSupplier === 'SHINSEGAE' && 'text-purple-600'
-                  )}>
-                    {formatCurrency(item.ssg_match.standard_price)}
-                    {item.ssg_match.unit_normalized && (
-                      <span className="text-gray-500 font-normal">/{item.ssg_match.unit_normalized}</span>
-                    )}
+                onClick={() => toggleExpand(item.id)}
+              >
+                {/* 품목명 */}
+                <div className="flex items-center gap-2 px-4">
+                  <span className="truncate text-sm" title={item.extracted_name}>
+                    {item.extracted_name}
                   </span>
-                ) : (
-                  <span className="text-gray-400">-</span>
-                )}
-              </div>
-
-              {/* 최대 절감액 */}
-              <div className="px-4 text-right text-sm">
-                {hasSavings ? (
-                  <div className="flex flex-col items-end">
-                    <span className="font-bold text-red-600">
-                      {formatCurrency(item.savings.max)}
+                  <span className="shrink-0 text-xs text-gray-500">
+                    x{item.extracted_quantity}
+                  </span>
+                  {item.extracted_spec && (
+                    <span className="shrink-0 text-xs text-gray-400">
+                      ({item.extracted_spec})
                     </span>
-                    {bestSupplier && (
-                      <span
-                        className={cn(
-                          'text-xs',
-                          bestSupplier === 'CJ' ? 'text-orange-600' : 'text-purple-600'
+                  )}
+                </div>
+
+                {/* 내 단가 */}
+                <div className="px-4 text-right text-sm">
+                  {formatCurrency(item.extracted_unit_price)}
+                </div>
+
+                {/* CJ 단가 */}
+                <div className="px-4 text-right text-sm">
+                  {item.cj_match ? (
+                    <div>
+                      <span className={cn(
+                        'font-medium',
+                        bestSupplier === 'CJ' && 'text-orange-600'
+                      )}>
+                        {hasCjAdjustment ? (
+                          <>
+                            {formatCurrency(cjAdj.cjAdjustedPrice)}
+                            <span className="block text-xs text-gray-400 line-through">
+                              {formatCurrency(item.cj_match.standard_price)}
+                            </span>
+                          </>
+                        ) : (
+                          formatCurrency(item.cj_match.standard_price)
                         )}
-                      >
-                        {bestSupplier === 'CJ' ? 'CJ' : '신세계'}
                       </span>
+                      {item.cj_match.unit_normalized && !hasCjAdjustment && (
+                        <span className="text-gray-500 font-normal">/{item.cj_match.unit_normalized}</span>
+                      )}
+                      {hasCjAdjustment && (
+                        <span className="block text-xs text-orange-500">x{cjAdj.cjMultiplier}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">-</span>
+                  )}
+                </div>
+
+                {/* 신세계 단가 */}
+                <div className="px-4 text-right text-sm">
+                  {item.ssg_match ? (
+                    <div>
+                      <span className={cn(
+                        'font-medium',
+                        bestSupplier === 'SHINSEGAE' && 'text-purple-600'
+                      )}>
+                        {hasSsgAdjustment ? (
+                          <>
+                            {formatCurrency(ssgAdj.ssgAdjustedPrice)}
+                            <span className="block text-xs text-gray-400 line-through">
+                              {formatCurrency(item.ssg_match.standard_price)}
+                            </span>
+                          </>
+                        ) : (
+                          formatCurrency(item.ssg_match.standard_price)
+                        )}
+                      </span>
+                      {item.ssg_match.unit_normalized && !hasSsgAdjustment && (
+                        <span className="text-gray-500 font-normal">/{item.ssg_match.unit_normalized}</span>
+                      )}
+                      {hasSsgAdjustment && (
+                        <span className="block text-xs text-purple-500">x{ssgAdj.ssgMultiplier}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">-</span>
+                  )}
+                </div>
+
+                {/* 최대 절감액 */}
+                <div className="px-4 text-right text-sm">
+                  {hasSavings ? (
+                    <div className="flex flex-col items-end">
+                      <span className="font-bold text-red-600">
+                        {formatCurrency(savings.max)}
+                      </span>
+                      {bestSupplier && (
+                        <span
+                          className={cn(
+                            'text-xs',
+                            bestSupplier === 'CJ' ? 'text-orange-600' : 'text-purple-600'
+                          )}
+                        >
+                          {bestSupplier === 'CJ' ? 'CJ' : '신세계'}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">-</span>
+                  )}
+                </div>
+
+                {/* Expand button */}
+                <div className="flex items-center justify-center">
+                  {(item.cj_match || item.ssg_match) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleExpand(item.id)
+                      }}
+                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                    >
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Expanded volume adjustment area */}
+              {isExpanded && (
+                <div className="border-b bg-gray-50 px-4 py-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* CJ Volume Adjuster */}
+                    {item.cj_match && (
+                      <div>
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
+                            CJ
+                          </span>
+                          <span className="text-xs text-gray-500 truncate">
+                            {item.cj_match.product_name}
+                          </span>
+                          {item.cj_match.unit_normalized && (
+                            <span className="text-xs text-gray-400">
+                              ({item.cj_match.unit_normalized})
+                            </span>
+                          )}
+                        </div>
+                        <VolumeAdjuster
+                          invoiceSpec={item.extracted_spec}
+                          supplierSpec={item.cj_match.unit_normalized}
+                          supplierUnitPrice={item.cj_match.standard_price}
+                          invoiceUnitPrice={item.extracted_unit_price}
+                          onChange={(adjustedPrice, multiplier) =>
+                            handleCjAdjustment(item.id, adjustedPrice, multiplier)
+                          }
+                          colorTheme="orange"
+                        />
+                      </div>
+                    )}
+
+                    {/* SSG Volume Adjuster */}
+                    {item.ssg_match && (
+                      <div>
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
+                            신세계
+                          </span>
+                          <span className="text-xs text-gray-500 truncate">
+                            {item.ssg_match.product_name}
+                          </span>
+                          {item.ssg_match.unit_normalized && (
+                            <span className="text-xs text-gray-400">
+                              ({item.ssg_match.unit_normalized})
+                            </span>
+                          )}
+                        </div>
+                        <VolumeAdjuster
+                          invoiceSpec={item.extracted_spec}
+                          supplierSpec={item.ssg_match.unit_normalized}
+                          supplierUnitPrice={item.ssg_match.standard_price}
+                          invoiceUnitPrice={item.extracted_unit_price}
+                          onChange={(adjustedPrice, multiplier) =>
+                            handleSsgAdjustment(item.id, adjustedPrice, multiplier)
+                          }
+                          colorTheme="purple"
+                        />
+                      </div>
                     )}
                   </div>
-                ) : (
-                  <span className="text-gray-400">-</span>
-                )}
-              </div>
+
+                  {/* No match info */}
+                  {!item.cj_match && !item.ssg_match && (
+                    <div className="text-sm text-gray-500">
+                      매칭된 공급사 상품이 없어 수량 보정을 적용할 수 없습니다.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
