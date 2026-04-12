@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
-import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord, cleanInput, extractCoreKeyword } from '@/lib/preprocessing'
+import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord, cleanInput, extractCoreKeyword, extractSearchHints, splitBrandCompound } from '@/lib/preprocessing'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
@@ -70,7 +70,8 @@ function expandSauceQuery(name: string): string[] {
  */
 function reRankCandidates<T extends { product_name: string; standard_price: number; match_score: number }>(
   itemName: string,
-  candidates: T[]
+  candidates: T[],
+  manufacturerHint?: string | null
 ): T[] {
   if (candidates.length <= 1) return candidates
 
@@ -78,6 +79,15 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
     candidate: c,
     bonus: 0,
   }))
+
+  // Rule 0: 제조사/브랜드 힌트 일치 보너스 (규격에서 추출한 브랜드)
+  if (manufacturerHint) {
+    for (const s of scored) {
+      if (s.candidate.product_name.includes(manufacturerHint)) {
+        s.bonus += 0.08 // 제조사 일치 보너스
+      }
+    }
+  }
 
   // Rule 1: 정육 - 냉장/냉동 일치 우선
   if (isMeatItem(itemName)) {
@@ -150,14 +160,29 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
 }
 
 /**
- * 복합어 분리 + 동의어 확장
+ * 복합어 분리 + 동의어 확장 + 서브브랜드 분리
  * 입력 키워드를 복합어 분리 후 각 부분의 동의어를 모두 합쳐서 반환
+ * 서브브랜드(비비고, 프레스코 등)도 분리하여 본체 상품명 추출
  */
 function expandWithCompoundSplitting(keyword: string): string[] {
   const tokens = keyword.split(/\s+/).filter(Boolean)
   const allTerms = new Set<string>()
 
   for (const token of tokens) {
+    // 1. 서브브랜드 분리 시도 (비비고물만두 → 비비고 + 물만두)
+    const { parts: brandParts, manufacturer } = splitBrandCompound(token)
+    if (manufacturer && brandParts.length > 1) {
+      // 서브브랜드가 발견되면 본체와 제조사 추가
+      allTerms.add(brandParts[1]) // 본체 (물만두)
+      allTerms.add(manufacturer) // 제조사 (CJ제일제당)
+      // 본체에 대해서도 동의어 확장
+      const expanded = expandWithSynonyms(brandParts[1])
+      for (const term of expanded) {
+        allTerms.add(term)
+      }
+    }
+
+    // 2. 기존 접두사 복합어 분리 (냉장돈후지 → 냉장 + 돈후지)
     const parts = splitCompoundWord(token)
     for (const part of parts) {
       const expanded = expandWithSynonyms(part)
@@ -473,14 +498,30 @@ export async function findComparisonMatches(
     // Sauce default rule: 스파게티소스 → 토마토 스파게티소스
     const expandedTerms = expandSauceQuery(itemName)
 
+    // 규격에서 브랜드 추출 + 서브브랜드 분리로 검색 힌트 생성
+    const specStr = extractedItem?.spec || ''
+    const { searchTerms: brandHints, manufacturer } = extractSearchHints(itemName, specStr)
+
     // Build expanded search term (join top synonyms for broader search)
-    const expandedKeyword = synonymTerms.length > 1
+    // 브랜드 힌트가 있으면 검색 키워드에 추가 (예: '스파게티 오뚜기', '물만두 CJ제일제당')
+    let expandedKeyword = synonymTerms.length > 1
       ? synonymTerms.slice(0, 3).join(' ')
       : forKeyword
 
+    if (brandHints.length > 0) {
+      // 브랜드 힌트를 검색 키워드에 결합
+      const brandTerms = brandHints.filter(h => !expandedKeyword.includes(h))
+      if (brandTerms.length > 0) {
+        expandedKeyword = `${expandedKeyword} ${brandTerms.join(' ')}`
+      }
+    }
+
     console.log(`  [Comparison] Mode: ${searchMode}`)
-    console.log(`  [Comparison] Raw: "${itemName}"`)
+    console.log(`  [Comparison] Raw: "${itemName}" | Spec: "${specStr}"`)
     console.log(`  [Comparison] Keyword: "${forKeyword}" | Core: "${coreKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
+    if (manufacturer) {
+      console.log(`  [Comparison] Brand hints: manufacturer="${manufacturer}", hints=[${brandHints.join(', ')}]`)
+    }
 
     // 병렬 실행: CJ와 SSG 동시 검색 (Top 10으로 증가 - 깔때기 필터링을 위해)
     const searchLimit = 10
@@ -788,8 +829,8 @@ export async function findComparisonMatches(
     }
 
     // Domain-specific re-ranking
-    cj_candidates = reRankCandidates(itemName, cj_candidates)
-    ssg_candidates = reRankCandidates(itemName, ssg_candidates)
+    cj_candidates = reRankCandidates(itemName, cj_candidates, manufacturer)
+    ssg_candidates = reRankCandidates(itemName, ssg_candidates, manufacturer)
 
     // Top 1 = 자동 선택
     const cj_match = cj_candidates[0]

@@ -128,6 +128,7 @@ const COMPOUND_PREFIXES: { prefix: string; minRemainder: number }[] = [
   { prefix: '구운', minRemainder: 2 },
   { prefix: '데친', minRemainder: 2 },
   { prefix: '간편', minRemainder: 2 },
+  { prefix: '전처리', minRemainder: 2 },
   // 크기 (Size)
   { prefix: '미니', minRemainder: 2 },
   { prefix: '대용량', minRemainder: 2 },
@@ -247,12 +248,58 @@ const BRAND_NORMALIZATION: Record<string, string> = {
 const BRAND_KEYWORDS = [
   '오뚜기', 'CJ', '제일제당', '삼양', '농심', '대상', '샘표', '청정원', '종가집', '해찬들',
   '풀무원', '동원', '사조', '롯데', '빙그레', '매일', '남양', '서울우유',
-  '팔도', '코카콜라', '펩시', '칠성'
+  '팔도', '코카콜라', '펩시', '칠성',
+  'CJ제일제당',
 ]
+
+// ========================================
+// 서브브랜드 → 제조사 매핑 (Sub-brand → Manufacturer)
+// ========================================
+
+/**
+ * 서브브랜드(제품 브랜드)를 제조사(공급사)로 매핑
+ * 예: 비비고 → CJ제일제당, 햇반 → CJ제일제당
+ */
+const SUB_BRAND_TO_MANUFACTURER: Record<string, string> = {
+  // CJ 계열
+  비비고: 'CJ제일제당',
+  햇반: 'CJ제일제당',
+  고메: 'CJ제일제당',
+  백설: 'CJ제일제당',
+  다시다: 'CJ제일제당',
+  스팸: 'CJ제일제당',
+  // 오뚜기 계열
+  프레스코: '오뚜기',
+  진라면: '오뚜기',
+  진짬뽕: '오뚜기',
+  // 대상 계열
+  청정원: '대상',
+  종가집: '대상',
+  순창: '대상',
+  // 풀무원 계열
+  풀무원: '풀무원',
+  // 동원 계열
+  양반: '동원',
+  // 농심 계열
+  신라면: '농심',
+  안성탕면: '농심',
+  너구리: '농심',
+  // 삼양 계열
+  불닭: '삼양',
+  // 사조 계열
+  해표: '사조',
+}
+
+/**
+ * 서브브랜드 키워드 목록 (복합어 분리에 사용)
+ * 길이 내림차순 정렬하여 긴 매치 우선
+ */
+const SUB_BRAND_KEYWORDS = Object.keys(SUB_BRAND_TO_MANUFACTURER)
+  .sort((a, b) => b.length - a.length)
 
 // 가공 지시어 (괄호 분리에 사용)
 const PROCESSING_KEYWORDS = [
-  '피제거', '시제거', '깍뚝썰기', '슬라이스', '다진', '채썬', '손질',
+  '피제거', '시제거', '깍뚝썰기', '슬라이스', '다진', '채썬', '손질', '전처리',
   '냉동', '냉장', '실온', '생', '익힌', '데친', '볶은', '튀긴',
   '중간맛', '순한맛', '매운맛', '단맛', '짠맛',
   '국내산', '수입산', '미국산', '호주산', '칠레산', '국산', '수입',
@@ -543,6 +590,130 @@ export function calculateNameSimilarity(name1: string, name2: string): number {
   if (union.size === 0) return 0
 
   return intersection.size / union.size
+}
+
+// ========================================
+// 규격(spec)에서 브랜드 추출 + 복합 브랜드명 분리
+// ========================================
+
+/**
+ * 규격(spec) 문자열에서 브랜드/제조사명 추출
+ *
+ * 거래명세표의 규격 필드에 브랜드명이 포함되어 있는 경우가 많음
+ * 예: "오뚜기 1KG", "CJ 2KG" → 브랜드명 추출
+ *
+ * @param spec - 규격 문자열
+ * @returns 발견된 브랜드명 (없으면 null)
+ *
+ * @example
+ * extractBrandFromSpec('오뚜기 1KG') // '오뚜기'
+ * extractBrandFromSpec('CJ제일제당 2KG') // 'CJ제일제당'
+ * extractBrandFromSpec('1KG') // null
+ */
+export function extractBrandFromSpec(spec: string): string | null {
+  if (!spec || spec.trim() === '') return null
+
+  const cleaned = spec.trim()
+
+  // 1. 직접 브랜드 키워드 매칭 (BRAND_KEYWORDS + 서브브랜드)
+  for (const brand of BRAND_KEYWORDS) {
+    if (cleaned.includes(brand)) {
+      return brand
+    }
+  }
+
+  // 2. 서브브랜드 매칭 → 제조사 반환
+  for (const subBrand of SUB_BRAND_KEYWORDS) {
+    if (cleaned.includes(subBrand)) {
+      return SUB_BRAND_TO_MANUFACTURER[subBrand]
+    }
+  }
+
+  return null
+}
+
+/**
+ * 서브브랜드가 포함된 복합 품목명 분리
+ *
+ * 비비고물만두 → ['비비고', '물만두'] + manufacturer: 'CJ제일제당'
+ * 프레스코스파게티 → ['프레스코', '스파게티'] + manufacturer: '오뚜기'
+ *
+ * @param name - 품목명
+ * @returns { parts: 분리된 부분, manufacturer: 제조사명 | null }
+ */
+export function splitBrandCompound(name: string): {
+  parts: string[]
+  manufacturer: string | null
+} {
+  const cleaned = name.trim()
+
+  for (const subBrand of SUB_BRAND_KEYWORDS) {
+    if (cleaned.startsWith(subBrand) && cleaned.length > subBrand.length) {
+      const remainder = cleaned.slice(subBrand.length)
+      return {
+        parts: [subBrand, remainder],
+        manufacturer: SUB_BRAND_TO_MANUFACTURER[subBrand],
+      }
+    }
+  }
+
+  return { parts: [cleaned], manufacturer: null }
+}
+
+/**
+ * 품목명 + 규격에서 검색 힌트 추출
+ *
+ * 규격 필드의 브랜드 정보와 품목명의 서브브랜드를 결합하여
+ * 검색에 활용할 추가 키워드를 생성
+ *
+ * @param itemName - 품목명
+ * @param spec - 규격 문자열 (optional)
+ * @returns { searchTerms: 추가 검색 키워드[], manufacturer: 제조사명 | null }
+ *
+ * @example
+ * extractSearchHints('프레스코스파게티(건면)', '오뚜기 1KG')
+ * // { searchTerms: ['스파게티', '오뚜기'], manufacturer: '오뚜기' }
+ *
+ * extractSearchHints('비비고물만두', '')
+ * // { searchTerms: ['물만두', 'CJ제일제당'], manufacturer: 'CJ제일제당' }
+ */
+export function extractSearchHints(
+  itemName: string,
+  spec?: string
+): {
+  searchTerms: string[]
+  manufacturer: string | null
+} {
+  const hints: string[] = []
+  let manufacturer: string | null = null
+
+  // 1. 규격에서 브랜드 추출
+  if (spec) {
+    const specBrand = extractBrandFromSpec(spec)
+    if (specBrand) {
+      manufacturer = specBrand
+      hints.push(specBrand)
+    }
+  }
+
+  // 2. 품목명에서 서브브랜드 분리
+  const { parts, manufacturer: nameMfr } = splitBrandCompound(itemName)
+  if (nameMfr) {
+    // 서브브랜드가 발견되면 본체(상품명)를 힌트에 추가
+    if (parts.length > 1) {
+      hints.push(parts[1]) // 본체 상품명 (예: '물만두')
+    }
+    // 규격에서 제조사를 못 찾았으면 서브브랜드 기반 제조사 사용
+    if (!manufacturer) {
+      manufacturer = nameMfr
+      hints.push(nameMfr)
+    }
+  }
+
+  return {
+    searchTerms: [...new Set(hints)],
+    manufacturer,
+  }
 }
 
 /**
