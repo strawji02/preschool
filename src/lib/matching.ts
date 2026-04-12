@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
-import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord } from '@/lib/preprocessing'
+import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord, cleanInput, extractCoreKeyword } from '@/lib/preprocessing'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
@@ -219,7 +219,7 @@ export async function findMatches(
 ): Promise<MatchResult> {
   try {
     // Dual Normalization: BM25용 vs Semantic용
-    const { forKeyword, forSemantic } = dualNormalize(itemName)
+    const { forKeyword, forSemantic, coreKeyword } = dualNormalize(itemName)
 
     // Synonym expansion for better recall
     const synonymTerms = expandWithCompoundSplitting(forKeyword)
@@ -229,11 +229,11 @@ export async function findMatches(
 
     // Sauce default rule
     const sauceExpanded = expandSauceQuery(itemName)
-    const searchRaw = sauceExpanded.length > 1 ? sauceExpanded[0] : itemName
+    const searchRaw = sauceExpanded.length > 1 ? sauceExpanded[0] : cleanInput(itemName).primary
 
     console.log(`  [Matching] Mode: ${searchMode}`)
     console.log(`  [Matching] Raw: "${itemName}"`)
-    console.log(`  [Matching] Keyword: "${forKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
+    console.log(`  [Matching] Keyword: "${forKeyword}" | Core: "${coreKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
 
     let candidates: RpcResult[] = []
     let error: any = null
@@ -289,6 +289,59 @@ export async function findMatches(
     if (error) {
       console.error('RPC error:', error.message)
       return { status: 'unmatched' }
+    }
+
+    // Fallback search: 결과 없거나 낮은 점수일 때 코어 키워드로 재검색
+    const topCandidateScore = candidates?.[0]?.match_score ?? 0
+    const needsFallback = (!candidates || candidates.length === 0 || topCandidateScore < 0.3)
+      && coreKeyword !== forKeyword && coreKeyword.length >= 2
+
+    if (needsFallback) {
+      console.log(`  [Matching] Fallback: trying core keyword "${coreKeyword}"`)
+      const coreExpanded = expandWithCompoundSplitting(coreKeyword)
+      const coreExpandedKeyword = coreExpanded.length > 1
+        ? coreExpanded.slice(0, 3).join(' ')
+        : coreKeyword
+
+      let fallbackResult: any = null
+
+      if (searchMode === 'hybrid') {
+        fallbackResult = await supabase.rpc('search_products_hybrid', {
+          search_term_raw: coreKeyword,
+          search_term_clean: coreExpandedKeyword,
+          limit_count: 5,
+          bm25_weight: 0.5,
+          semantic_weight: 0.5,
+        })
+      } else if (searchMode === 'bm25') {
+        fallbackResult = await supabase.rpc('search_products_bm25', {
+          search_term: coreExpandedKeyword,
+          limit_count: 5,
+        })
+      } else if (searchMode !== 'semantic') {
+        fallbackResult = await supabase.rpc('search_products_fuzzy', {
+          search_term_raw: coreKeyword,
+          search_term_clean: coreExpandedKeyword,
+          limit_count: 5,
+        })
+      }
+
+      if (fallbackResult?.data && fallbackResult.data.length > 0) {
+        console.log(`  [Matching] Fallback found ${fallbackResult.data.length} candidates`)
+        // Merge: prefer original if it had results, otherwise use fallback
+        if (!candidates || candidates.length === 0) {
+          candidates = fallbackResult.data as RpcResult[]
+        } else {
+          // Combine and deduplicate, keeping higher scores
+          const seen = new Set(candidates.map((c: RpcResult) => c.id))
+          for (const fc of fallbackResult.data as RpcResult[]) {
+            if (!seen.has(fc.id)) {
+              candidates.push(fc)
+              seen.add(fc.id)
+            }
+          }
+        }
+      }
     }
 
     if (!candidates || candidates.length === 0) {
@@ -413,7 +466,7 @@ export async function findComparisonMatches(
   extractedItem?: ExtractedItem // 깔때기 알고리즘 적용 시 필요
 ): Promise<ComparisonMatchResult> {
   try {
-    const { forKeyword, forSemantic } = dualNormalize(itemName)
+    const { forKeyword, forSemantic, coreKeyword } = dualNormalize(itemName)
 
     // Synonym-expanded search terms for better recall
     const synonymTerms = expandWithCompoundSplitting(forKeyword)
@@ -427,7 +480,7 @@ export async function findComparisonMatches(
 
     console.log(`  [Comparison] Mode: ${searchMode}`)
     console.log(`  [Comparison] Raw: "${itemName}"`)
-    console.log(`  [Comparison] Keyword: "${forKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
+    console.log(`  [Comparison] Keyword: "${forKeyword}" | Core: "${coreKeyword}" | Expanded: "${expandedKeyword}" | Semantic: "${forSemantic}"`)
 
     // 병렬 실행: CJ와 SSG 동시 검색 (Top 10으로 증가 - 깔때기 필터링을 위해)
     const searchLimit = 10
@@ -459,9 +512,10 @@ export async function findComparisonMatches(
       }
     } else if (searchMode === 'hybrid') {
       // Use expanded keyword (with synonyms) for better trigram recall
-      // and original itemName for BM25 (token overlap)
+      // and cleaned itemName for BM25 (token overlap)
       const sauceExpandedH = expandSauceQuery(itemName)
-      const searchRawH: string = sauceExpandedH.length > 1 ? sauceExpandedH[0] : itemName
+      const cleanedPrimary = cleanInput(itemName).primary
+      const searchRawH: string = sauceExpandedH.length > 1 ? sauceExpandedH[0] : cleanedPrimary
 
       ;[cjResult, ssgResult] = await Promise.all([
         supabase.rpc('search_products_hybrid', {
@@ -513,8 +567,98 @@ export async function findComparisonMatches(
     }
 
     // 결과 매핑 - DBProduct로 변환
-    const cjData = cjResult.data as RpcResult[] | null
-    const ssgData = ssgResult.data as RpcResult[] | null
+    let cjData = cjResult.data as RpcResult[] | null
+    let ssgData = ssgResult.data as RpcResult[] | null
+
+    // Fallback search: 결과 없거나 낮은 점수일 때 코어 키워드로 재검색
+    const cjTopScore = cjData?.[0]?.match_score ?? 0
+    const ssgTopScore = ssgData?.[0]?.match_score ?? 0
+    const needsFallback = (cjTopScore < 0.3 && ssgTopScore < 0.3)
+      && coreKeyword !== forKeyword && coreKeyword.length >= 2
+
+    if (needsFallback) {
+      console.log(`  [Comparison] Fallback: trying core keyword "${coreKeyword}"`)
+      const coreExpanded = expandWithCompoundSplitting(coreKeyword)
+      const coreExpandedKeyword = coreExpanded.length > 1
+        ? coreExpanded.slice(0, 3).join(' ')
+        : coreKeyword
+
+      let fbCjResult: any
+      let fbSsgResult: any
+
+      if (searchMode === 'hybrid') {
+        ;[fbCjResult, fbSsgResult] = await Promise.all([
+          supabase.rpc('search_products_hybrid', {
+            search_term_raw: coreKeyword,
+            search_term_clean: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'CJ',
+            bm25_weight: 0.5,
+            semantic_weight: 0.5,
+          }),
+          supabase.rpc('search_products_hybrid', {
+            search_term_raw: coreKeyword,
+            search_term_clean: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'SHINSEGAE',
+            bm25_weight: 0.5,
+            semantic_weight: 0.5,
+          }),
+        ])
+      } else if (searchMode === 'bm25') {
+        ;[fbCjResult, fbSsgResult] = await Promise.all([
+          supabase.rpc('search_products_bm25', {
+            search_term: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'CJ',
+          }),
+          supabase.rpc('search_products_bm25', {
+            search_term: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'SHINSEGAE',
+          }),
+        ])
+      } else if (searchMode !== 'semantic') {
+        ;[fbCjResult, fbSsgResult] = await Promise.all([
+          supabase.rpc('search_products_fuzzy', {
+            search_term_raw: coreKeyword,
+            search_term_clean: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'CJ',
+          }),
+          supabase.rpc('search_products_fuzzy', {
+            search_term_raw: coreKeyword,
+            search_term_clean: coreExpandedKeyword,
+            limit_count: searchLimit,
+            supplier_filter: 'SHINSEGAE',
+          }),
+        ])
+      }
+
+      // Merge fallback results
+      if (fbCjResult?.data?.length) {
+        if (!cjData || cjData.length === 0) {
+          cjData = fbCjResult.data
+        } else {
+          const seen = new Set(cjData.map((c: RpcResult) => c.id))
+          for (const fc of fbCjResult.data as RpcResult[]) {
+            if (!seen.has(fc.id)) { cjData.push(fc); seen.add(fc.id) }
+          }
+        }
+      }
+      if (fbSsgResult?.data?.length) {
+        if (!ssgData || ssgData.length === 0) {
+          ssgData = fbSsgResult.data
+        } else {
+          const seen = new Set(ssgData.map((c: RpcResult) => c.id))
+          for (const fc of fbSsgResult.data as RpcResult[]) {
+            if (!seen.has(fc.id)) { ssgData.push(fc); seen.add(fc.id) }
+          }
+        }
+      }
+
+      console.log(`  [Comparison] After fallback: CJ=${cjData?.length ?? 0}, SSG=${ssgData?.length ?? 0}`)
+    }
 
     let cj_candidates: SupplierMatch[]
     let ssg_candidates: SupplierMatch[]

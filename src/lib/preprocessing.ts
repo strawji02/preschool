@@ -15,6 +15,102 @@ import { normalizeText as normalizeSynonyms, expandWithSynonyms } from './synony
 export { normalizeText } from './synonyms'
 
 // ========================================
+// 입력 클리닝 (Input Cleaning)
+// ========================================
+
+// 마케팅/유통 용어 (제거 대상)
+const MARKETING_TERMS = [
+  '기획절감형', '기획절감', 'FD전용', 'FD', '외식', 'DC', 'VB',
+  '기획', '특가', '할인', '프리미엄', '행사', '이벤트',
+]
+
+// 맛/종류 수식어 (코어 키워드 추출 시 제거)
+const FLAVOR_MODIFIERS = [
+  '순한맛', '매운맛', '보통맛', '중간맛', '단맛', '짠맛',
+  '그린', '레드', '화이트', '오리지널', '클래식',
+]
+
+/**
+ * 입력 텍스트 클리닝: 콤마 분리, 괄호 처리, 마케팅 용어 제거, 공백 정규화
+ *
+ * @param name - 원본 품목명
+ * @returns { primary: 주요 품목명, secondary: 부가 설명 }
+ *
+ * @example
+ * cleanInput('토마토스파게티소스,구운마늘과양파') // { primary: '토마토스파게티소스', secondary: '구운마늘과양파' }
+ * cleanInput('간편브로컬리(컷 팅)') // { primary: '간편브로컬리컷팅', secondary: '' }
+ * cleanInput('백김치,기획절감 형') // { primary: '백김치', secondary: '' }
+ */
+export function cleanInput(name: string): { primary: string; secondary: string } {
+  let cleaned = name.trim()
+
+  // 1. 괄호 내용을 공백 제거 후 본문에 합치기: (컷 팅) → 컷팅
+  cleaned = cleaned.replace(/[\(\[](.*?)[\)\]]/g, (_match, content: string) => {
+    return content.replace(/\s+/g, '')
+  })
+
+  // 2. 콤마로 분리하여 주요 품목 / 부가 설명 분리
+  const commaParts = cleaned.split(',').map(p => p.trim()).filter(Boolean)
+  let primary = commaParts[0] || cleaned
+  let secondary = commaParts.slice(1).join(' ')
+
+  // 3. 마케팅 용어 제거 (primary와 secondary 모두)
+  for (const term of MARKETING_TERMS) {
+    const regex = new RegExp(term, 'gi')
+    primary = primary.replace(regex, '')
+    secondary = secondary.replace(regex, '')
+  }
+
+  // 4. 단어 내 공백 정규화: '컷 팅' → '컷팅', '스파게티소 스' → '스파게티소스'
+  // 한글 음절 사이의 단독 공백을 제거 (2글자 이하 토큰이 한글로만 구성된 경우)
+  primary = normalizeIntraWordSpaces(primary)
+  secondary = normalizeIntraWordSpaces(secondary)
+
+  // 5. 연속 공백 정리
+  primary = primary.replace(/\s+/g, ' ').trim()
+  secondary = secondary.replace(/\s+/g, ' ').trim()
+
+  return { primary, secondary }
+}
+
+/**
+ * 한글 단어 내 불필요한 공백 제거
+ * '컷 팅' → '컷팅', '스파게티소 스' → '스파게티소스'
+ * 단, '토마토 소스' 처럼 양쪽이 모두 2글자 이상이면 유지
+ */
+function normalizeIntraWordSpaces(text: string): string {
+  // 한글 1글자 + 공백 + 한글 1-2글자 패턴을 결합
+  // 예: '컷 팅' (1+2), '소 스' (1+1)
+  return text.replace(
+    /([\uAC00-\uD7A3]{1})\s+([\uAC00-\uD7A3]{1,2})(?=\s|$|[\uAC00-\uD7A3])/g,
+    '$1$2'
+  )
+}
+
+/**
+ * 코어 키워드 추출: 맛/종류 수식어를 제거하여 핵심 상품명 추출
+ *
+ * @param name - 전처리된 품목명
+ * @returns 수식어가 제거된 코어 상품명
+ *
+ * @example
+ * extractCoreKeyword('그린치커리') // '치커리'
+ * extractCoreKeyword('순한맛김치') // '김치'
+ * extractCoreKeyword('오리지널핫도그') // '핫도그'
+ */
+export function extractCoreKeyword(name: string): string {
+  let core = name.trim()
+
+  for (const modifier of FLAVOR_MODIFIERS) {
+    if (core.startsWith(modifier) && core.length > modifier.length) {
+      core = core.slice(modifier.length)
+    }
+  }
+
+  return core.trim()
+}
+
+// ========================================
 // 복합어 분리 (Compound Word Splitting)
 // ========================================
 
@@ -91,6 +187,8 @@ const SPELLING_NORMALIZATION: Record<string, string> = {
   파인애플: '파인애플',
   파인애풀: '파인애플',
   파이낸풀: '파인애플',
+  // 채소 추가
+  브로컬리: '브로콜리',
   // 기타
   라면: '라면',
   라멘: '라면',
@@ -352,9 +450,13 @@ export function normalizeItemNameLegacy(name: string): string {
 export function dualNormalize(name: string): {
   forKeyword: string // BM25 검색용
   forSemantic: string // Trigram/Vector 검색용
+  coreKeyword: string // 수식어 제거된 코어 키워드 (fallback용)
 } {
+  // 0. 입력 클리닝 (콤마 분리, 괄호 처리, 마케팅 용어 제거)
+  const { primary } = cleanInput(name)
+
   // BM25용: 공격적 정규화 (조사 제거, 맞춤법 통일, 동의어 정규화)
-  const forKeyword = preprocessKoreanFoodName(name, {
+  const forKeyword = preprocessKoreanFoodName(primary, {
     removeParticles: true,
     normalizeSpelling: true,
     normalizeBrands: false,
@@ -364,7 +466,7 @@ export function dualNormalize(name: string): {
   })
 
   // Semantic용: 보수적 정규화 (의미 보존, 동의어 정규화)
-  const forSemantic = preprocessKoreanFoodName(name, {
+  const forSemantic = preprocessKoreanFoodName(primary, {
     removeParticles: false, // 조사는 의미에 영향 줄 수 있음
     normalizeSpelling: true, // 맞춤법만 통일
     normalizeBrands: false,
@@ -373,7 +475,10 @@ export function dualNormalize(name: string): {
     normalizeSynonyms: true, // 동의어 정규화 활성화
   })
 
-  return { forKeyword, forSemantic }
+  // 코어 키워드: 맛/종류 수식어 제거 (fallback 검색용)
+  const coreKeyword = extractCoreKeyword(forKeyword)
+
+  return { forKeyword, forSemantic, coreKeyword }
 }
 
 /**
@@ -387,8 +492,11 @@ export function dualNormalize(name: string): {
  * expandSearchQuery('계란 10개') // 전처리 후 ['계란', '달걀', '란', '에그']
  */
 export function expandSearchQuery(query: string): string[] {
+  // 0. 입력 클리닝
+  const { primary } = cleanInput(query)
+
   // 먼저 전처리 (숫자 등 제거)
-  const normalized = preprocessKoreanFoodName(query, {
+  const normalized = preprocessKoreanFoodName(primary, {
     removeParticles: true,
     normalizeSpelling: true,
     normalizeBrands: false,
