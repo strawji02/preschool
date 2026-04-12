@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
-import { preprocessKoreanFoodName, dualNormalize } from '@/lib/preprocessing'
+import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord } from '@/lib/preprocessing'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
@@ -86,9 +86,9 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
       for (const s of scored) {
         const candidateStorage = extractStorageType(s.candidate.product_name)
         if (candidateStorage === storageType) {
-          s.bonus += 0.05 // 보너스 점수
+          s.bonus += 0.10 // 냉장/냉동 일치 보너스 (강화)
         } else if (candidateStorage !== null && candidateStorage !== storageType) {
-          s.bonus -= 0.03 // 불일치 페널티
+          s.bonus -= 0.08 // 냉장/냉동 불일치 페널티 (강화)
         }
       }
     }
@@ -149,6 +149,29 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
   }))
 }
 
+/**
+ * 복합어 분리 + 동의어 확장
+ * 입력 키워드를 복합어 분리 후 각 부분의 동의어를 모두 합쳐서 반환
+ */
+function expandWithCompoundSplitting(keyword: string): string[] {
+  const tokens = keyword.split(/\s+/).filter(Boolean)
+  const allTerms = new Set<string>()
+
+  for (const token of tokens) {
+    const parts = splitCompoundWord(token)
+    for (const part of parts) {
+      const expanded = expandWithSynonyms(part)
+      for (const term of expanded) {
+        allTerms.add(term)
+      }
+    }
+    // 원본 토큰도 포함
+    allTerms.add(token)
+  }
+
+  return Array.from(allTerms)
+}
+
 // Search mode
 type SearchMode = 'trigram' | 'hybrid' | 'bm25' | 'semantic'
 const SEARCH_MODE: SearchMode = process.env.NEXT_PUBLIC_SEARCH_MODE as SearchMode || 'hybrid'
@@ -199,7 +222,7 @@ export async function findMatches(
     const { forKeyword, forSemantic } = dualNormalize(itemName)
 
     // Synonym expansion for better recall
-    const synonymTerms = expandWithSynonyms(forKeyword)
+    const synonymTerms = expandWithCompoundSplitting(forKeyword)
     const expandedKeyword = synonymTerms.length > 1
       ? synonymTerms.slice(0, 3).join(' ')
       : forKeyword
@@ -393,7 +416,7 @@ export async function findComparisonMatches(
     const { forKeyword, forSemantic } = dualNormalize(itemName)
 
     // Synonym-expanded search terms for better recall
-    const synonymTerms = expandWithSynonyms(forKeyword)
+    const synonymTerms = expandWithCompoundSplitting(forKeyword)
     // Sauce default rule: 스파게티소스 → 토마토 스파게티소스
     const expandedTerms = expandSauceQuery(itemName)
 

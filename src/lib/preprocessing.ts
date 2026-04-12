@@ -14,6 +14,56 @@ import { normalizeText as normalizeSynonyms, expandWithSynonyms } from './synony
 // Re-export normalizeText for convenience
 export { normalizeText } from './synonyms'
 
+// ========================================
+// 복합어 분리 (Compound Word Splitting)
+// ========================================
+
+// 접두사 목록: 저장방식, 가공상태, 크기, 형태
+const COMPOUND_PREFIXES: { prefix: string; minRemainder: number }[] = [
+  // 저장방식 (Storage)
+  { prefix: '냉장', minRemainder: 2 },
+  { prefix: '냉동', minRemainder: 2 },
+  // 가공상태 (Processing)
+  { prefix: '깐', minRemainder: 2 },
+  { prefix: '썰은', minRemainder: 2 },
+  { prefix: '다진', minRemainder: 2 },
+  { prefix: '삶은', minRemainder: 2 },
+  { prefix: '볶은', minRemainder: 2 },
+  { prefix: '구운', minRemainder: 2 },
+  { prefix: '데친', minRemainder: 2 },
+  { prefix: '간편', minRemainder: 2 },
+  // 크기 (Size)
+  { prefix: '미니', minRemainder: 2 },
+  { prefix: '대용량', minRemainder: 2 },
+  // 형태 (Type modifiers)
+  { prefix: '순살', minRemainder: 2 },
+  { prefix: '뼈없는', minRemainder: 2 },
+  { prefix: '무뼈', minRemainder: 2 },
+]
+
+/**
+ * 복합어를 접두사 + 본체로 분리
+ *
+ * @param word - 복합어 (예: '냉장돈후지', '깐감자', '미니깍두기')
+ * @returns 분리된 단어 배열 (접두사 + 나머지)
+ *
+ * @example
+ * splitCompoundWord('냉장돈후지') // ['냉장', '돈후지']
+ * splitCompoundWord('깐감자') // ['깐', '감자']
+ * splitCompoundWord('미니깍두기') // ['미니', '깍두기']
+ * splitCompoundWord('냉장한우목심') // ['냉장', '한우목심']
+ * splitCompoundWord('감자') // ['감자'] (분리 없음)
+ */
+export function splitCompoundWord(word: string): string[] {
+  for (const { prefix, minRemainder } of COMPOUND_PREFIXES) {
+    if (word.startsWith(prefix) && word.length >= prefix.length + minRemainder) {
+      const remainder = word.slice(prefix.length)
+      return [prefix, remainder]
+    }
+  }
+  return [word]
+}
+
 // 맞춤법 통일 매핑
 const SPELLING_NORMALIZATION: Record<string, string> = {
   // 초콜릿 계열
@@ -347,8 +397,23 @@ export function expandSearchQuery(query: string): string[] {
     normalizeSynonyms: false, // 동의어는 expandWithSynonyms에서 처리
   })
 
-  // 동의어 확장
-  return expandWithSynonyms(normalized)
+  // 복합어 분리 후 각 부분에 대해 동의어 확장
+  const tokens = normalized.split(/\s+/).filter(Boolean)
+  const allTerms = new Set<string>()
+
+  for (const token of tokens) {
+    const parts = splitCompoundWord(token)
+    for (const part of parts) {
+      const expanded = expandWithSynonyms(part)
+      for (const term of expanded) {
+        allTerms.add(term)
+      }
+    }
+    // 원본 토큰도 포함 (복합어 자체가 DB에 있을 수 있음)
+    allTerms.add(token)
+  }
+
+  return Array.from(allTerms)
 }
 
 /**
