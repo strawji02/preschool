@@ -523,25 +523,35 @@ export function useAuditSession() {
       // 3. 엑셀 분석 API 호출 (매칭 수행)
       dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: 1 })
 
-      const analyzeRes = await fetch('/api/analyze/excel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: initData.session_id,
-          items: parseResult.items,
-        }),
-      })
-
-      if (!analyzeRes.ok) {
-        const errorData = await analyzeRes.json().catch(() => ({}))
-        throw new Error(errorData.error || '품목 매칭 실패')
+      // Vercel function timeout(최대 60초) 회피: 품목을 배치로 나눠서 호출
+      const BATCH_SIZE = 20
+      const allItems = parseResult.items
+      const batches: typeof allItems[] = []
+      for (let i = 0; i < allItems.length; i += BATCH_SIZE) {
+        batches.push(allItems.slice(i, i + BATCH_SIZE))
       }
 
-      const analyzeData = await analyzeRes.json()
-      if (analyzeData.success && analyzeData.items) {
-        dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
-      } else {
-        throw new Error(analyzeData.error || '분석 결과가 없습니다.')
+      for (const [batchIdx, batch] of batches.entries()) {
+        const analyzeRes = await fetch('/api/analyze/excel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: initData.session_id,
+            items: batch,
+          }),
+        })
+
+        if (!analyzeRes.ok) {
+          const errorData = await analyzeRes.json().catch(() => ({}))
+          throw new Error(errorData.error || `품목 매칭 실패 (배치 ${batchIdx + 1}/${batches.length})`)
+        }
+
+        const analyzeData = await analyzeRes.json()
+        if (analyzeData.success && analyzeData.items) {
+          dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+        } else {
+          throw new Error(analyzeData.error || '분석 결과가 없습니다.')
+        }
       }
 
       // 4. 분석 완료

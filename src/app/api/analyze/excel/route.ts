@@ -4,9 +4,9 @@ import { findComparisonMatches, calculateComparisonSavings } from '@/lib/matchin
 import type { ComparisonItem } from '@/types/audit'
 
 // Node.js Runtime (Edge runtime의 자체 타임아웃으로 인해 대량 품목 처리 시 504 발생하여 전환)
-// Cloud Run의 timeoutSeconds(600초) 설정에 맡김
+// 프론트엔드에서 20개씩 배치로 나눠 호출하므로 각 호출은 60초 내에 완료되어야 함
 export const runtime = 'nodejs'
-export const maxDuration = 540
+export const maxDuration = 60
 
 interface ExcelItem {
   name: string
