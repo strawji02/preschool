@@ -34,3 +34,16 @@ __tests__
 *.spec.ts
 *.spec.tsx
 coverage
+
+# Local test/scratch data (not used at runtime)
+test-data
+docs
+claudedocs
+src/lib/agents
+*.xlsx
+*.xls
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.heic

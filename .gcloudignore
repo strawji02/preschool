@@ -1,0 +1,32 @@
+# Ignored when uploading source to Cloud Build
+.git
+.gitignore
+node_modules
+.next
+out
+
+# Local test/scratch data
+test-data
+docs
+claudedocs
+src/lib/agents
+*.xlsx
+*.xls
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.heic
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# OS
+.DS_Store

@@ -3,8 +3,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { findComparisonMatches, calculateComparisonSavings } from '@/lib/matching'
 import type { ComparisonItem } from '@/types/audit'
 
-// Edge Runtime 사용
-export const runtime = 'edge'
+// Node.js Runtime (Edge runtime의 자체 타임아웃으로 인해 대량 품목 처리 시 504 발생하여 전환)
+// Cloud Run의 timeoutSeconds(600초) 설정에 맡김
+export const runtime = 'nodejs'
+export const maxDuration = 540
 
 interface ExcelItem {
   name: string
