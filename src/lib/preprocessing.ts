@@ -498,9 +498,10 @@ export function dualNormalize(name: string): {
   forKeyword: string // BM25 검색용
   forSemantic: string // Trigram/Vector 검색용
   coreKeyword: string // 수식어 제거된 코어 키워드 (fallback용)
+  secondaryKeywords: string[] // 콤마 분리된 부가 키워드 (스틱형, 슬라이스 등)
 } {
   // 0. 입력 클리닝 (콤마 분리, 괄호 처리, 마케팅 용어 제거)
-  const { primary } = cleanInput(name)
+  const { primary, secondary } = cleanInput(name)
 
   // BM25용: 공격적 정규화 (조사 제거, 맞춤법 통일, 동의어 정규화)
   const forKeyword = preprocessKoreanFoodName(primary, {
@@ -525,7 +526,23 @@ export function dualNormalize(name: string): {
   // 코어 키워드: 맛/종류 수식어 제거 (fallback 검색용)
   const coreKeyword = extractCoreKeyword(forKeyword)
 
-  return { forKeyword, forSemantic, coreKeyword }
+  // 부가 키워드: 콤마 뒤의 설명 (스틱형, 슬라이스 등)에서 유의미한 키워드 추출
+  const secondaryKeywords: string[] = []
+  if (secondary) {
+    const cleaned = preprocessKoreanFoodName(secondary, {
+      removeParticles: true,
+      normalizeSpelling: true,
+      normalizeBrands: false,
+      removeNumbers: true,
+      removeSpecialChars: true,
+      normalizeSynonyms: true,
+    })
+    if (cleaned.length >= 2) {
+      secondaryKeywords.push(...cleaned.split(/\s+/).filter(k => k.length >= 2))
+    }
+  }
+
+  return { forKeyword, forSemantic, coreKeyword, secondaryKeywords }
 }
 
 /**
@@ -697,11 +714,13 @@ export function extractSearchHints(
   }
 
   // 2. 품목명에서 서브브랜드 분리
-  const { parts, manufacturer: nameMfr } = splitBrandCompound(itemName)
+  // cleanInput으로 정리된 primary를 사용하여 괄호/마케팅 노이즈 제거
+  const { primary: cleanedName } = cleanInput(itemName)
+  const { parts, manufacturer: nameMfr } = splitBrandCompound(cleanedName)
   if (nameMfr) {
     // 서브브랜드가 발견되면 본체(상품명)를 힌트에 추가
     if (parts.length > 1) {
-      hints.push(parts[1]) // 본체 상품명 (예: '물만두')
+      hints.push(parts[1]) // 본체 상품명 (예: '물만두', '스파게티건면')
     }
     // 규격에서 제조사를 못 찾았으면 서브브랜드 기반 제조사 사용
     if (!manufacturer) {

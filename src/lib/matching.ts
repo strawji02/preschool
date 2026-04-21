@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
 import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord, cleanInput, extractCoreKeyword, extractSearchHints, splitBrandCompound } from '@/lib/preprocessing'
-import { expandWithSynonyms } from '@/lib/synonyms'
+import { expandWithSynonyms, expandBrandEquivalents } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
 import type { InvoiceItem } from '@/lib/funnel/excel-parser'
@@ -58,6 +58,127 @@ function expandSauceQuery(name: string): string[] {
   }
   return [name]
 }
+
+// ========================================
+// 후보 오매칭 필터 (Susan 검수 피드백 반영)
+// ========================================
+
+/**
+ * 단어 경계를 고려한 매칭
+ * - 3글자 이상 키워드: substring 매칭 허용
+ * - 1-2글자 키워드: 단어 시작(앞에 한글 없음) 또는 끝(뒤에 한글 없음)에서만 매칭
+ *   예: "무" → "세척무"(O, suffix), "무 국내산"(O, prefix), "무항생제"(X, middle)
+ */
+function hasWordMatch(text: string, keyword: string): boolean {
+  if (!text.includes(keyword)) return false
+  if (keyword.length >= 3) return true
+
+  const isHangul = (c: string) => c >= '가' && c <= '힣'
+  let searchFrom = 0
+  while (true) {
+    const idx = text.indexOf(keyword, searchFrom)
+    if (idx < 0) return false
+    const before = idx > 0 ? text[idx - 1] : ''
+    const after = idx + keyword.length < text.length ? text[idx + keyword.length] : ''
+    const hasHangulBefore = isHangul(before)
+    const hasHangulAfter = isHangul(after)
+    // 앞뒤 모두 한글이면 복합어 중간 → 다음 위치 탐색
+    if (hasHangulBefore && hasHangulAfter) {
+      searchFrom = idx + 1
+      continue
+    }
+    return true
+  }
+}
+
+/**
+ * 후보에서 "브랜드만 일치하고 핵심어는 하나도 안 맞는" 것들을 제외
+ *
+ * Susan 검수 피드백 사례:
+ * - "스팸캔(CJ,1.81KG/EA)" → "CJ크레잇 프로틴바"가 1위로 올라오는 문제
+ * - "카레분,순한맛(오뚜기,100G/EA)" → "오뚜기밥"이 1위로 올라오는 문제
+ * - "비비고물만두(CJ)" → "CJ크레잇 프로틴바"가 1위로 올라오는 문제
+ *
+ * 로직:
+ * - 품목명에서 추출한 비-브랜드 핵심어(coreKeywords)가 있다면,
+ *   후보의 product_name에 core 중 최소 1개는 포함되어야 함
+ * - 짧은 핵심어(1-2글자)는 단어 경계 체크 (hasWordMatch)
+ *
+ * @param candidates RPC 결과 후보 목록
+ * @param coreKeywords 품목명에서 추출한 핵심어 (브랜드 제외)
+ * @returns 필터를 통과한 후보들. 통과한 후보가 너무 적으면 원본 반환 (recall 안전장치)
+ */
+function filterCandidatesByCoreKeyword<T extends { product_name: string }>(
+  candidates: T[],
+  coreKeywords: string[]
+): T[] {
+  if (candidates.length === 0) return candidates
+  if (coreKeywords.length === 0) return candidates
+
+  const filtered = candidates.filter(c => {
+    const name = c.product_name
+    // 핵심어 중 최소 1개가 단어경계 매칭되어야 통과
+    return coreKeywords.some(kw => hasWordMatch(name, kw))
+  })
+
+  // 필터 후 2개 이상이면 적용, 아니면 원본 유지 (recall 안전장치)
+  if (filtered.length >= 2) {
+    return filtered
+  }
+  // 1개라도 통과한 후보가 있으면 그것 + 원본 Top 일부 복원
+  if (filtered.length === 1) {
+    const others = candidates.filter(c => !filtered.includes(c)).slice(0, 2)
+    return [...filtered, ...others]
+  }
+  return candidates
+}
+
+/**
+ * 품목명에서 브랜드를 제외한 핵심어 배열 추출
+ *
+ * 예시:
+ * - "카레분,순한맛" + 제조사="오뚜기" → ["카레분", "카레", "순한맛"] (오뚜기 제거)
+ * - "스팸캔,DC" + 제조사="CJ" → ["스팸캔", "스팸"] (CJ, DC 제거)
+ * - "비비고물만두" → ["물만두", "만두"] (비비고 제거)
+ */
+function extractCoreKeywordsForFilter(
+  itemName: string,
+  manufacturer: string | null
+): string[] {
+  const { primary } = cleanInput(itemName)
+  const { parts } = splitBrandCompound(primary)
+  const body = parts.length > 1 ? parts[1] : parts[0]
+
+  const core = extractCoreKeyword(body)
+  const coreSet = new Set<string>()
+  coreSet.add(body)
+  if (core && core !== body) coreSet.add(core)
+
+  // 동의어도 추가 (스팸캔 → 스팸, 카레분 → 카레 등 표준 용어 확장)
+  for (const kw of Array.from(coreSet)) {
+    for (const syn of expandWithSynonyms(kw)) {
+      coreSet.add(syn)
+    }
+  }
+
+  // 브랜드/제조사는 핵심어가 아니므로 제외
+  const brandsToRemove = new Set<string>()
+  if (manufacturer) {
+    for (const b of expandBrandEquivalents(manufacturer)) {
+      brandsToRemove.add(b)
+    }
+  }
+
+  return Array.from(coreSet).filter(kw => {
+    if (kw.length < 2) return false
+    if (brandsToRemove.has(kw)) return false
+    return true
+  })
+}
+
+// ========================================
+// 도메인 재순위
+// ========================================
 
 /**
  * 후보 목록에 대해 도메인별 재순위 적용
@@ -163,38 +284,49 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
  * 복합어 분리 + 동의어 확장 + 서브브랜드 분리
  * 입력 키워드를 복합어 분리 후 각 부분의 동의어를 모두 합쳐서 반환
  * 서브브랜드(비비고, 프레스코 등)도 분리하여 본체 상품명 추출
+ *
+ * 반환 순서: 본체(product body) → 제조사 → 원본 → 접두사 동의어 (우선순위 순)
  */
 function expandWithCompoundSplitting(keyword: string): string[] {
   const tokens = keyword.split(/\s+/).filter(Boolean)
-  const allTerms = new Set<string>()
+  const primaryTerms: string[] = []   // 본체, 제조사 (높은 우선순위)
+  const secondaryTerms: string[] = [] // 원본 토큰, 본체 동의어
+  const tertiaryTerms: string[] = []  // 접두사 동의어 (낮은 우선순위)
+  const seen = new Set<string>()
+
+  const addTo = (list: string[], term: string) => {
+    if (!seen.has(term)) { seen.add(term); list.push(term) }
+  }
 
   for (const token of tokens) {
     // 1. 서브브랜드 분리 시도 (비비고물만두 → 비비고 + 물만두)
     const { parts: brandParts, manufacturer } = splitBrandCompound(token)
     if (manufacturer && brandParts.length > 1) {
-      // 서브브랜드가 발견되면 본체와 제조사 추가
-      allTerms.add(brandParts[1]) // 본체 (물만두)
-      allTerms.add(manufacturer) // 제조사 (CJ제일제당)
-      // 본체에 대해서도 동의어 확장
+      addTo(primaryTerms, brandParts[1]) // 본체 (물만두)
+      addTo(primaryTerms, manufacturer) // 제조사 (CJ제일제당)
       const expanded = expandWithSynonyms(brandParts[1])
-      for (const term of expanded) {
-        allTerms.add(term)
-      }
+      for (const term of expanded) addTo(secondaryTerms, term)
     }
 
-    // 2. 기존 접두사 복합어 분리 (냉장돈후지 → 냉장 + 돈후지)
+    // 2. 기존 접두사 복합어 분리 (냉장돈후지 → 냉장 + 돈후지, 전처리파인애플 → 전처리 + 파인애플)
     const parts = splitCompoundWord(token)
-    for (const part of parts) {
-      const expanded = expandWithSynonyms(part)
-      for (const term of expanded) {
-        allTerms.add(term)
-      }
+    if (parts.length > 1) {
+      // parts[0] = 접두사, parts[1] = 본체
+      addTo(primaryTerms, parts[1]) // 본체 우선
+      const bodyExpanded = expandWithSynonyms(parts[1])
+      for (const term of bodyExpanded) addTo(secondaryTerms, term)
+      // 접두사 동의어는 낮은 우선순위
+      const prefixExpanded = expandWithSynonyms(parts[0])
+      for (const term of prefixExpanded) addTo(tertiaryTerms, term)
+    } else {
+      const expanded = expandWithSynonyms(token)
+      for (const term of expanded) addTo(secondaryTerms, term)
     }
     // 원본 토큰도 포함
-    allTerms.add(token)
+    addTo(secondaryTerms, token)
   }
 
-  return Array.from(allTerms)
+  return [...primaryTerms, ...secondaryTerms, ...tertiaryTerms]
 }
 
 // Search mode
@@ -244,13 +376,38 @@ export async function findMatches(
 ): Promise<MatchResult> {
   try {
     // Dual Normalization: BM25용 vs Semantic용
-    const { forKeyword, forSemantic, coreKeyword } = dualNormalize(itemName)
+    const { forKeyword, forSemantic, coreKeyword, secondaryKeywords } = dualNormalize(itemName)
+
+    // 서브브랜드 분리로 검색 힌트 생성
+    const { searchTerms: brandHintsM, manufacturer: manufacturerM } = extractSearchHints(itemName)
 
     // Synonym expansion for better recall
     const synonymTerms = expandWithCompoundSplitting(forKeyword)
-    const expandedKeyword = synonymTerms.length > 1
-      ? synonymTerms.slice(0, 3).join(' ')
-      : forKeyword
+    if (secondaryKeywords.length > 0) {
+      for (const kw of secondaryKeywords) {
+        synonymTerms.push(kw)
+      }
+    }
+
+    // Build expanded keyword (focused when brand splitting gives manufacturer)
+    let expandedKeyword: string
+    if (manufacturerM && brandHintsM.length > 0) {
+      const keyTerms = [...brandHintsM]
+      for (const kw of secondaryKeywords) {
+        if (!keyTerms.includes(kw)) keyTerms.push(kw)
+      }
+      expandedKeyword = keyTerms.join(' ')
+    } else {
+      expandedKeyword = synonymTerms.length > 1
+        ? synonymTerms.slice(0, 4).join(' ')
+        : forKeyword
+      // 부가 키워드(콤마 뒤: 스틱형 등)가 slice에서 잘렸을 수 있으므로 명시적으로 추가
+      for (const kw of secondaryKeywords) {
+        if (!expandedKeyword.includes(kw)) {
+          expandedKeyword = `${expandedKeyword} ${kw}`
+        }
+      }
+    }
 
     // Sauce default rule
     const sauceExpanded = expandSauceQuery(itemName)
@@ -386,8 +543,8 @@ export async function findMatches(
       standard_unit: c.standard_unit ?? undefined,
     }))
 
-    // Domain-specific re-ranking
-    matchCandidates = reRankCandidates(itemName, matchCandidates)
+    // Domain-specific re-ranking (제조사 힌트 전달하여 브랜드 부스트 적용)
+    matchCandidates = reRankCandidates(itemName, matchCandidates, manufacturerM)
 
     const topScore = matchCandidates[0].match_score
 
@@ -491,10 +648,16 @@ export async function findComparisonMatches(
   extractedItem?: ExtractedItem // 깔때기 알고리즘 적용 시 필요
 ): Promise<ComparisonMatchResult> {
   try {
-    const { forKeyword, forSemantic, coreKeyword } = dualNormalize(itemName)
+    const { forKeyword, forSemantic, coreKeyword, secondaryKeywords } = dualNormalize(itemName)
 
     // Synonym-expanded search terms for better recall
     const synonymTerms = expandWithCompoundSplitting(forKeyword)
+    // 부가 키워드(콤마 뒤: 스틱형 등)도 검색에 포함
+    if (secondaryKeywords.length > 0) {
+      for (const kw of secondaryKeywords) {
+        synonymTerms.push(kw)
+      }
+    }
     // Sauce default rule: 스파게티소스 → 토마토 스파게티소스
     const expandedTerms = expandSauceQuery(itemName)
 
@@ -502,17 +665,34 @@ export async function findComparisonMatches(
     const specStr = extractedItem?.spec || ''
     const { searchTerms: brandHints, manufacturer } = extractSearchHints(itemName, specStr)
 
-    // Build expanded search term (join top synonyms for broader search)
-    // 브랜드 힌트가 있으면 검색 키워드에 추가 (예: '스파게티 오뚜기', '물만두 CJ제일제당')
-    let expandedKeyword = synonymTerms.length > 1
-      ? synonymTerms.slice(0, 3).join(' ')
-      : forKeyword
-
-    if (brandHints.length > 0) {
-      // 브랜드 힌트를 검색 키워드에 결합
-      const brandTerms = brandHints.filter(h => !expandedKeyword.includes(h))
-      if (brandTerms.length > 0) {
-        expandedKeyword = `${expandedKeyword} ${brandTerms.join(' ')}`
+    // Build expanded search term
+    // 브랜드 분리가 된 경우: 본체 + 제조사를 핵심 검색어로 사용 (노이즈 최소화)
+    // 예: 비비고물만두 → "물만두 CJ제일제당", 프레스코스파게티 → "스파게티 오뚜기"
+    let expandedKeyword: string
+    if (manufacturer && brandHints.length > 0) {
+      // 브랜드 힌트(본체 + 제조사)를 중심으로 검색어 구성
+      const keyTerms = [...brandHints]
+      // 부가 키워드도 추가 (스틱형 등)
+      for (const kw of secondaryKeywords) {
+        if (!keyTerms.includes(kw)) keyTerms.push(kw)
+      }
+      expandedKeyword = keyTerms.join(' ')
+    } else {
+      expandedKeyword = synonymTerms.length > 1
+        ? synonymTerms.slice(0, 4).join(' ')
+        : forKeyword
+      // 브랜드 힌트가 있으면 추가
+      if (brandHints.length > 0) {
+        const brandTerms = brandHints.filter(h => !expandedKeyword.includes(h))
+        if (brandTerms.length > 0) {
+          expandedKeyword = `${expandedKeyword} ${brandTerms.join(' ')}`
+        }
+      }
+      // 부가 키워드(콤마 뒤: 스틱형 등)가 slice에서 잘렸을 수 있으므로 명시적으로 추가
+      for (const kw of secondaryKeywords) {
+        if (!expandedKeyword.includes(kw)) {
+          expandedKeyword = `${expandedKeyword} ${kw}`
+        }
       }
     }
 
@@ -802,8 +982,8 @@ export async function findComparisonMatches(
         ssg_candidates = []
       }
     } else {
-      // 깔때기 알고리즘 미적용 (기존 로직)
-      cj_candidates = (cjData || []).slice(0, 5).map(item => ({
+      // 깔때기 알고리즘 미적용 (기존 로직) - 원본 10개까지 유지하여 필터 후에도 Top 5 확보
+      cj_candidates = (cjData || []).map(item => ({
         id: item.id,
         product_name: item.product_name,
         standard_price: item.standard_price,
@@ -815,7 +995,7 @@ export async function findComparisonMatches(
         spec_unit: item.spec_unit ?? undefined,
       }))
 
-      ssg_candidates = (ssgData || []).slice(0, 5).map(item => ({
+      ssg_candidates = (ssgData || []).map(item => ({
         id: item.id,
         product_name: item.product_name,
         standard_price: item.standard_price,
@@ -828,9 +1008,26 @@ export async function findComparisonMatches(
       }))
     }
 
+    // 브랜드-only 오매칭 필터 (Susan 검수 피드백 반영)
+    // 예: "스팸캔(CJ)" → "CJ 프로틴바" 차단, "카레분(오뚜기)" → "오뚜기밥" 차단
+    const coreFilterKeywords = extractCoreKeywordsForFilter(itemName, manufacturer)
+    if (coreFilterKeywords.length > 0) {
+      const cjBefore = cj_candidates.length
+      const ssgBefore = ssg_candidates.length
+      cj_candidates = filterCandidatesByCoreKeyword(cj_candidates, coreFilterKeywords)
+      ssg_candidates = filterCandidatesByCoreKeyword(ssg_candidates, coreFilterKeywords)
+      if (cjBefore !== cj_candidates.length || ssgBefore !== ssg_candidates.length) {
+        console.log(`  [CoreFilter] Filtered: CJ ${cjBefore}→${cj_candidates.length}, SSG ${ssgBefore}→${ssg_candidates.length} (core=[${coreFilterKeywords.slice(0, 5).join(',')}])`)
+      }
+    }
+
     // Domain-specific re-ranking
     cj_candidates = reRankCandidates(itemName, cj_candidates, manufacturer)
     ssg_candidates = reRankCandidates(itemName, ssg_candidates, manufacturer)
+
+    // Top 5로 최종 자르기
+    cj_candidates = cj_candidates.slice(0, 5)
+    ssg_candidates = ssg_candidates.slice(0, 5)
 
     // Top 1 = 자동 선택
     const cj_match = cj_candidates[0]
