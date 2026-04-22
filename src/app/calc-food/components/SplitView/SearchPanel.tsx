@@ -42,8 +42,8 @@ function parseSpec(spec: string | undefined): { quantity: number; unit: string }
     return { quantity: parseFloat(matchWithNumber[1]), unit: matchWithNumber[2].toUpperCase() }
   }
   
-  // 숫자 없이 단위만 있는 경우 (예: KG/톡, KG) → quantity = 1
-  const matchUnitOnly = spec.match(/^(KG|G|L|ML)(?:\/|$|\s)/i)
+  // 숫자 없이 단위만 있는 경우 (예: KG/톡, KG, "KG,상") → quantity = 1
+  const matchUnitOnly = spec.match(/^(KG|G|L|ML)(?:[,\/\s]|$)/i)
   if (matchUnitOnly) {
     return { quantity: 1, unit: matchUnitOnly[1].toUpperCase() }
   }
@@ -122,6 +122,16 @@ function calculateSupplierQuantityExact(invoiceTotalGrams: number, match: Suppli
   return Math.round((invoiceTotalGrams / matchGrams) * 10) / 10
 }
 
+// 매칭 API 응답에 저장된 SupplierMatch 후보를 MatchCandidate로 변환 (top 5)
+function toCandidates(item: ComparisonItem, supplier: 'CJ' | 'SHINSEGAE'): MatchCandidate[] {
+  const raw = (supplier === 'CJ' ? item.cj_candidates : item.ssg_candidates) ?? []
+  return raw.slice(0, 5).map<MatchCandidate>((c) => ({
+    ...c,
+    supplier,
+    unit_normalized: c.unit_normalized ?? '',
+  }))
+}
+
 export function SearchPanel({
   item,
   isFocused,
@@ -143,17 +153,17 @@ export function SearchPanel({
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // AI 추출 키워드로 검색어 초기화
+  // 초기엔 이미 매칭된 TOP-5 후보를 표시 (검색 API 호출 X)
+  // 사용자가 검색어 입력 후 검색 버튼 누르면 그때 검색 API 호출
   useEffect(() => {
     if (item) {
-      const keyword = extractSearchKeyword(item.extracted_name)
-      setQuery(keyword)
-      performSearch(keyword)
+      setResults(toCandidates(item, supplier))
+      setQuery('')  // 빈값으로 시작 (사용자가 검색할 때만 입력)
     } else {
       setQuery('')
       setResults([])
     }
-  }, [item?.id])
+  }, [item?.id, supplier])
 
   // 포커스 시 입력창에 포커스
   useEffect(() => {
@@ -211,12 +221,11 @@ export function SearchPanel({
     performSearch(query)
   }, [query, item])
 
-  // 검색어 초기화 (Esc)
+  // 검색어 초기화 (Esc) — 후보 5개 다시 표시
   const handleReset = () => {
     if (item) {
-      const keyword = extractSearchKeyword(item.extracted_name)
-      setQuery(keyword)
-      performSearch(keyword)
+      setQuery('')
+      setResults(toCandidates(item, supplier))
     }
   }
 
@@ -453,55 +462,6 @@ export function SearchPanel({
         )
       })()}
 
-      {/* 검색창 */}
-      <div className="border-b bg-white p-4">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleSearch()
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  handleReset()
-                }
-              }}
-              placeholder="검색어 입력..."
-              className={cn(
-                'w-full rounded-lg border py-2 pl-10 pr-4 focus:outline-none focus:ring-2',
-                isFocused
-                  ? 'border-orange-400 focus:ring-orange-200'
-                  : 'border-gray-300 focus:ring-blue-200'
-              )}
-            />
-          </div>
-
-          <button
-            onClick={handleReset}
-            className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50"
-            title="검색어 초기화 (Esc)"
-          >
-            <RotateCcw size={18} />
-          </button>
-
-          <button
-            onClick={handleSearch}
-            disabled={isLoading}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-white hover:bg-orange-600 disabled:opacity-50"
-          >
-            {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-            검색
-          </button>
-        </div>
-      </div>
-
       {/* AI 추천 TOP 3 */}
       {top3Recommendations.length > 0 && (
         <div className="border-b bg-gradient-to-r from-yellow-50 to-orange-50 p-4">
@@ -572,7 +532,9 @@ export function SearchPanel({
       {/* 정렬 옵션 */}
       <div className="flex items-center justify-between border-b bg-gray-50 px-4 py-2">
         <span className="text-sm text-gray-600">
-          검색 결과 <span className="font-semibold">{results.length}</span>건
+          {query.trim() ? '검색 결과' : '추천 후보'}
+          {' '}<span className="font-semibold">{results.length}</span>
+          {query.trim() ? '건' : '개'}
         </span>
         <div className="flex gap-1">
           {[
@@ -685,6 +647,58 @@ export function SearchPanel({
             )
           })
         )}
+      </div>
+
+      {/* 하단 검색 영역 — 후보 5개에 원하는 결과가 없으면 여기서 검색 */}
+      <div className="shrink-0 border-t-2 border-green-200 bg-green-50/40 p-3">
+        <p className="mb-1.5 text-xs font-medium text-gray-600">
+          🔎 위 후보에 원하는 제품이 없으면 검색어로 신세계 DB 직접 검색:
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleSearch()
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  handleReset()
+                }
+              }}
+              placeholder="다른 키워드로 검색..."
+              className={cn(
+                'w-full rounded-lg border py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2',
+                isFocused
+                  ? 'border-green-400 focus:ring-green-200'
+                  : 'border-gray-300 focus:ring-blue-200',
+              )}
+            />
+          </div>
+
+          <button
+            onClick={handleReset}
+            className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50"
+            title="초기화 — 후보 5개 다시 보기 (Esc)"
+          >
+            <RotateCcw size={16} />
+          </button>
+
+          <button
+            onClick={handleSearch}
+            disabled={isLoading || !query.trim()}
+            className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+            검색
+          </button>
+        </div>
       </div>
     </div>
   )

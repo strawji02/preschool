@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { CheckCircle, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -35,6 +35,33 @@ export function SplitView({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [focusedPanel, setFocusedPanel] = useState<PanelFocus>('left')
   const [selectedResultIndex, setSelectedResultIndex] = useState(0)
+
+  // 좌/우 패널 너비 비율 (초기 40% : 60%)
+  const [leftPct, setLeftPct] = useState(40)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isResizingRef = useRef(false)
+
+  const handleResizerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizingRef.current = true
+    const onMove = (ev: MouseEvent) => {
+      if (!isResizingRef.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100
+      setLeftPct(Math.max(20, Math.min(75, pct)))
+    }
+    const onUp = () => {
+      isResizingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
   
   // PDF 모달 상태
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false)
@@ -176,15 +203,16 @@ export function SplitView({
       <ProgressBar status={progressStatus} />
 
       {/* 스플릿 뷰 */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* 좌측 패널: 거래명세서 (40%) */}
+      <div ref={containerRef} className="flex flex-1 overflow-hidden">
+        {/* 좌측 패널: 거래명세서 */}
         <div
           className={cn(
-            'w-[40%] border-r-2 bg-white transition-all',
+            'border-r bg-white transition-colors overflow-hidden',
             focusedPanel === 'left'
               ? 'border-blue-500'
               : 'border-gray-200'
           )}
+          style={{ width: `${leftPct}%`, flexShrink: 0 }}
           onClick={() => setFocusedPanel('left')}
         >
           <InvoicePanel
@@ -197,12 +225,25 @@ export function SplitView({
           />
         </div>
 
-        {/* 우측 패널: CJ 스마트 검색 (60%) */}
+        {/* 리사이저 핸들 */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={handleResizerMouseDown}
+          onDoubleClick={() => setLeftPct(40)}
+          className="relative flex w-1 cursor-col-resize items-center justify-center bg-gray-200 hover:bg-blue-400 transition-colors"
+          title="드래그로 크기 조정 (더블클릭하면 기본값 복원)"
+        >
+          {/* 드래그 영역을 넓혀 UX 향상 (시각적 핸들은 좁게) */}
+          <div className="absolute inset-y-0 -left-2 -right-2" />
+        </div>
+
+        {/* 우측 패널: 신세계 검색 */}
         <div
           className={cn(
-            'flex-1 bg-white transition-all',
+            'flex-1 bg-white transition-all overflow-hidden',
             focusedPanel === 'right'
-              ? 'ring-2 ring-inset ring-orange-500'
+              ? 'ring-2 ring-inset ring-green-500'
               : ''
           )}
           onClick={() => setFocusedPanel('right')}

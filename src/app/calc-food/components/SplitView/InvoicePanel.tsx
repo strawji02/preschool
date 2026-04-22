@@ -29,8 +29,8 @@ function parseSpec(spec: string | undefined): { quantity: number; unit: string }
     return { quantity: parseFloat(matchWithNumber[1]), unit: matchWithNumber[2].toUpperCase() }
   }
   
-  // 숫자 없이 단위만 있는 경우 (예: KG/톡, KG) → quantity = 1
-  const matchUnitOnly = spec.match(/^(KG|G|L|ML)(?:\/|$|\s)/i)
+  // 숫자 없이 단위만 있는 경우 (예: KG/톡, KG, "KG,상") → quantity = 1
+  const matchUnitOnly = spec.match(/^(KG|G|L|ML)(?:[,\/\s]|$)/i)
   if (matchUnitOnly) {
     return { quantity: 1, unit: matchUnitOnly[1].toUpperCase() }
   }
