@@ -5,7 +5,10 @@ export interface ExtractedExcelItem {
   spec?: string
   quantity: number
   unit_price: number
+  /** 세액을 포함한 총액 (있으면 공급가액+세액, 없으면 금액 컬럼) */
   total_price: number
+  /** 세액 (있을 때만) - 합계검증에서 quantity*unit_price+tax_amount=total_price 검증용 */
+  tax_amount?: number
   row_index: number
 }
 
@@ -29,20 +32,39 @@ function parseNumber(value: unknown): number {
 }
 
 // 컬럼 이름 매핑 (다양한 형식 지원)
+// 주의: 세액 포함 "총액" vs 세액 미포함 "공급가액"을 구분하기 위해 별도 키로 분리
 const COLUMN_ALIASES: Record<string, string[]> = {
   no: ['no', 'NO', '번호', '순번', '#'],
   name: ['품명', '품목명', '상품명', '제품명', '품목', '상품', '제품', 'name', 'item', 'product'],
   spec: ['규격', '단위', '용량', '사양', 'spec', 'unit', 'size'],
   quantity: ['수량', '갯수', '개수', 'qty', 'quantity', 'count'],
   unit_price: ['단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행'],
-  total_price: ['금액', '합계', '총액', '공급가', 'total', 'amount', 'total_price'],
+  // 세액 포함 최종 총액 (최우선)
+  total_price: ['총액', '총계', '합계', '최종금액', 'grand_total', 'total_amount', 'total_price'],
+  // 세액 미포함 공급가액 (별도 파싱 → total 없으면 supply+tax로 합산)
+  supply_amount: ['공급가액', '공급가', 'supply_amount'],
+  tax_amount: ['세액', '부가세', '부가가치세', 'tax_amount', 'vat'],
+  // 일반 "금액" (총액/공급가액 미검출 시 fallback)
+  amount: ['금액', 'amount'],
 }
 
-// 컬럼 이름 찾기
-function findColumnIndex(headers: string[], aliases: string[]): number {
+// 컬럼 이름 찾기: exact match 우선, 그다음 substring match
+// excludeIndexes: 이미 다른 컬럼으로 사용 중인 인덱스는 제외 (중복 매핑 방지)
+function findColumnIndex(headers: string[], aliases: string[], excludeIndexes: number[] = []): number {
+  const exclude = new Set(excludeIndexes)
+  // 1차: exact match (대소문자/공백 정규화)
   for (const alias of aliases) {
-    const index = headers.findIndex(h => 
-      h && typeof h === 'string' && h.toLowerCase().includes(alias.toLowerCase())
+    const target = alias.trim().toLowerCase()
+    const index = headers.findIndex((h, i) =>
+      !exclude.has(i) && h && typeof h === 'string' && h.trim().toLowerCase() === target,
+    )
+    if (index !== -1) return index
+  }
+  // 2차: substring match
+  for (const alias of aliases) {
+    const target = alias.toLowerCase()
+    const index = headers.findIndex((h, i) =>
+      !exclude.has(i) && h && typeof h === 'string' && h.toLowerCase().includes(target),
     )
     if (index !== -1) return index
   }
@@ -84,8 +106,10 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       // 필수 컬럼 (품명, 수량, 단가) 중 2개 이상 있으면 헤더로 인식
       const hasName = findColumnIndex(rowStrings, COLUMN_ALIASES.name) !== -1
       const hasQty = findColumnIndex(rowStrings, COLUMN_ALIASES.quantity) !== -1
-      const hasPrice = findColumnIndex(rowStrings, COLUMN_ALIASES.unit_price) !== -1 || 
-                       findColumnIndex(rowStrings, COLUMN_ALIASES.total_price) !== -1
+      const hasPrice = findColumnIndex(rowStrings, COLUMN_ALIASES.unit_price) !== -1 ||
+                       findColumnIndex(rowStrings, COLUMN_ALIASES.total_price) !== -1 ||
+                       findColumnIndex(rowStrings, COLUMN_ALIASES.supply_amount) !== -1 ||
+                       findColumnIndex(rowStrings, COLUMN_ALIASES.amount) !== -1
       
       if ((hasName && hasQty) || (hasName && hasPrice) || (hasQty && hasPrice)) {
         headerRowIndex = i
@@ -104,11 +128,26 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     }
 
     // 컬럼 인덱스 찾기
+    // 순서: 공급가액·세액 먼저 → 총액 → 금액(fallback)
+    // 이렇게 해야 "공급가액"이 "금액" alias에 잘못 잡히지 않음
     const nameIdx = findColumnIndex(headers, COLUMN_ALIASES.name)
     const specIdx = findColumnIndex(headers, COLUMN_ALIASES.spec)
     const qtyIdx = findColumnIndex(headers, COLUMN_ALIASES.quantity)
     const unitPriceIdx = findColumnIndex(headers, COLUMN_ALIASES.unit_price)
-    const totalPriceIdx = findColumnIndex(headers, COLUMN_ALIASES.total_price)
+    const supplyIdx = findColumnIndex(headers, COLUMN_ALIASES.supply_amount)
+    const taxIdx = findColumnIndex(headers, COLUMN_ALIASES.tax_amount)
+    // total_price: "공급가액/세액/단가"가 이미 잡힌 컬럼은 제외
+    const totalPriceIdx = findColumnIndex(
+      headers,
+      COLUMN_ALIASES.total_price,
+      [supplyIdx, taxIdx, unitPriceIdx].filter(i => i !== -1),
+    )
+    // fallback "금액" (총액 미검출 시 공급가액 대체용으로만 사용)
+    const amountIdx = findColumnIndex(
+      headers,
+      COLUMN_ALIASES.amount,
+      [supplyIdx, taxIdx, unitPriceIdx, totalPriceIdx].filter(i => i !== -1),
+    )
 
     if (nameIdx === -1) {
       return {
@@ -137,15 +176,35 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       const spec = specIdx !== -1 ? String(row[specIdx] || '').trim() : undefined
       const quantity = qtyIdx !== -1 ? parseNumber(row[qtyIdx]) : 1
       const unitPrice = unitPriceIdx !== -1 ? parseNumber(row[unitPriceIdx]) : 0
-      const totalPrice = totalPriceIdx !== -1 ? parseNumber(row[totalPriceIdx]) : 0
 
-      // 단가 또는 금액 중 하나라도 있어야 함
+      // 총액(세액 포함) 우선 추출:
+      //   1) 명시적 "총액" 컬럼이 있으면 사용
+      //   2) 없으면 공급가액 + 세액
+      //   3) 그것도 없으면 fallback "금액" 컬럼
+      //   4) 그것도 없으면 단가 × 수량
+      const supplyAmount = supplyIdx !== -1 ? parseNumber(row[supplyIdx]) : 0
+      const taxAmount = taxIdx !== -1 ? parseNumber(row[taxIdx]) : 0
+      const explicitTotal = totalPriceIdx !== -1 ? parseNumber(row[totalPriceIdx]) : 0
+      const fallbackAmount = amountIdx !== -1 ? parseNumber(row[amountIdx]) : 0
+
+      let totalPrice = 0
+      if (explicitTotal > 0) {
+        totalPrice = explicitTotal
+      } else if (supplyAmount > 0) {
+        totalPrice = supplyAmount + taxAmount
+      } else if (fallbackAmount > 0) {
+        totalPrice = fallbackAmount
+      }
+
+      // 단가 또는 총액 중 하나라도 있어야 함
       if (unitPrice === 0 && totalPrice === 0) continue
 
-      // 단가가 없으면 금액/수량으로 계산
-      const finalUnitPrice = unitPrice || (quantity > 0 ? Math.round(totalPrice / quantity) : 0)
-      // 금액이 없으면 단가*수량으로 계산
-      const finalTotalPrice = totalPrice || finalUnitPrice * quantity
+      // 단가가 없으면 (공급가액/수량) 또는 (총액/수량)
+      const finalUnitPrice = unitPrice || (quantity > 0
+        ? Math.round((supplyAmount || totalPrice) / quantity)
+        : 0)
+      // 총액이 없으면 (단가×수량) + 세액
+      const finalTotalPrice = totalPrice || (finalUnitPrice * quantity + taxAmount)
 
       items.push({
         name,
@@ -153,6 +212,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
         quantity,
         unit_price: finalUnitPrice,
         total_price: finalTotalPrice,
+        tax_amount: taxIdx !== -1 ? taxAmount : undefined,
         row_index: i - headerRowIndex - 1,
       })
     }

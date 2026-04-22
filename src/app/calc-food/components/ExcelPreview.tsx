@@ -160,7 +160,7 @@ export function ExcelPreview({
           <div className="mt-3 flex items-start gap-2 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
             <AlertCircle size={18} className="shrink-0" />
             <span>
-              수량 × 단가 ≠ 금액인 행이 {preview.mismatchCount}개 있습니다. 해당 행은 빨간색으로 표시됩니다. 수정하시거나 그대로 진행 가능합니다.
+              수량 × 단가 + 세액 ≠ 총액인 행이 {preview.mismatchCount}개 있습니다. 해당 행은 빨간색으로 표시됩니다. 수정하시거나 그대로 진행 가능합니다.
             </span>
           </div>
         )}
@@ -181,7 +181,8 @@ export function ExcelPreview({
 
         <div className="max-h-[500px] overflow-y-auto">
           {preview.items.map((item, idx) => {
-            const expected = item.quantity * item.unit_price
+            // 세액 포함 총액 기준 검증 (명세표 원장과 일치하는지)
+            const expected = item.quantity * item.unit_price + (item.tax_amount ?? 0)
             const mismatch = Math.abs(expected - item.total_price) > 1
             const isEditing = editingRow === item.row_index
 

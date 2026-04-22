@@ -19,11 +19,14 @@ export interface ExcelPreviewData {
     spec?: string
     quantity: number
     unit_price: number
+    /** 세액 포함 총액 (원장 총액) */
     total_price: number
+    /** 세액 (있을 때만) - 합계검증은 quantity*unit_price + tax_amount = total_price */
+    tax_amount?: number
     row_index: number
   }>
   totalAmount: number
-  mismatchCount: number  // 수량 × 단가 ≠ 금액인 행 수
+  mismatchCount: number  // 수량 × 단가 + 세액 ≠ 총액인 행 수
 }
 
 // 분석 단계 (새로 추가)
@@ -164,9 +167,10 @@ const initialState: AuditState = {
 }
 
 // 엑셀 preview 합계 불일치 카운트
+// 세액 포함 총액 기준: quantity × unit_price + (tax_amount || 0) = total_price
 function countMismatches(items: ExcelPreviewData['items']): number {
   return items.filter(i => {
-    const expected = i.quantity * i.unit_price
+    const expected = i.quantity * i.unit_price + (i.tax_amount ?? 0)
     return Math.abs(expected - i.total_price) > 1  // 1원 오차 허용
   }).length
 }
@@ -358,20 +362,23 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
     case 'UPDATE_EXCEL_PREVIEW_ITEM': {
       if (!state.excelPreview) return state
-      const newItems = state.excelPreview.items.map((it) =>
-        it.row_index === action.rowIndex ? { ...it, ...action.patch } : it,
-      )
-      // total_price는 수량×단가로 자동 재계산 옵션
-      const recalculated = newItems.map((it) => {
-        if ('quantity' in action.patch || 'unit_price' in action.patch) {
-          return { ...it, total_price: Math.round(it.quantity * it.unit_price) }
+      // 수정 대상 행에만 patch 적용. 다른 행은 건드리지 않는다.
+      // patch에 total_price가 명시돼 있으면 그 값을 존중하고, 없고 quantity/unit_price만 바뀌었을 때만
+      // (세액이 있으면) total = quantity*unit_price + tax_amount 로 자동 재계산.
+      const newItems = state.excelPreview.items.map((it) => {
+        if (it.row_index !== action.rowIndex) return it
+        const merged = { ...it, ...action.patch }
+        const quantityOrPriceChanged = 'quantity' in action.patch || 'unit_price' in action.patch
+        const totalProvided = 'total_price' in action.patch
+        if (quantityOrPriceChanged && !totalProvided) {
+          merged.total_price = Math.round(merged.quantity * merged.unit_price + (merged.tax_amount ?? 0))
         }
-        return it
+        return merged
       })
-      const totals = recalcExcelPreviewTotals(recalculated)
+      const totals = recalcExcelPreviewTotals(newItems)
       return {
         ...state,
-        excelPreview: { ...state.excelPreview, items: recalculated, ...totals },
+        excelPreview: { ...state.excelPreview, items: newItems, ...totals },
       }
     }
 
