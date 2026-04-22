@@ -17,16 +17,20 @@ export interface ExcelPreviewData {
   items: Array<{
     name: string
     spec?: string
+    /** 단위 (KG, PAC, EA 등) */
+    unit?: string
     quantity: number
     unit_price: number
+    /** 공급가액 (세액 미포함) */
+    supply_amount?: number
+    /** 세액 */
+    tax_amount?: number
     /** 세액 포함 총액 (원장 총액) */
     total_price: number
-    /** 세액 (있을 때만) - 합계검증은 quantity*unit_price + tax_amount = total_price */
-    tax_amount?: number
     row_index: number
   }>
   totalAmount: number
-  mismatchCount: number  // 수량 × 단가 + 세액 ≠ 총액인 행 수
+  mismatchCount: number  // 공급가액 + 세액 ≠ 총액인 행 수
 }
 
 // 분석 단계 (새로 추가)
@@ -167,10 +171,11 @@ const initialState: AuditState = {
 }
 
 // 엑셀 preview 합계 불일치 카운트
-// 세액 포함 총액 기준: quantity × unit_price + (tax_amount || 0) = total_price
+// 검증: 공급가액 + 세액 = 총액 (공급가액이 없으면 quantity × unit_price로 계산)
 function countMismatches(items: ExcelPreviewData['items']): number {
   return items.filter(i => {
-    const expected = i.quantity * i.unit_price + (i.tax_amount ?? 0)
+    const supply = i.supply_amount ?? i.quantity * i.unit_price
+    const expected = supply + (i.tax_amount ?? 0)
     return Math.abs(expected - i.total_price) > 1  // 1원 오차 허용
   }).length
 }
@@ -363,15 +368,20 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'UPDATE_EXCEL_PREVIEW_ITEM': {
       if (!state.excelPreview) return state
       // 수정 대상 행에만 patch 적용. 다른 행은 건드리지 않는다.
-      // patch에 total_price가 명시돼 있으면 그 값을 존중하고, 없고 quantity/unit_price만 바뀌었을 때만
-      // (세액이 있으면) total = quantity*unit_price + tax_amount 로 자동 재계산.
+      // 자동 재계산:
+      //  - 수량/단가 변경 → 공급가액 = quantity × unit_price (명시적 supply_amount patch가 없을 때만)
+      //  - 공급가액/세액 변경 → 총액 = 공급가액 + 세액 (명시적 total_price patch가 없을 때만)
       const newItems = state.excelPreview.items.map((it) => {
         if (it.row_index !== action.rowIndex) return it
         const merged = { ...it, ...action.patch }
-        const quantityOrPriceChanged = 'quantity' in action.patch || 'unit_price' in action.patch
-        const totalProvided = 'total_price' in action.patch
-        if (quantityOrPriceChanged && !totalProvided) {
-          merged.total_price = Math.round(merged.quantity * merged.unit_price + (merged.tax_amount ?? 0))
+        const qtyOrPriceChanged = 'quantity' in action.patch || 'unit_price' in action.patch
+        if (qtyOrPriceChanged && !('supply_amount' in action.patch)) {
+          merged.supply_amount = Math.round(merged.quantity * merged.unit_price)
+        }
+        const supplyOrTaxChanged = qtyOrPriceChanged || 'supply_amount' in action.patch || 'tax_amount' in action.patch
+        if (supplyOrTaxChanged && !('total_price' in action.patch)) {
+          const supply = merged.supply_amount ?? merged.quantity * merged.unit_price
+          merged.total_price = Math.round(supply + (merged.tax_amount ?? 0))
         }
         return merged
       })

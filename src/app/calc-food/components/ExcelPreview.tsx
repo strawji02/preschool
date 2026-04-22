@@ -37,7 +37,12 @@ export function ExcelPreview({
   const [supplierDraft, setSupplierDraft] = useState(preview.supplierName)
 
   const [editingRow, setEditingRow] = useState<number | null>(null)
-  const [rowDraft, setRowDraft] = useState<{ quantity: number; unit_price: number; total_price: number } | null>(null)
+  const [rowDraft, setRowDraft] = useState<{
+    quantity: number
+    unit_price: number
+    tax_amount: number
+    total_price: number
+  } | null>(null)
 
   const saveSupplier = () => {
     if (supplierDraft.trim() && supplierDraft !== preview.supplierName) {
@@ -53,6 +58,7 @@ export function ExcelPreview({
     setRowDraft({
       quantity: item.quantity,
       unit_price: item.unit_price,
+      tax_amount: item.tax_amount ?? 0,
       total_price: item.total_price,
     })
   }
@@ -160,37 +166,47 @@ export function ExcelPreview({
           <div className="mt-3 flex items-start gap-2 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
             <AlertCircle size={18} className="shrink-0" />
             <span>
-              수량 × 단가 + 세액 ≠ 총액인 행이 {preview.mismatchCount}개 있습니다. 해당 행은 빨간색으로 표시됩니다. 수정하시거나 그대로 진행 가능합니다.
+              공급가액 + 세액 ≠ 총액인 행이 {preview.mismatchCount}개 있습니다. 해당 행은 빨간색으로 표시됩니다. 수정하시거나 그대로 진행 가능합니다.
             </span>
           </div>
         )}
       </div>
 
-      {/* 품목 테이블 */}
+      {/* 품목 테이블 — 열: No / 품목명 / 규격 / 수량 / 단위 / 단가 / 공급가액 / 세액 / 총액 / 액션 */}
       <div className="rounded-xl border bg-white shadow-sm">
-        <div className="grid grid-cols-[50px_1fr_160px_70px_80px_90px_110px_50px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
+        <div className="grid grid-cols-[40px_minmax(140px,1fr)_minmax(120px,180px)_60px_60px_80px_90px_70px_100px_60px] gap-2 border-b bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
           <div className="text-center">No</div>
           <div>품목명</div>
           <div>규격</div>
           <div className="text-right">수량</div>
-          <div>단위</div>
+          <div className="text-center">단위</div>
           <div className="text-right">단가</div>
-          <div className="text-right">금액</div>
+          <div className="text-right">공급가액</div>
+          <div className="text-right">세액</div>
+          <div className="text-right">총액</div>
           <div></div>
         </div>
 
         <div className="max-h-[500px] overflow-y-auto">
           {preview.items.map((item, idx) => {
-            // 세액 포함 총액 기준 검증 (명세표 원장과 일치하는지)
-            const expected = item.quantity * item.unit_price + (item.tax_amount ?? 0)
+            // 공급가액: 명시 저장값 우선, 없으면 quantity × unit_price
+            const supplyAmount = item.supply_amount ?? item.quantity * item.unit_price
+            const taxAmount = item.tax_amount ?? 0
+            // 검증: 공급가액 + 세액 = 총액 (원장 일치 확인)
+            const expected = supplyAmount + taxAmount
             const mismatch = Math.abs(expected - item.total_price) > 1
             const isEditing = editingRow === item.row_index
+
+            // 편집 중에는 draft 기반 공급가액 미리보기
+            const draftSupply = rowDraft
+              ? Math.round(rowDraft.quantity * rowDraft.unit_price)
+              : supplyAmount
 
             return (
               <div
                 key={item.row_index}
                 className={cn(
-                  'grid grid-cols-[50px_1fr_160px_70px_80px_90px_110px_50px] gap-2 border-b px-4 py-2 text-sm',
+                  'grid grid-cols-[40px_minmax(140px,1fr)_minmax(120px,180px)_60px_60px_80px_90px_70px_100px_60px] gap-2 border-b px-3 py-2 text-sm',
                   mismatch && 'bg-red-50',
                   isEditing && 'bg-blue-50',
                 )}
@@ -208,21 +224,31 @@ export function ExcelPreview({
                       type="number"
                       value={rowDraft?.quantity ?? 0}
                       onChange={(e) => setRowDraft(p => p ? { ...p, quantity: Number(e.target.value) } : null)}
-                      className="rounded border border-blue-400 px-1 text-right"
+                      className="w-full rounded border border-blue-400 px-1 text-right"
                       step="0.1"
                     />
-                    <div className="text-gray-600">-</div>
+                    <div className="text-center text-gray-600">{item.unit || '-'}</div>
                     <input
                       type="number"
                       value={rowDraft?.unit_price ?? 0}
                       onChange={(e) => setRowDraft(p => p ? { ...p, unit_price: Number(e.target.value) } : null)}
-                      className="rounded border border-blue-400 px-1 text-right"
+                      className="w-full rounded border border-blue-400 px-1 text-right"
+                    />
+                    {/* 공급가액은 자동 계산 (편집 불가) */}
+                    <div className="text-right text-gray-500">
+                      {formatCurrency(draftSupply)}
+                    </div>
+                    <input
+                      type="number"
+                      value={rowDraft?.tax_amount ?? 0}
+                      onChange={(e) => setRowDraft(p => p ? { ...p, tax_amount: Number(e.target.value) } : null)}
+                      className="w-full rounded border border-blue-400 px-1 text-right"
                     />
                     <input
                       type="number"
                       value={rowDraft?.total_price ?? 0}
                       onChange={(e) => setRowDraft(p => p ? { ...p, total_price: Number(e.target.value) } : null)}
-                      className="rounded border border-blue-400 px-1 text-right"
+                      className="w-full rounded border border-blue-400 px-1 text-right"
                     />
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={saveRow} className="rounded bg-blue-600 p-1 text-white hover:bg-blue-700" title="저장">
@@ -236,9 +262,11 @@ export function ExcelPreview({
                 ) : (
                   <>
                     <div className="text-right">{item.quantity}</div>
-                    <div className="text-gray-600">-</div>
+                    <div className="text-center text-gray-600">{item.unit || '-'}</div>
                     <div className="text-right">{formatCurrency(item.unit_price)}</div>
-                    <div className={cn('text-right', mismatch && 'text-red-600 font-medium')}>
+                    <div className="text-right text-gray-700">{formatCurrency(supplyAmount)}</div>
+                    <div className="text-right text-gray-700">{formatCurrency(taxAmount)}</div>
+                    <div className={cn('text-right font-medium', mismatch && 'text-red-600')}>
                       {formatCurrency(item.total_price)}
                       {mismatch && (
                         <div className="text-xs text-red-500">
