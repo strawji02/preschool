@@ -7,7 +7,24 @@ import { extractPagesFromPDF, extractPagesFromImages, extractBase64, isPDF, isIm
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 
 // 상태 타입
-export type AuditStatus = 'empty' | 'processing' | 'analysis' | 'error'
+// 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
+export type AuditStatus = 'empty' | 'excel_preview' | 'processing' | 'analysis' | 'error'
+
+// 엑셀 파싱 결과 (담당자 확인용 임시 데이터)
+export interface ExcelPreviewData {
+  fileName: string
+  supplierName: string
+  items: Array<{
+    name: string
+    spec?: string
+    quantity: number
+    unit_price: number
+    total_price: number
+    row_index: number
+  }>
+  totalAmount: number
+  mismatchCount: number  // 수량 × 단가 ≠ 금액인 행 수
+}
 
 // 분석 단계 (새로 추가)
 export type AnalysisStep = 'matching' | 'report'
@@ -43,29 +60,41 @@ export interface AuditState {
   supplierName: string | null  // 파일명에서 추출한 공급업체명
   isReanalyzing: boolean
   reanalyzingPage: number | null
+  // 엑셀 파싱 후 담당자 확인 단계용 임시 데이터 (2026-04-21 추가)
+  excelPreview: ExcelPreviewData | null
 }
 
-// 파일명에서 공급업체명 추출
-function extractSupplierName(fileName: string): string {
-  // 확장자 제거
-  const nameWithoutExt = fileName.replace(/\.(pdf|xlsx|xls)$/i, '')
-  
-  // "거래명세서", "거래명세", "명세서" 등을 제거하고 앞부분 추출
-  const patterns = [
-    /^(.+?)거래명세서/,
-    /^(.+?)거래명세/,
-    /^(.+?)명세서/,
-    /^(.+?)명세/,
-  ]
-  
-  for (const pattern of patterns) {
-    const match = nameWithoutExt.match(pattern)
-    if (match && match[1]) {
-      return match[1].trim()
+// 파일명에서 업체명(유치원 이름) 추출
+// 예시 패턴 — "_" 뒤의 마지막 세그먼트가 업체명으로 관례화되어 있음:
+//   "8월 급식 거래명세서_만안.xlsx"     → "만안"
+//   "2024.12월 급식 거래명세서_로사.pdf" → "로사"
+//   "25년6월검수일지_선경.xlsx"          → "선경"
+//   "청정원 8월 거래명세서_예은.pdf"     → "예은"
+// fallback: 파일명 전체에서 "명세서" 앞 부분
+export function extractSupplierName(fileName: string): string {
+  const nameWithoutExt = fileName.replace(/\.(pdf|xlsx|xls|heic|jpg|jpeg|png)$/i, '').trim()
+
+  // 패턴 1: 마지막 언더스코어 뒤 부분 (가장 흔한 관례)
+  const underscoreMatch = nameWithoutExt.match(/_([^_]+)$/)
+  if (underscoreMatch && underscoreMatch[1]) {
+    const candidate = underscoreMatch[1].trim()
+    // 너무 길면(>10자) 아마 업체명이 아니라 수식어 → 다음 패턴으로
+    if (candidate.length <= 10 && !/^\d+$/.test(candidate)) {
+      return candidate
     }
   }
-  
-  // 패턴 매칭 실패 시 파일명 그대로 사용 (확장자 제외)
+
+  // 패턴 2: "명세서"/"명세" 앞 부분의 마지막 단어
+  const nameseoMatch = nameWithoutExt.match(/(.+?)(거래명세서|거래명세|명세서|명세|검수일지|검수)/)
+  if (nameseoMatch && nameseoMatch[1]) {
+    const beforeNamese = nameseoMatch[1].trim()
+    // 마지막 공백 뒤 단어
+    const words = beforeNamese.split(/\s+/).filter(Boolean)
+    const lastWord = words[words.length - 1]
+    if (lastWord && lastWord.length <= 10) return lastWord
+  }
+
+  // 최종 fallback: 파일명 그대로 (수동 수정 가능)
   return nameWithoutExt
 }
 
@@ -86,12 +115,22 @@ type AuditAction =
   | { type: 'SELECT_CANDIDATE'; itemId: string; supplier: Supplier; candidate: SupplierMatch }
   | { type: 'CONFIRM_ITEM'; itemId: string; supplier?: Supplier }  // supplier 추가
   | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
+  | { type: 'AUTO_EXCLUDE_UNMATCHED' }
   | { type: 'PROCEED_TO_REPORT' }
   | { type: 'BACK_TO_MATCHING' }
   // 재분석 액션
   | { type: 'START_REANALYZE'; pageNumber: number }
   | { type: 'REPLACE_PAGE_ITEMS'; pageNumber: number; items: ComparisonItem[] }
   | { type: 'COMPLETE_REANALYZE' }
+  // 업체명 수정 / 비교 제외 (2026-04-21 추가)
+  | { type: 'UPDATE_SUPPLIER_NAME'; supplierName: string }
+  | { type: 'TOGGLE_EXCLUDE'; itemId: string; reason?: string }
+  // 엑셀 담당자 확인 단계 (2026-04-21 추가)
+  | { type: 'SET_EXCEL_PREVIEW'; preview: ExcelPreviewData }
+  | { type: 'UPDATE_EXCEL_PREVIEW_ITEM'; rowIndex: number; patch: Partial<ExcelPreviewData['items'][number]> }
+  | { type: 'REMOVE_EXCEL_PREVIEW_ITEM'; rowIndex: number }
+  | { type: 'UPDATE_EXCEL_PREVIEW_SUPPLIER'; supplierName: string }
+  | { type: 'CLEAR_EXCEL_PREVIEW' }
 
 const initialStats: SessionStats = {
   totalItems: 0,
@@ -121,6 +160,21 @@ const initialState: AuditState = {
   supplierName: null,
   isReanalyzing: false,
   reanalyzingPage: null,
+  excelPreview: null,
+}
+
+// 엑셀 preview 합계 불일치 카운트
+function countMismatches(items: ExcelPreviewData['items']): number {
+  return items.filter(i => {
+    const expected = i.quantity * i.unit_price
+    return Math.abs(expected - i.total_price) > 1  // 1원 오차 허용
+  }).length
+}
+
+function recalcExcelPreviewTotals(items: ExcelPreviewData['items']) {
+  const totalAmount = items.reduce((s, i) => s + i.total_price, 0)
+  const mismatchCount = countMismatches(items)
+  return { totalAmount, mismatchCount }
 }
 
 function calculateStats(items: ComparisonItem[]): SessionStats {
@@ -277,6 +331,70 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'RESET':
       return initialState
 
+    // 업체명 수정 (inline edit) ─ 2026-04-21
+    case 'UPDATE_SUPPLIER_NAME':
+      return { ...state, supplierName: action.supplierName }
+
+    // 비교 제외 토글 ─ 2026-04-21
+    case 'TOGGLE_EXCLUDE': {
+      const newItems = state.items.map((item) => {
+        if (item.id !== action.itemId) return item
+        return {
+          ...item,
+          is_excluded: !item.is_excluded,
+          exclusion_reason: !item.is_excluded ? (action.reason ?? '담당자 제외') : undefined,
+        }
+      })
+      return { ...state, items: newItems, stats: calculateStats(newItems) }
+    }
+
+    // 엑셀 preview (2026-04-21)
+    case 'SET_EXCEL_PREVIEW':
+      return {
+        ...state,
+        status: 'excel_preview',
+        excelPreview: action.preview,
+      }
+
+    case 'UPDATE_EXCEL_PREVIEW_ITEM': {
+      if (!state.excelPreview) return state
+      const newItems = state.excelPreview.items.map((it) =>
+        it.row_index === action.rowIndex ? { ...it, ...action.patch } : it,
+      )
+      // total_price는 수량×단가로 자동 재계산 옵션
+      const recalculated = newItems.map((it) => {
+        if ('quantity' in action.patch || 'unit_price' in action.patch) {
+          return { ...it, total_price: Math.round(it.quantity * it.unit_price) }
+        }
+        return it
+      })
+      const totals = recalcExcelPreviewTotals(recalculated)
+      return {
+        ...state,
+        excelPreview: { ...state.excelPreview, items: recalculated, ...totals },
+      }
+    }
+
+    case 'REMOVE_EXCEL_PREVIEW_ITEM': {
+      if (!state.excelPreview) return state
+      const newItems = state.excelPreview.items.filter((it) => it.row_index !== action.rowIndex)
+      const totals = recalcExcelPreviewTotals(newItems)
+      return {
+        ...state,
+        excelPreview: { ...state.excelPreview, items: newItems, ...totals },
+      }
+    }
+
+    case 'UPDATE_EXCEL_PREVIEW_SUPPLIER':
+      if (!state.excelPreview) return state
+      return {
+        ...state,
+        excelPreview: { ...state.excelPreview, supplierName: action.supplierName },
+      }
+
+    case 'CLEAR_EXCEL_PREVIEW':
+      return { ...state, status: 'empty', excelPreview: null }
+
     // 2-Step Workflow 액션 핸들러
     case 'SET_STEP':
       return { ...state, currentStep: action.step }
@@ -346,13 +464,36 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     }
 
     case 'CONFIRM_ALL_AUTO_MATCHED': {
+      // 매칭 후보가 존재하는 모든 품목 일괄 확정 (담당자가 개별 검토 대신 한 번에 처리)
+      // 매칭 score 낮아도 어차피 보고서에서 개별로 제외 토글 가능
       const newItems = state.items.map((item) => {
-        // 신뢰도 90% 이상인 매칭이 있는 경우에만 자동 확정
-        const hasCjHighConfidence = item.cj_match && item.cj_match.match_score >= 0.9
-        const hasSsgHighConfidence = item.ssg_match && item.ssg_match.match_score >= 0.9
-
-        if (hasCjHighConfidence || hasSsgHighConfidence) {
+        if (item.is_confirmed) return item
+        const hasAnyMatch = Boolean(item.cj_match || item.ssg_match)
+        if (hasAnyMatch) {
           return { ...item, is_confirmed: true }
+        }
+        return item
+      })
+
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
+      }
+    }
+
+    case 'AUTO_EXCLUDE_UNMATCHED': {
+      // 매칭 없는 품목 일괄 제외 + 확정 (Susan 요구사항: 비교 불가 별지 처리)
+      const newItems = state.items.map((item) => {
+        if (item.is_confirmed) return item
+        const hasAnyMatch = Boolean(item.cj_match || item.ssg_match)
+        if (!hasAnyMatch) {
+          return {
+            ...item,
+            is_excluded: true,
+            exclusion_reason: '매칭 결과 없음 (자동 제외)',
+            is_confirmed: true,
+          }
         }
         return item
       })
@@ -484,48 +625,63 @@ export function useAuditSession() {
     }
   }, [])
 
-  // 엑셀 파일 처리
+  // 엑셀 파일 처리 — 1단계: 파싱 후 담당자 확인을 위한 preview 상태로 전환
   const processExcelFile = useCallback(async (file: File) => {
     try {
-      const supplierName = extractSupplierName(file.name)
-      dispatch({ type: 'START_PROCESSING', fileName: file.name, totalPages: 1, supplierName })
-
-      // 1. 클라이언트에서 엑셀 파싱
+      // 클라이언트에서 엑셀 파싱
       const parseResult = await parseInvoiceExcel(file)
-      
+
       if (!parseResult.success) {
         throw new Error(parseResult.error || '엑셀 파싱 실패')
       }
 
       console.log(`엑셀에서 ${parseResult.items.length}개 품목 추출`)
 
-      // 2. 세션 초기화
+      const totalAmount = parseResult.items.reduce((s, i) => s + i.total_price, 0)
+      const mismatchCount = countMismatches(parseResult.items as ExcelPreviewData['items'])
+
+      const preview: ExcelPreviewData = {
+        fileName: file.name,
+        supplierName: extractSupplierName(file.name),
+        items: parseResult.items as ExcelPreviewData['items'],
+        totalAmount,
+        mismatchCount,
+      }
+
+      dispatch({ type: 'SET_EXCEL_PREVIEW', preview })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '알 수 없는 오류'
+      dispatch({ type: 'SET_ERROR', error: message })
+    }
+  }, [])
+
+  // 엑셀 담당자 확인 완료 — 2단계: 실제 매칭 수행
+  // preview 데이터를 명시적으로 인자로 받음 (state snapshot 문제 회피)
+  const confirmAndAnalyzeExcel = useCallback(async (preview: ExcelPreviewData) => {
+    try {
+      dispatch({
+        type: 'START_PROCESSING',
+        fileName: preview.fileName,
+        totalPages: 1,
+        supplierName: preview.supplierName,
+      })
+
+      // 세션 초기화
       const initRes = await fetch('/api/session/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: file.name,
-          total_pages: 1,
-        }),
+        body: JSON.stringify({ name: preview.fileName, total_pages: 1 }),
       })
-
-      if (!initRes.ok) {
-        throw new Error('세션 초기화 실패')
-      }
-
+      if (!initRes.ok) throw new Error('세션 초기화 실패')
       const initData = await initRes.json()
-      if (!initData.success) {
-        throw new Error(initData.message || '세션 초기화 실패')
-      }
+      if (!initData.success) throw new Error(initData.message || '세션 초기화 실패')
 
       dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
-
-      // 3. 엑셀 분석 API 호출 (매칭 수행)
       dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: 1 })
 
-      // Vercel function timeout(최대 60초) 회피: 품목을 배치로 나눠서 호출
+      // 배치로 나눠 매칭
       const BATCH_SIZE = 20
-      const allItems = parseResult.items
+      const allItems = preview.items
       const batches: typeof allItems[] = []
       for (let i = 0; i < allItems.length; i += BATCH_SIZE) {
         batches.push(allItems.slice(i, i + BATCH_SIZE))
@@ -535,17 +691,12 @@ export function useAuditSession() {
         const analyzeRes = await fetch('/api/analyze/excel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: initData.session_id,
-            items: batch,
-          }),
+          body: JSON.stringify({ session_id: initData.session_id, items: batch }),
         })
-
         if (!analyzeRes.ok) {
           const errorData = await analyzeRes.json().catch(() => ({}))
           throw new Error(errorData.error || `품목 매칭 실패 (배치 ${batchIdx + 1}/${batches.length})`)
         }
-
         const analyzeData = await analyzeRes.json()
         if (analyzeData.success && analyzeData.items) {
           dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
@@ -554,7 +705,6 @@ export function useAuditSession() {
         }
       }
 
-      // 4. 분석 완료
       dispatch({ type: 'COMPLETE_ANALYSIS' })
     } catch (error) {
       const message = error instanceof Error ? error.message : '알 수 없는 오류'
@@ -599,6 +749,10 @@ export function useAuditSession() {
 
   const confirmAllAutoMatched = useCallback(() => {
     dispatch({ type: 'CONFIRM_ALL_AUTO_MATCHED' })
+  }, [])
+
+  const autoExcludeUnmatched = useCallback(() => {
+    dispatch({ type: 'AUTO_EXCLUDE_UNMATCHED' })
   }, [])
 
   const proceedToReport = useCallback(() => {
@@ -648,60 +802,86 @@ export function useAuditSession() {
     }
   }, [state.sessionId, state.pages, state.isReanalyzing])
 
-  // 시나리오 계산 (CJ vs SSG)
+  // 시나리오 계산 (CJ vs SSG) — 2026-04-21 개편
+  // - is_excluded=true 품목은 "비교 불가" 별지로 이동, 절감액 계산에서 스킵
+  // - grandTotalOurCost = 원장(거래명세표 전체 총액, 제외 품목 포함)
+  // - totalOurCost = 비교 가능 품목의 총액 (비교 기준)
+  // - excludedCount / excludedTotalCost = 별지 정보
   const scenarios = useMemo((): { cj: SupplierScenario; ssg: SupplierScenario } => {
     const items = state.items
 
-    let cjTotalOur = 0
-    let cjTotalSupplier = 0
+    let grandTotal = 0
+    let excludedCount = 0
+    let excludedTotal = 0
+
+    let cjComparableOur = 0
+    let cjComparableSupplier = 0
     let cjMatchedCount = 0
-    let ssgTotalOur = 0
-    let ssgTotalSupplier = 0
+    let cjComparableItems = 0
+
+    let ssgComparableOur = 0
+    let ssgComparableSupplier = 0
     let ssgMatchedCount = 0
+    let ssgComparableItems = 0
 
     for (const item of items) {
       const itemTotal = item.extracted_unit_price * item.extracted_quantity
+      grandTotal += itemTotal
 
-      // CJ 시나리오
-      cjTotalOur += itemTotal
-      if (item.cj_match) {
-        cjTotalSupplier += item.cj_match.standard_price * item.extracted_quantity
-        cjMatchedCount++
-      } else {
-        cjTotalSupplier += itemTotal // 매칭 없으면 현재가 유지
+      if (item.is_excluded) {
+        excludedCount++
+        excludedTotal += itemTotal
+        continue  // 비교 제외 품목은 시나리오 계산에서 스킵
       }
 
-      // SSG 시나리오
-      ssgTotalOur += itemTotal
+      // CJ 시나리오 (비교 가능 품목만)
+      cjComparableOur += itemTotal
+      cjComparableItems++
+      if (item.cj_match) {
+        cjComparableSupplier += item.cj_match.standard_price * item.extracted_quantity
+        cjMatchedCount++
+      } else {
+        cjComparableSupplier += itemTotal
+      }
+
+      // SSG 시나리오 (비교 가능 품목만)
+      ssgComparableOur += itemTotal
+      ssgComparableItems++
       if (item.ssg_match) {
-        ssgTotalSupplier += item.ssg_match.standard_price * item.extracted_quantity
+        ssgComparableSupplier += item.ssg_match.standard_price * item.extracted_quantity
         ssgMatchedCount++
       } else {
-        ssgTotalSupplier += itemTotal // 매칭 없으면 현재가 유지
+        ssgComparableSupplier += itemTotal
       }
     }
 
-    const cjSavings = Math.max(0, cjTotalOur - cjTotalSupplier)
-    const ssgSavings = Math.max(0, ssgTotalOur - ssgTotalSupplier)
+    const cjSavings = Math.max(0, cjComparableOur - cjComparableSupplier)
+    const ssgSavings = Math.max(0, ssgComparableOur - ssgComparableSupplier)
 
     return {
       cj: {
         supplier: 'CJ',
-        totalOurCost: cjTotalOur,
-        totalSupplierCost: cjTotalSupplier,
+        totalOurCost: cjComparableOur,
+        totalSupplierCost: cjComparableSupplier,
         totalSavings: cjSavings,
-        savingsPercent: cjTotalOur > 0 ? (cjSavings / cjTotalOur) * 100 : 0,
+        savingsPercent: cjComparableOur > 0 ? (cjSavings / cjComparableOur) * 100 : 0,
         matchedCount: cjMatchedCount,
-        unmatchedCount: items.length - cjMatchedCount,
+        unmatchedCount: cjComparableItems - cjMatchedCount,
+        grandTotalOurCost: grandTotal,
+        excludedCount,
+        excludedTotalCost: excludedTotal,
       },
       ssg: {
         supplier: 'SHINSEGAE',
-        totalOurCost: ssgTotalOur,
-        totalSupplierCost: ssgTotalSupplier,
+        totalOurCost: ssgComparableOur,
+        totalSupplierCost: ssgComparableSupplier,
         totalSavings: ssgSavings,
-        savingsPercent: ssgTotalOur > 0 ? (ssgSavings / ssgTotalOur) * 100 : 0,
+        savingsPercent: ssgComparableOur > 0 ? (ssgSavings / ssgComparableOur) * 100 : 0,
         matchedCount: ssgMatchedCount,
-        unmatchedCount: items.length - ssgMatchedCount,
+        unmatchedCount: ssgComparableItems - ssgMatchedCount,
+        grandTotalOurCost: grandTotal,
+        excludedCount,
+        excludedTotalCost: excludedTotal,
       },
     }
   }, [state.items])
@@ -714,6 +894,33 @@ export function useAuditSession() {
     return { total, confirmed, unconfirmed }
   }, [state.items])
 
+  // 업체명 수정 (inline edit) ─ 2026-04-21
+  const updateSupplierName = useCallback((supplierName: string) => {
+    dispatch({ type: 'UPDATE_SUPPLIER_NAME', supplierName })
+  }, [])
+
+  // 비교 제외 토글 ─ 2026-04-21
+  const toggleExclude = useCallback((itemId: string, reason?: string) => {
+    dispatch({ type: 'TOGGLE_EXCLUDE', itemId, reason })
+  }, [])
+
+  // 엑셀 담당자 확인 단계 액션들 (2026-04-21)
+  const updateExcelPreviewItem = useCallback(
+    (rowIndex: number, patch: Partial<ExcelPreviewData['items'][number]>) => {
+      dispatch({ type: 'UPDATE_EXCEL_PREVIEW_ITEM', rowIndex, patch })
+    },
+    [],
+  )
+  const removeExcelPreviewItem = useCallback((rowIndex: number) => {
+    dispatch({ type: 'REMOVE_EXCEL_PREVIEW_ITEM', rowIndex })
+  }, [])
+  const updateExcelPreviewSupplier = useCallback((supplierName: string) => {
+    dispatch({ type: 'UPDATE_EXCEL_PREVIEW_SUPPLIER', supplierName })
+  }, [])
+  const clearExcelPreview = useCallback(() => {
+    dispatch({ type: 'CLEAR_EXCEL_PREVIEW' })
+  }, [])
+
   return {
     state,
     processFiles,
@@ -724,6 +931,7 @@ export function useAuditSession() {
     selectCandidate,
     confirmItem,
     confirmAllAutoMatched,
+    autoExcludeUnmatched,
     proceedToReport,
     backToMatching,
     scenarios,
@@ -731,5 +939,14 @@ export function useAuditSession() {
     // 재분석
     reanalyze,
     isReanalyzing: state.isReanalyzing,
+    // 업체명 수정 / 비교 제외 (2026-04-21 추가)
+    updateSupplierName,
+    toggleExclude,
+    // 엑셀 담당자 확인 단계 (2026-04-21 추가)
+    confirmAndAnalyzeExcel,
+    updateExcelPreviewItem,
+    removeExcelPreviewItem,
+    updateExcelPreviewSupplier,
+    clearExcelPreview,
   }
 }

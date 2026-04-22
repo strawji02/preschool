@@ -26,6 +26,11 @@ const SplitView = dynamic(() => import('./components/SplitView').then(mod => ({ 
   loading: () => <LoadingFallback />,
 })
 
+const ExcelPreview = dynamic(() => import('./components/ExcelPreview').then(mod => ({ default: mod.ExcelPreview })), {
+  ssr: false,
+  loading: () => <LoadingFallback />,
+})
+
 function LoadingFallback() {
   return (
     <div className="flex min-h-[calc(100vh-200px)] items-center justify-center">
@@ -45,6 +50,7 @@ export default function CalcFoodPage() {
     selectCandidate,
     confirmItem,
     confirmAllAutoMatched,
+    autoExcludeUnmatched,
     proceedToReport,
     backToMatching,
     scenarios,
@@ -52,6 +58,15 @@ export default function CalcFoodPage() {
     // 재분석
     reanalyze,
     isReanalyzing,
+    // 엑셀 담당자 확인 (2026-04-21 추가)
+    confirmAndAnalyzeExcel,
+    updateExcelPreviewItem,
+    removeExcelPreviewItem,
+    updateExcelPreviewSupplier,
+    clearExcelPreview,
+    // 비교 제외 / 업체명 수정 (2026-04-21)
+    toggleExclude,
+    updateSupplierName,
   } = useAuditSession()
 
   return (
@@ -110,6 +125,18 @@ export default function CalcFoodPage() {
       <main>
         {state.status === 'empty' && <UploadZone onFileSelect={processFiles} />}
 
+        {/* 엑셀 담당자 확인 단계 (2026-04-21 추가) */}
+        {state.status === 'excel_preview' && state.excelPreview && (
+          <ExcelPreview
+            preview={state.excelPreview}
+            onSupplierNameChange={updateExcelPreviewSupplier}
+            onItemChange={updateExcelPreviewItem}
+            onItemRemove={removeExcelPreviewItem}
+            onCancel={clearExcelPreview}
+            onConfirm={confirmAndAnalyzeExcel}
+          />
+        )}
+
         {state.status === 'processing' && (
           <ProcessingView
             fileName={state.fileName || ''}
@@ -128,6 +155,7 @@ export default function CalcFoodPage() {
               onSelectCandidate={selectCandidate}
               onConfirmItem={confirmItem}
               onConfirmAllAutoMatched={confirmAllAutoMatched}
+              onAutoExcludeUnmatched={autoExcludeUnmatched}
               onProceedToReport={proceedToReport}
             />
           </div>
@@ -155,6 +183,9 @@ export default function CalcFoodPage() {
             isReanalyzing={isReanalyzing}
             // Report step callbacks
             onBackToMatching={backToMatching}
+            supplierName={state.supplierName}
+            onToggleExclude={toggleExclude}
+            onUpdateSupplierName={updateSupplierName}
           />
         )}
 

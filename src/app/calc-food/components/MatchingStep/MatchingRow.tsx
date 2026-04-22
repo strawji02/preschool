@@ -9,6 +9,7 @@ import { CandidateSelector } from './CandidateSelector'
 import { parseUnitString, type NormalizedUnit } from '@/lib/unitConversion'
 import { convertPriceUnified, type ConversionResult } from '@/lib/unitConversionUnified'
 import { calculateVolumeMultiplier } from '@/lib/spec-parser'
+import { FEATURE_FLAGS } from '../../config'
 
 // 추출된 spec 또는 name에서 단위와 수량 파싱
 function parseExtractedSpec(spec: string | null | undefined, name: string | null | undefined): { unit: NormalizedUnit; quantity: number } {
@@ -141,12 +142,16 @@ export function MatchingRow({
 
   return (
     <div className="border-b">
-      {/* 메인 행 - 8컬럼 (단위 수정 UI 추가) */}
+      {/* 메인 행 (CJ 플래그에 따라 동적 그리드) */}
       <div
         className={cn(
-          'grid grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px] gap-2 px-4 py-3 transition-colors',
+          'grid gap-2 px-4 py-3 transition-colors',
+          FEATURE_FLAGS.SHOW_CJ
+            ? 'grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px]'
+            : 'grid-cols-[1fr_60px_90px_200px_120px_60px_40px]',
           item.is_confirmed ? 'bg-green-50' : 'hover:bg-gray-50',
-          totalMismatch && 'bg-red-50 border-l-4 border-red-500'
+          totalMismatch && 'bg-red-50 border-l-4 border-red-500',
+          item.is_excluded && 'opacity-50 bg-gray-100'
         )}
       >
         {/* 품목명 */}
@@ -211,19 +216,21 @@ export function MatchingRow({
           )}
         </div>
 
-        {/* CJ 선택 */}
-        <div className="flex items-center justify-center">
-          <CandidateSelector
-            supplier="CJ"
-            candidates={item.cj_candidates}
-            selectedMatch={item.cj_match}
-            userUnit={userUnit}
-            userQuantity={userQuantity}
-            onSelect={(candidate) => onSelectCandidate(item.id, 'CJ', candidate)}
-            onSearchClick={() => onSearchClick(item, 'CJ')}
-            disabled={item.is_confirmed}
-          />
-        </div>
+        {/* CJ 선택 (feature flag로 숨김) */}
+        {FEATURE_FLAGS.SHOW_CJ && (
+          <div className="flex items-center justify-center">
+            <CandidateSelector
+              supplier="CJ"
+              candidates={item.cj_candidates}
+              selectedMatch={item.cj_match}
+              userUnit={userUnit}
+              userQuantity={userQuantity}
+              onSelect={(candidate) => onSelectCandidate(item.id, 'CJ', candidate)}
+              onSearchClick={() => onSearchClick(item, 'CJ')}
+              disabled={item.is_confirmed}
+            />
+          </div>
+        )}
 
         {/* SSG 선택 */}
         <div className="flex items-center justify-center">

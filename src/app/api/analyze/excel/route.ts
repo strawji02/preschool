@@ -115,6 +115,10 @@ export async function POST(request: NextRequest) {
         ? Math.min(9.9999, Math.max(0, bestMatch.match_score))
         : null
 
+      // 매칭 결과가 아예 없는 품목만 자동 제외
+      // (match.status='unmatched'라도 후보가 있으면 담당자가 판단 가능하므로 비교 가능에 포함)
+      const autoExcluded = !match.cj_match && !match.ssg_match
+
       return {
         dbRecord: {
           session_id: body.session_id,
@@ -132,6 +136,7 @@ export async function POST(request: NextRequest) {
           loss_amount: savings.max,
           page_number: 1, // 엑셀은 단일 페이지로 처리
           row_index: item.row_index,
+          is_excluded: autoExcluded,  // 2026-04-21: 미매칭 자동 제외
         },
         cj_match: match.cj_match,
         ssg_match: match.ssg_match,
@@ -169,15 +174,18 @@ export async function POST(request: NextRequest) {
       extracted_spec: item.dbRecord.extracted_spec,
       extracted_quantity: item.dbRecord.extracted_quantity,
       extracted_unit_price: item.dbRecord.extracted_unit_price,
+      extracted_total_price: item.dbRecord.extracted_total_price,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
       cj_candidates: item.cj_candidates,
       ssg_candidates: item.ssg_candidates,
-      is_confirmed: false,
+      // 자동 제외된 품목(매칭 없음)은 확정까지 자동 처리 → 담당자 수작업 생략
+      is_confirmed: item.dbRecord.is_excluded === true,
       cj_confirmed: false,
       ssg_confirmed: false,
       savings: item.savings,
       match_status: item.dbRecord.match_status,
+      is_excluded: item.dbRecord.is_excluded,  // 2026-04-21
     }))
 
     console.log(`[${body.session_id}] Excel analysis completed in ${Date.now() - startTime}ms`)

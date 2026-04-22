@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/format'
 import { calculatePricePerUnit } from '@/lib/funnel/price-normalizer'
 import type { ComparisonItem, SupplierMatch, MatchCandidate } from '@/types/audit'
+import { FEATURE_FLAGS } from '../../config'
 
 interface SearchPanelProps {
   item: ComparisonItem | null
@@ -136,7 +137,9 @@ export function SearchPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [results, setResults] = useState<MatchCandidate[]>([])
   const [sortBy, setSortBy] = useState<'score' | 'price' | 'pricePerGram'>('score')
-  const [supplier, setSupplier] = useState<'CJ' | 'SHINSEGAE'>('CJ')
+  const [supplier, setSupplier] = useState<'CJ' | 'SHINSEGAE'>(
+    FEATURE_FLAGS.SHOW_CJ ? 'CJ' : 'SHINSEGAE'
+  )
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -290,31 +293,33 @@ export function SearchPanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* 공급사 탭 */}
-      <div className="flex border-b">
-        <button
-          onClick={() => handleSupplierChange('CJ')}
-          className={cn(
-            'flex-1 py-3 text-center font-medium transition-colors',
-            supplier === 'CJ'
-              ? 'bg-orange-100 text-orange-800 border-b-2 border-orange-500'
-              : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-          )}
-        >
-          🏢 CJ
-        </button>
-        <button
-          onClick={() => handleSupplierChange('SHINSEGAE')}
-          className={cn(
-            'flex-1 py-3 text-center font-medium transition-colors',
-            supplier === 'SHINSEGAE'
-              ? 'bg-green-100 text-green-800 border-b-2 border-green-500'
-              : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-          )}
-        >
-          🛒 신세계
-        </button>
-      </div>
+      {/* 공급사 탭 (SHOW_CJ=false일 때는 신세계만 표시) */}
+      {FEATURE_FLAGS.SHOW_CJ && (
+        <div className="flex border-b">
+          <button
+            onClick={() => handleSupplierChange('CJ')}
+            className={cn(
+              'flex-1 py-3 text-center font-medium transition-colors',
+              supplier === 'CJ'
+                ? 'bg-orange-100 text-orange-800 border-b-2 border-orange-500'
+                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+            )}
+          >
+            🏢 CJ
+          </button>
+          <button
+            onClick={() => handleSupplierChange('SHINSEGAE')}
+            className={cn(
+              'flex-1 py-3 text-center font-medium transition-colors',
+              supplier === 'SHINSEGAE'
+                ? 'bg-green-100 text-green-800 border-b-2 border-green-500'
+                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+            )}
+          >
+            🛒 신세계
+          </button>
+        </div>
+      )}
 
       {/* 헤더 */}
       <div className={cn(

@@ -6,10 +6,13 @@ import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { VolumeAdjuster } from '@/components/ui/VolumeAdjuster'
 import type { ComparisonItem } from '@/types/audit'
+import { FEATURE_FLAGS } from '../../config'
+import { EyeOff, Eye } from 'lucide-react'
 
 interface ItemBreakdownTableProps {
   items: ComparisonItem[]
   onAdjustedSavingsChange?: (adjustedSavings: { cj: number; ssg: number }) => void
+  onToggleExclude?: (itemId: string, reason?: string) => void  // 2026-04-21 비교 제외 토글
 }
 
 type SortField = 'name' | 'our_price' | 'cj_price' | 'ssg_price' | 'max_savings'
@@ -24,7 +27,7 @@ interface AdjustedPrices {
   }
 }
 
-export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreakdownTableProps) {
+export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExclude }: ItemBreakdownTableProps) {
   const [sortField, setSortField] = useState<SortField>('max_savings')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
@@ -179,8 +182,15 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
         </div>
       )}
 
-      {/* 테이블 헤더 */}
-      <div className="grid grid-cols-[1fr_100px_100px_100px_100px_32px] border-b bg-gray-50">
+      {/* 테이블 헤더 (CJ 숨김 시 컬럼 축소) */}
+      <div
+        className={cn(
+          'grid border-b bg-gray-50',
+          FEATURE_FLAGS.SHOW_CJ
+            ? 'grid-cols-[1fr_100px_100px_100px_100px_32px]'
+            : 'grid-cols-[1fr_100px_100px_100px_32px]'
+        )}
+      >
         <button
           onClick={() => handleSort('name')}
           className="flex items-center gap-2 px-4 py-3 text-left text-sm font-medium text-gray-600 hover:bg-gray-100"
@@ -195,15 +205,17 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
           내 단가
           <SortIcon field="our_price" />
         </button>
-        <button
-          onClick={() => handleSort('cj_price')}
-          className="flex items-center justify-end gap-2 px-4 py-3 text-sm font-medium hover:bg-gray-100"
-        >
-          <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
-            CJ
-          </span>
-          <SortIcon field="cj_price" />
-        </button>
+        {FEATURE_FLAGS.SHOW_CJ && (
+          <button
+            onClick={() => handleSort('cj_price')}
+            className="flex items-center justify-end gap-2 px-4 py-3 text-sm font-medium hover:bg-gray-100"
+          >
+            <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
+              CJ
+            </span>
+            <SortIcon field="cj_price" />
+          </button>
+        )}
         <button
           onClick={() => handleSort('ssg_price')}
           className="flex items-center justify-end gap-2 px-4 py-3 text-sm font-medium hover:bg-gray-100"
@@ -217,7 +229,7 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
           onClick={() => handleSort('max_savings')}
           className="flex items-center justify-end gap-2 px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-100"
         >
-          최대 절감
+          절감액
           <SortIcon field="max_savings" />
         </button>
         <div /> {/* expand button column */}
@@ -238,11 +250,14 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
 
           return (
             <div key={item.id}>
-              {/* Main row */}
+              {/* Main row (CJ 숨김 시 컬럼 축소) */}
               <div
                 className={cn(
-                  'grid grid-cols-[1fr_100px_100px_100px_100px_32px] border-b py-3 transition-colors cursor-pointer',
-                  hasSavings ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
+                  'grid border-b py-3 transition-colors cursor-pointer',
+                  FEATURE_FLAGS.SHOW_CJ
+                    ? 'grid-cols-[1fr_100px_100px_100px_100px_32px]'
+                    : 'grid-cols-[1fr_100px_100px_100px_32px]',
+                  item.is_excluded ? 'opacity-60 bg-gray-100' : hasSavings ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
                 )}
                 onClick={() => toggleExpand(item.id)}
               >
@@ -266,36 +281,38 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
                   {formatCurrency(item.extracted_unit_price)}
                 </div>
 
-                {/* CJ 단가 */}
-                <div className="px-4 text-right text-sm">
-                  {item.cj_match ? (
-                    <div>
-                      <span className={cn(
-                        'font-medium',
-                        bestSupplier === 'CJ' && 'text-orange-600'
-                      )}>
-                        {hasCjAdjustment ? (
-                          <>
-                            {formatCurrency(cjAdj.cjAdjustedPrice)}
-                            <span className="block text-xs text-gray-400 line-through">
-                              {formatCurrency(item.cj_match.standard_price)}
-                            </span>
-                          </>
-                        ) : (
-                          formatCurrency(item.cj_match.standard_price)
+                {/* CJ 단가 (feature flag로 숨김) */}
+                {FEATURE_FLAGS.SHOW_CJ && (
+                  <div className="px-4 text-right text-sm">
+                    {item.cj_match ? (
+                      <div>
+                        <span className={cn(
+                          'font-medium',
+                          bestSupplier === 'CJ' && 'text-orange-600'
+                        )}>
+                          {hasCjAdjustment ? (
+                            <>
+                              {formatCurrency(cjAdj.cjAdjustedPrice)}
+                              <span className="block text-xs text-gray-400 line-through">
+                                {formatCurrency(item.cj_match.standard_price)}
+                              </span>
+                            </>
+                          ) : (
+                            formatCurrency(item.cj_match.standard_price)
+                          )}
+                        </span>
+                        {item.cj_match.unit_normalized && !hasCjAdjustment && (
+                          <span className="text-gray-500 font-normal">/{item.cj_match.unit_normalized}</span>
                         )}
-                      </span>
-                      {item.cj_match.unit_normalized && !hasCjAdjustment && (
-                        <span className="text-gray-500 font-normal">/{item.cj_match.unit_normalized}</span>
-                      )}
-                      {hasCjAdjustment && (
-                        <span className="block text-xs text-orange-500">x{cjAdj.cjMultiplier}</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-gray-400">-</span>
-                  )}
-                </div>
+                        {hasCjAdjustment && (
+                          <span className="block text-xs text-orange-500">x{cjAdj.cjMultiplier}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </div>
+                )}
 
                 {/* 신세계 단가 */}
                 <div className="px-4 text-right text-sm">
@@ -351,8 +368,25 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange }: ItemBreak
                   )}
                 </div>
 
-                {/* Expand button */}
-                <div className="flex items-center justify-center">
+                {/* Expand button + 비교 제외 토글 (2026-04-21) */}
+                <div className="flex items-center justify-center gap-1">
+                  {onToggleExclude && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleExclude(item.id, item.is_excluded ? undefined : '담당자 제외')
+                      }}
+                      className={cn(
+                        'rounded p-1 transition-colors',
+                        item.is_excluded
+                          ? 'text-yellow-600 hover:bg-yellow-100'
+                          : 'text-gray-400 hover:bg-gray-200 hover:text-gray-600',
+                      )}
+                      title={item.is_excluded ? '비교 포함 (제외 해제)' : '보고서에서 비교 제외'}
+                    >
+                      {item.is_excluded ? <Eye size={14} /> : <EyeOff size={14} />}
+                    </button>
+                  )}
                   {(item.cj_match || item.ssg_match) && (
                     <button
                       onClick={(e) => {

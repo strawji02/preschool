@@ -181,18 +181,89 @@ function extractCoreKeywordsForFilter(
 // ========================================
 
 /**
- * 후보 목록에 대해 도메인별 재순위 적용
+ * 규격 문자열에서 g 단위로 환산한 총 중량 추출
+ * 예: "1KG" → 1000, "500G" → 500, "180G*10EA" → 1800, "100ml" → 100
+ * 반환: g 단위 총량, 파싱 실패 시 null
+ */
+function parseSpecToGrams(spec: string | null | undefined, spec_quantity?: number | null, spec_unit?: string | null): number | null {
+  // 우선 spec_quantity + spec_unit 구조화 데이터가 있으면 그것 사용
+  if (spec_quantity != null && spec_unit) {
+    const u = spec_unit.toUpperCase()
+    if (u === 'KG' || u === 'L') return spec_quantity * 1000
+    if (u === 'G' || u === 'ML') return spec_quantity
+  }
+  if (!spec) return null
+
+  const normalized = spec.toUpperCase()
+  // 패턴: 숫자+단위, 패키지 곱셈(예: 180G*10EA)
+  const packMatch = normalized.match(/(\d+\.?\d*)\s*(KG|G|ML|L)\s*[*×]\s*(\d+)/)
+  if (packMatch) {
+    const qty = parseFloat(packMatch[1])
+    const unit = packMatch[2]
+    const pack = parseInt(packMatch[3])
+    const multiplier = unit === 'KG' || unit === 'L' ? 1000 : 1
+    return qty * multiplier * pack
+  }
+  const simpleMatch = normalized.match(/(\d+\.?\d*)\s*(KG|G|ML|L)/)
+  if (simpleMatch) {
+    const qty = parseFloat(simpleMatch[1])
+    const unit = simpleMatch[2]
+    const multiplier = unit === 'KG' || unit === 'L' ? 1000 : 1
+    return qty * multiplier
+  }
+  return null
+}
+
+/**
+ * 품목명에서 접두사+본체 분리 시도 + 동의어 정규화
+ * 예: "(피제거)들깨가루" → ["피제거", "들깨가루"]
+ *     "기피들깨가루" → ["기피", "들깨가루"]
+ *     "순살돼지등뼈" → ["순살", "돼지등뼈"]
+ */
+function splitPrefixAndBody(name: string): { prefix: string | null; body: string } {
+  // 괄호 내용 추출
+  const bracketMatch = name.match(/\(([^)]+)\)(.+)/)
+  if (bracketMatch) {
+    return { prefix: bracketMatch[1].trim(), body: bracketMatch[2].trim() }
+  }
+  // 알려진 접두사 (동의어 그룹 기반)
+  const KNOWN_PREFIXES = ['기피', '탈피', '거피', '껍질제거', '피제거', '순살', '냉장', '냉동', '전처리', '세척', '깐', '흙']
+  for (const p of KNOWN_PREFIXES) {
+    if (name.startsWith(p) && name.length > p.length) {
+      return { prefix: p, body: name.slice(p.length) }
+    }
+  }
+  return { prefix: null, body: name }
+}
+
+/**
+ * 후보 목록에 대해 도메인별 재순위 적용 (Susan 피드백 반영, 2026-04-21)
  *
+ * 기존 규칙:
  * - 정육: 냉장/냉동 일치 우선, 이후 부위 매칭
  * - 농산물: 같은 원산지(국내산)일 때 중량 근접성
  * - 계란: 등급 대체 (왕란→특란, 특→상)
  * - 스파게티소스: 무수식어 → 토마토 기본
  * - 브랜드 다를 때: 저가 우선
+ *
+ * 신규 규칙 (골든셋 5번 정답 1위 처리):
+ * - 규격(용량) 근접도: 500G ↔ 500G +0.10, 근접 +0.05, 불일치 -0.05
+ * - 단가 근접도: ≤10% +0.05, ≤30% +0.02, >100% -0.05
+ * - 핵심어 접두사 동의어 일치: 피제거 ↔ 기피/탈피/거피 +0.08
  */
-function reRankCandidates<T extends { product_name: string; standard_price: number; match_score: number }>(
+function reRankCandidates<T extends {
+  product_name: string
+  standard_price: number
+  match_score: number
+  spec_quantity?: number | null
+  spec_unit?: string | null
+  unit_normalized?: string | null
+}>(
   itemName: string,
   candidates: T[],
-  manufacturerHint?: string | null
+  manufacturerHint?: string | null,
+  invoiceUnitPrice?: number,
+  invoiceSpec?: string
 ): T[] {
   if (candidates.length <= 1) return candidates
 
@@ -201,11 +272,11 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
     bonus: 0,
   }))
 
-  // Rule 0: 제조사/브랜드 힌트 일치 보너스 (규격에서 추출한 브랜드)
+  // Rule 0: 제조사/브랜드 힌트 일치 보너스
   if (manufacturerHint) {
     for (const s of scored) {
       if (s.candidate.product_name.includes(manufacturerHint)) {
-        s.bonus += 0.08 // 제조사 일치 보너스
+        s.bonus += 0.08
       }
     }
   }
@@ -217,16 +288,15 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
       for (const s of scored) {
         const candidateStorage = extractStorageType(s.candidate.product_name)
         if (candidateStorage === storageType) {
-          s.bonus += 0.10 // 냉장/냉동 일치 보너스 (강화)
+          s.bonus += 0.10
         } else if (candidateStorage !== null && candidateStorage !== storageType) {
-          s.bonus -= 0.08 // 냉장/냉동 불일치 페널티 (강화)
+          s.bonus -= 0.08
         }
       }
     }
   }
 
-  // Rule 2: 농산물 - 같은 원산지 시 중량 근접 우선 (점수가 비슷한 경우)
-  // (중량 정보가 product_name에 포함된 경우에만 적용)
+  // Rule 2: 농산물 - 같은 원산지 시 보너스
   if (isProduceItem(itemName)) {
     const isItemDomestic = itemName.includes('국내산') || itemName.includes('국산')
     if (isItemDomestic) {
@@ -243,17 +313,72 @@ function reRankCandidates<T extends { product_name: string; standard_price: numb
   if (eggGrades.length > 0) {
     for (const s of scored) {
       const pname = s.candidate.product_name
-      // 첫 번째 등급(정확 매치)에 더 높은 보너스
       if (pname.includes(eggGrades[0])) {
         s.bonus += 0.04
       } else if (eggGrades[1] && pname.includes(eggGrades[1])) {
-        s.bonus += 0.02 // 대체 등급
+        s.bonus += 0.02
       }
     }
   }
 
-  // Rule 4: 브랜드 다를 때 저가 우선 (점수가 비슷한 후보들 사이에서)
-  // 상위 후보들의 점수가 0.05 이내로 비슷하면 저가 우선
+  // Rule 5 (신규): 규격(용량) 근접도 보너스
+  const invoiceGrams = parseSpecToGrams(invoiceSpec)
+  if (invoiceGrams !== null && invoiceGrams > 0) {
+    for (const s of scored) {
+      const candGrams = parseSpecToGrams(
+        s.candidate.unit_normalized,
+        s.candidate.spec_quantity,
+        s.candidate.spec_unit,
+      )
+      if (candGrams !== null && candGrams > 0) {
+        const ratio = Math.min(invoiceGrams, candGrams) / Math.max(invoiceGrams, candGrams)
+        if (ratio >= 0.95) {
+          s.bonus += 0.10  // 완전 일치 (±5%)
+        } else if (ratio >= 0.5) {
+          s.bonus += 0.05  // 근접 (±100%)
+        } else if (ratio < 0.25) {
+          s.bonus -= 0.05  // 크게 불일치 (4배 이상)
+        }
+      }
+    }
+  }
+
+  // Rule 6 (신규): 단가 근접도 보너스
+  if (invoiceUnitPrice && invoiceUnitPrice > 0) {
+    for (const s of scored) {
+      const price = s.candidate.standard_price
+      if (price > 0) {
+        const diff = Math.abs(invoiceUnitPrice - price) / invoiceUnitPrice
+        if (diff <= 0.10) {
+          s.bonus += 0.05
+        } else if (diff <= 0.30) {
+          s.bonus += 0.02
+        } else if (diff > 1.0) {
+          s.bonus -= 0.05
+        }
+      }
+    }
+  }
+
+  // Rule 7 (신규): 접두사 동의어 완전 일치 보너스
+  // 예: 품목 "(피제거)들깨가루" → prefix="피제거", body="들깨가루"
+  //     후보 "기피들깨가루" → prefix="기피", body="들깨가루"
+  //     expandWithSynonyms("기피")가 "피제거" 포함하면 +0.08
+  const itemSplit = splitPrefixAndBody(itemName.replace(/[()]/g, ''))
+  if (itemSplit.prefix) {
+    const prefixSynonyms = new Set(expandWithSynonyms(itemSplit.prefix))
+    for (const s of scored) {
+      const candSplit = splitPrefixAndBody(s.candidate.product_name)
+      if (candSplit.prefix && prefixSynonyms.has(candSplit.prefix)) {
+        // body도 유사하면 (body 포함 관계 확인)
+        if (s.candidate.product_name.includes(itemSplit.body)) {
+          s.bonus += 0.08
+        }
+      }
+    }
+  }
+
+  // Rule 4: 브랜드 다를 때 저가 우선
   const topScore = scored[0]?.candidate.match_score ?? 0
   const similarScored = scored.filter(s =>
     Math.abs(s.candidate.match_score - topScore) <= 0.05
@@ -1021,9 +1146,15 @@ export async function findComparisonMatches(
       }
     }
 
-    // Domain-specific re-ranking
-    cj_candidates = reRankCandidates(itemName, cj_candidates, manufacturer)
-    ssg_candidates = reRankCandidates(itemName, ssg_candidates, manufacturer)
+    // Domain-specific re-ranking (내 단가/규격 전달하여 근접도 보너스 적용)
+    cj_candidates = reRankCandidates(
+      itemName, cj_candidates, manufacturer,
+      extractedItem?.unit_price, extractedItem?.spec,
+    )
+    ssg_candidates = reRankCandidates(
+      itemName, ssg_candidates, manufacturer,
+      extractedItem?.unit_price, extractedItem?.spec,
+    )
 
     // Top 5로 최종 자르기
     cj_candidates = cj_candidates.slice(0, 5)

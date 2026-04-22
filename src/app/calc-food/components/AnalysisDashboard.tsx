@@ -33,6 +33,10 @@ interface AnalysisDashboardProps {
   isReanalyzing?: boolean
   // Report step callbacks
   onBackToMatching: () => void
+  // 2026-04-21: 비교 제외, 업체명 수정
+  supplierName?: string | null
+  onToggleExclude?: (itemId: string, reason?: string) => void
+  onUpdateSupplierName?: (name: string) => void
 }
 
 export function AnalysisDashboard({
@@ -53,6 +57,9 @@ export function AnalysisDashboard({
   onReanalyze,
   isReanalyzing,
   onBackToMatching,
+  supplierName,
+  onToggleExclude,
+  onUpdateSupplierName,
 }: AnalysisDashboardProps) {
   if (currentStep === 'matching') {
     return (
@@ -82,8 +89,11 @@ export function AnalysisDashboard({
       onPageSelect={onPageSelect}
       items={items}
       fileName={fileName}
+      supplierName={supplierName}
       scenarios={scenarios}
       onBackToMatching={onBackToMatching}
+      onToggleExclude={onToggleExclude}
+      onUpdateSupplierName={onUpdateSupplierName}
     />
   )
 }

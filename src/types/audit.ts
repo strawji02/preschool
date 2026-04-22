@@ -58,17 +58,29 @@ export interface ComparisonItem {
 
   match_status: MatchStatus
   match_candidates?: MatchCandidate[]  // 기존 호환성 유지
+
+  // 보고서 비교 제외 (Susan 피드백 반영, 2026-04-21)
+  // - true면 ScenarioComparison 절감액 계산에서 스킵, "비교 불가 품목" 별지로 이동
+  // - 기본 false, 미매칭 품목 자동 제외 + 담당자 수동 토글 가능
+  is_excluded?: boolean
+  exclusion_reason?: string  // 선택: 사유 (예: "매칭 없음", "일회성 구매")
 }
 
 // 공급사별 시나리오 분석 결과 (새로 추가)
 export interface SupplierScenario {
   supplier: 'CJ' | 'SHINSEGAE'
-  totalOurCost: number        // 현재 총액
-  totalSupplierCost: number   // 공급사 전환 시 총액
-  totalSavings: number        // 절감액
-  savingsPercent: number      // 절감률
-  matchedCount: number        // 매칭된 품목 수
-  unmatchedCount: number      // 미매칭 품목 수
+  // 비교 가능 품목 기준 (is_excluded=false)
+  totalOurCost: number           // 비교 가능 품목의 현재 총액
+  totalSupplierCost: number      // 비교 가능 품목의 공급사 전환 시 총액
+  totalSavings: number           // 절감액 = totalOurCost - totalSupplierCost
+  savingsPercent: number         // 절감률 (비교 가능 총액 기준)
+  matchedCount: number           // 비교 가능 + 매칭된 품목 수
+  unmatchedCount: number         // 비교 가능인데 매칭 없는 품목 수 (레거시)
+
+  // 전체 원장 기준 (Susan 피드백 반영, 2026-04-21)
+  grandTotalOurCost: number      // 전체 품목 원본 총액 (기존 업체 거래명세표 총액)
+  excludedCount: number          // 비교 제외 품목 수
+  excludedTotalCost: number      // 비교 제외 품목의 원본 총액 (별지용)
 }
 
 // 새 API 응답 타입
@@ -121,6 +133,7 @@ export interface AuditItem {
   row_index?: number
   is_flagged: boolean
   user_note?: string
+  is_excluded?: boolean  // 2026-04-21 추가
   created_at: string
   updated_at: string
 }

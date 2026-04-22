@@ -18,6 +18,7 @@ interface SplitViewProps {
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
   onConfirmItem: (itemId: string, supplier?: Supplier) => void
   onConfirmAllAutoMatched: () => void
+  onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
 }
 
@@ -28,6 +29,7 @@ export function SplitView({
   onSelectCandidate,
   onConfirmItem,
   onConfirmAllAutoMatched,
+  onAutoExcludeUnmatched,
   onProceedToReport,
 }: SplitViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -155,10 +157,15 @@ export function SplitView({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [focusedPanel, items.length, currentItem, selectedIndex, onConfirmItem, moveToNextUnconfirmed])
 
-  // 모든 자동 매칭 확정 가능 여부
+  // 자동 확정 가능 여부: 매칭 후보가 있는 미확정 품목 존재 시
   const hasUnconfirmedAutoMatched = items.some(
-    i => !i.is_confirmed && i.match_status === 'auto_matched'
+    i => !i.is_confirmed && (i.cj_match || i.ssg_match)
   )
+
+  // 매칭 없는 미확정 품목 수 (자동 제외 대상)
+  const unmatchedUnconfirmedCount = items.filter(
+    i => !i.is_confirmed && !i.cj_match && !i.ssg_match
+  ).length
 
   // 모두 확정 완료 여부
   const allConfirmed = items.every(i => i.is_confirmed)
@@ -236,6 +243,17 @@ export function SplitView({
             >
               <CheckCircle size={18} />
               자동매칭 일괄 확정
+            </button>
+          )}
+
+          {/* 매칭 없는 품목 자동 제외 */}
+          {unmatchedUnconfirmedCount > 0 && onAutoExcludeUnmatched && (
+            <button
+              onClick={onAutoExcludeUnmatched}
+              className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-amber-700 hover:bg-amber-100"
+              title="매칭 결과 없는 품목을 보고서 비교에서 제외 처리 (별지로 표시)"
+            >
+              비교 불가 {unmatchedUnconfirmedCount}개 자동 제외
             </button>
           )}
 

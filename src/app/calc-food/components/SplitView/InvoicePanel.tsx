@@ -5,6 +5,7 @@ import { Check, AlertCircle, Clock, FileText } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/format'
 import type { ComparisonItem, SupplierMatch } from '@/types/audit'
+import { FEATURE_FLAGS } from '../../config'
 
 // 단위를 g으로 변환
 function unitToGrams(unit: string): number {
@@ -296,26 +297,28 @@ export function InvoicePanel({
                       </span>
                     </p>
 
-                    {/* CJ */}
-                    {item.cj_match ? (
-                      <p className="text-orange-600">
-                        <span className="font-medium">CJ</span>
-                        {' - '}
-                        {item.cj_match.product_name}
-                        {' : '}
-                        {formatCurrency(item.cj_match.standard_price)}
-                        {' x '}
-                        {cjQty}
-                        {' = '}
-                        {formatCurrency(cjTotal)}원
-                        {item.cj_match.spec_unit && (
-                          <span className="text-orange-400">
-                            {' '}({cjTotalQty}{item.cj_match.spec_unit.toLowerCase()})
-                          </span>
-                        )}
-                      </p>
-                    ) : (
-                      <p className="text-gray-400">CJ - 매칭 없음</p>
+                    {/* CJ (feature flag로 숨김 가능) */}
+                    {FEATURE_FLAGS.SHOW_CJ && (
+                      item.cj_match ? (
+                        <p className="text-orange-600">
+                          <span className="font-medium">CJ</span>
+                          {' - '}
+                          {item.cj_match.product_name}
+                          {' : '}
+                          {formatCurrency(item.cj_match.standard_price)}
+                          {' x '}
+                          {cjQty}
+                          {' = '}
+                          {formatCurrency(cjTotal)}원
+                          {item.cj_match.spec_unit && (
+                            <span className="text-orange-400">
+                              {' '}({cjTotalQty}{item.cj_match.spec_unit.toLowerCase()})
+                            </span>
+                          )}
+                        </p>
+                      ) : (
+                        <p className="text-gray-400">CJ - 매칭 없음</p>
+                      )
                     )}
 
                     {/* 신세계 */}

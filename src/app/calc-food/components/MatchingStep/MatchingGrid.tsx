@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, Supplier, SupplierMatch } from '@/types/audit'
 import { MatchingRow } from './MatchingRow'
+import { FEATURE_FLAGS } from '../../config'
 
 interface MatchingGridProps {
   items: ComparisonItem[]
@@ -81,20 +82,29 @@ export function MatchingGrid({
         ))}
       </div>
 
-      {/* 테이블 헤더 - 8컬럼 (단위 수정 추가) */}
-      <div className="grid grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px] gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600">
+      {/* 테이블 헤더 (CJ 플래그에 따라 동적 그리드) */}
+      <div
+        className={cn(
+          'grid gap-2 border-b bg-gray-50 px-4 py-2 text-sm font-medium text-gray-600',
+          FEATURE_FLAGS.SHOW_CJ
+            ? 'grid-cols-[1fr_60px_90px_200px_120px_120px_60px_40px]'
+            : 'grid-cols-[1fr_60px_90px_200px_120px_60px_40px]'
+        )}
+      >
         <div>품목명</div>
         <div className="text-right">수량</div>
         <div className="text-right">현재 급식 단가</div>
         <div className="text-center">단위 수정</div>
-        <div className="text-center">
-          <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
-            CJ 선택
-          </span>
-        </div>
+        {FEATURE_FLAGS.SHOW_CJ && (
+          <div className="text-center">
+            <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
+              CJ 선택
+            </span>
+          </div>
+        )}
         <div className="text-center">
           <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
-            SSG 선택
+            신세계 선택
           </span>
         </div>
         <div className="text-center">확정</div>
