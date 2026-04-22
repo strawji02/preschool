@@ -38,12 +38,11 @@ export function ReportView({
 }: ReportViewProps) {
   const excludedItems = items.filter(i => i.is_excluded)
   const includedItems = items.filter(i => !i.is_excluded)
-  const excludedTotal = excludedItems.reduce(
-    (s, i) => s + i.extracted_unit_price * i.extracted_quantity, 0,
-  )
-  const includedTotal = includedItems.reduce(
-    (s, i) => s + i.extracted_unit_price * i.extracted_quantity, 0,
-  )
+  // 세액 포함 총액(원장 총액)으로 집계. extracted_total_price가 없으면 공급가액으로 대체.
+  const itemBilled = (i: typeof items[number]) =>
+    i.extracted_total_price ?? i.extracted_unit_price * i.extracted_quantity
+  const excludedTotal = excludedItems.reduce((s, i) => s + itemBilled(i), 0)
+  const includedTotal = includedItems.reduce((s, i) => s + itemBilled(i), 0)
   const grandTotal = excludedTotal + includedTotal
 
   return (

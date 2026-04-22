@@ -200,8 +200,8 @@ function calculateStats(items: ComparisonItem[]): SessionStats {
   let ssgMatchCount = 0
 
   for (const item of items) {
-    // 청구 총액
-    totalBilled += item.extracted_unit_price * item.extracted_quantity
+    // 청구 총액 (세액 포함 총액 우선, 없으면 공급가액으로 대체)
+    totalBilled += item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
 
     // 절감액 합산
     cjSavings += item.savings.cj
@@ -842,33 +842,34 @@ export function useAuditSession() {
     let ssgComparableItems = 0
 
     for (const item of items) {
-      const itemTotal = item.extracted_unit_price * item.extracted_quantity
-      grandTotal += itemTotal
+      // 원장 기준 총액 (세액 포함). 없으면 공급가액으로 대체.
+      const billedCost = item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
+      grandTotal += billedCost
 
       if (item.is_excluded) {
         excludedCount++
-        excludedTotal += itemTotal
+        excludedTotal += billedCost
         continue  // 비교 제외 품목은 시나리오 계산에서 스킵
       }
 
-      // CJ 시나리오 (비교 가능 품목만)
-      cjComparableOur += itemTotal
+      // CJ 시나리오 (비교 가능 품목만) — 우리측은 세액 포함 원장 기준
+      cjComparableOur += billedCost
       cjComparableItems++
       if (item.cj_match) {
         cjComparableSupplier += item.cj_match.standard_price * item.extracted_quantity
         cjMatchedCount++
       } else {
-        cjComparableSupplier += itemTotal
+        cjComparableSupplier += billedCost
       }
 
       // SSG 시나리오 (비교 가능 품목만)
-      ssgComparableOur += itemTotal
+      ssgComparableOur += billedCost
       ssgComparableItems++
       if (item.ssg_match) {
         ssgComparableSupplier += item.ssg_match.standard_price * item.extracted_quantity
         ssgMatchedCount++
       } else {
-        ssgComparableSupplier += itemTotal
+        ssgComparableSupplier += billedCost
       }
     }
 
