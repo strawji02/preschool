@@ -31,6 +31,11 @@ const ExcelPreview = dynamic(() => import('./components/ExcelPreview').then(mod 
   loading: () => <LoadingFallback />,
 })
 
+const ImagePreview = dynamic(() => import('./components/ImagePreview').then(mod => ({ default: mod.ImagePreview })), {
+  ssr: false,
+  loading: () => <LoadingFallback />,
+})
+
 function LoadingFallback() {
   return (
     <div className="flex min-h-[calc(100vh-200px)] items-center justify-center">
@@ -67,6 +72,8 @@ export default function CalcFoodPage() {
     // 비교 제외 / 업체명 수정 (2026-04-21)
     toggleExclude,
     updateSupplierName,
+    // PDF/이미지 담당자 확인 (2026-04-23)
+    confirmImagePreview,
   } = useAuditSession()
 
   return (
@@ -134,6 +141,18 @@ export default function CalcFoodPage() {
             onItemRemove={removeExcelPreviewItem}
             onCancel={clearExcelPreview}
             onConfirm={confirmAndAnalyzeExcel}
+          />
+        )}
+
+        {/* PDF/이미지 담당자 확인 단계 (2026-04-23 추가) */}
+        {state.status === 'image_preview' && (
+          <ImagePreview
+            items={state.items}
+            fileName={state.fileName || ''}
+            supplierName={state.supplierName || '업체'}
+            onSupplierNameChange={updateSupplierName}
+            onCancel={reset}
+            onConfirm={confirmImagePreview}
           />
         )}
 

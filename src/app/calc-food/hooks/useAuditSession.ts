@@ -8,7 +8,8 @@ import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
-export type AuditStatus = 'empty' | 'excel_preview' | 'processing' | 'analysis' | 'error'
+// 'image_preview' — 2026-04-23 추가: PDF/이미지 OCR 완료 후 담당자 확인 절차 (엑셀과 UX 통일)
+export type AuditStatus = 'empty' | 'excel_preview' | 'image_preview' | 'processing' | 'analysis' | 'error'
 
 // 엑셀 파싱 결과 (담당자 확인용 임시 데이터)
 export interface ExcelPreviewData {
@@ -138,6 +139,9 @@ type AuditAction =
   | { type: 'REMOVE_EXCEL_PREVIEW_ITEM'; rowIndex: number }
   | { type: 'UPDATE_EXCEL_PREVIEW_SUPPLIER'; supplierName: string }
   | { type: 'CLEAR_EXCEL_PREVIEW' }
+  // PDF/이미지 담당자 확인 단계 (2026-04-23 추가)
+  | { type: 'SHOW_IMAGE_PREVIEW' }
+  | { type: 'CONFIRM_IMAGE_PREVIEW' }
 
 const initialStats: SessionStats = {
   totalItems: 0,
@@ -297,6 +301,14 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
     case 'COMPLETE_ANALYSIS':
       return { ...state, status: 'analysis' }
+
+    // PDF/이미지 OCR 완료 → 담당자 확인 단계 진입
+    case 'SHOW_IMAGE_PREVIEW':
+      return { ...state, status: 'image_preview' }
+
+    // 담당자 확인 완료 → 매칭 단계 진입 (analysis status + matching step)
+    case 'CONFIRM_IMAGE_PREVIEW':
+      return { ...state, status: 'analysis', currentStep: 'matching' }
 
     case 'SET_CURRENT_PAGE':
       return { ...state, currentPage: action.page }
@@ -634,12 +646,17 @@ export function useAuditSession() {
         }
       }
 
-      // 4. 분석 완료
-      dispatch({ type: 'COMPLETE_ANALYSIS' })
+      // 4. OCR + 매칭 완료 → 담당자 확인 단계로 진입 (엑셀과 UX 통일)
+      dispatch({ type: 'SHOW_IMAGE_PREVIEW' })
     } catch (error) {
       const message = error instanceof Error ? error.message : '알 수 없는 오류'
       dispatch({ type: 'SET_ERROR', error: message })
     }
+  }, [])
+
+  // 담당자 확인 완료 → 매칭 단계 진입 (PDF/이미지)
+  const confirmImagePreview = useCallback(() => {
+    dispatch({ type: 'CONFIRM_IMAGE_PREVIEW' })
   }, [])
 
   // 엑셀 파일 처리 — 1단계: 파싱 후 담당자 확인을 위한 preview 상태로 전환
@@ -966,5 +983,7 @@ export function useAuditSession() {
     removeExcelPreviewItem,
     updateExcelPreviewSupplier,
     clearExcelPreview,
+    // PDF/이미지 담당자 확인 단계 (2026-04-23 추가)
+    confirmImagePreview,
   }
 }
