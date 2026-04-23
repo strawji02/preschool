@@ -190,11 +190,18 @@ export async function extractItemsFromImage(
       }
     } catch (error) {
       lastError = error
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorName = error instanceof Error ? error.name : 'UnknownError'
+      const errorStack = error instanceof Error ? error.stack?.slice(0, 500) : ''
       const retriable = isRetriableError(error)
-      console.error(
-        `[Gemini OCR] attempt ${attempt}/${MAX_ATTEMPTS} failed${retriable ? ' (retriable)' : ''}: ${errorMessage}`
+
+      // Vercel log에 확실히 찍히도록 console.log + 구조화된 메시지로 출력
+      console.log(
+        `[Gemini OCR FAIL attempt=${attempt}/${MAX_ATTEMPTS} retriable=${retriable}] name=${errorName} msg=${errorMessage.slice(0, 300)}`
       )
+      if (errorStack) {
+        console.log(`[Gemini OCR STACK] ${errorStack}`)
+      }
 
       // 마지막 시도이거나 재시도 불가능한 오류면 중단
       if (attempt >= MAX_ATTEMPTS || !retriable) break
@@ -205,10 +212,11 @@ export async function extractItemsFromImage(
     }
   }
 
-  const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error'
+  const errorMessage = lastError instanceof Error ? lastError.message : String(lastError)
+  const errorName = lastError instanceof Error ? lastError.name : 'UnknownError'
   return {
     success: false,
     items: [],
-    error: `OCR failed after retries: ${errorMessage}`,
+    error: `OCR failed after ${MAX_ATTEMPTS} retries: [${errorName}] ${errorMessage.slice(0, 500)}`,
   }
 }

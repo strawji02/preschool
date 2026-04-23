@@ -84,6 +84,10 @@ export async function POST(request: NextRequest) {
     console.log(`[${body.session_id}] Step 3: Gemini OCR completed in ${Date.now() - ocrStartTime}ms`)
 
     if (!ocrResult.success) {
+      // OCR 실패 원인을 Vercel log + response body 양쪽에 명시
+      console.log(
+        `[${body.session_id}] OCR FAILED for page ${body.page_number}: ${ocrResult.error}`
+      )
       return NextResponse.json<ComparisonPageResponse>(
         {
           success: false,

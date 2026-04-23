@@ -704,7 +704,19 @@ export function useAuditSession() {
               })
 
               if (!analyzeRes.ok) {
-                console.error(`페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status})`)
+                // 서버 응답 body에서 에러 원인 추출 (브라우저 console + state 기록)
+                let serverErrMsg = ''
+                try {
+                  const errBody = await analyzeRes.json()
+                  serverErrMsg = errBody?.error || ''
+                } catch {
+                  try {
+                    serverErrMsg = await analyzeRes.text()
+                  } catch { /* ignore */ }
+                }
+                console.error(
+                  `페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status}): ${serverErrMsg || '(no error body)'}`,
+                )
                 return
               }
 
