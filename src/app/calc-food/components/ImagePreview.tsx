@@ -172,14 +172,17 @@ export function ImagePreview({
         </span>
       </div>
 
-      {/* 품목 테이블 — 열: No / 품목명 / 규격 / 수량 / 단가 / 총액 */}
+      {/* 품목 테이블 — 열: No / 품목명 / 규격 / 단위 / 수량 / 단가 / 공급가액 / 세액 / 총액 */}
       <div className="rounded-xl border bg-white shadow-sm">
-        <div className="grid grid-cols-[40px_minmax(140px,1fr)_minmax(120px,180px)_80px_100px_110px] gap-2 border-b bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+        <div className="grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px] gap-2 border-b bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
           <div className="text-center">No</div>
           <div>품목명</div>
           <div>규격</div>
+          <div className="text-center">단위</div>
           <div className="text-right">수량</div>
           <div className="text-right">단가</div>
+          <div className="text-right">공급가액</div>
+          <div className="text-right">세액</div>
           <div className="text-right">총액</div>
         </div>
 
@@ -190,12 +193,20 @@ export function ImagePreview({
               item.extracted_total_price != null &&
               !isAmountValid(supply, item.extracted_total_price)
             const displayTotal = itemTotal(item)
+            // 공급가액: OCR이 직접 추출한 값 우선, 없으면 단가×수량
+            const displaySupply = item.extracted_supply_amount ?? supply
+            // 세액: OCR이 직접 추출한 값 우선, 없으면 (총액 - 공급가액)으로 역산 (음수/NaN 방지)
+            const derivedTax =
+              item.extracted_total_price != null
+                ? Math.max(0, item.extracted_total_price - displaySupply)
+                : 0
+            const displayTax = item.extracted_tax_amount ?? derivedTax
 
             return (
               <div
                 key={item.id}
                 className={cn(
-                  'grid grid-cols-[40px_minmax(140px,1fr)_minmax(120px,180px)_80px_100px_110px] gap-2 border-b px-3 py-2 text-sm',
+                  'grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px] gap-2 border-b px-3 py-2 text-sm',
                   mismatch ? 'bg-red-50' : 'hover:bg-gray-50',
                 )}
               >
@@ -206,8 +217,13 @@ export function ImagePreview({
                 <div className="truncate text-gray-600" title={item.extracted_spec || ''}>
                   {item.extracted_spec || '-'}
                 </div>
+                <div className="text-center text-gray-600">{item.extracted_unit || '-'}</div>
                 <div className="text-right">{formatNumber(item.extracted_quantity)}</div>
                 <div className="text-right">{formatCurrency(item.extracted_unit_price)}</div>
+                <div className="text-right text-gray-700">{formatCurrency(displaySupply)}</div>
+                <div className="text-right text-gray-700">
+                  {displayTax > 0 ? formatCurrency(displayTax) : '면세'}
+                </div>
                 <div
                   className={cn(
                     'text-right font-medium',

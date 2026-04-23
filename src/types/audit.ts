@@ -37,9 +37,12 @@ export interface ComparisonItem {
   id: string
   extracted_name: string
   extracted_spec?: string
+  extracted_unit?: string            // 단위 (EA, KG, BOX 등) — 거래명세표 별도 컬럼
   extracted_quantity: number
   extracted_unit_price: number
-  extracted_total_price?: number  // 합계 검증용 추가
+  extracted_supply_amount?: number   // 세액 미포함 공급가액
+  extracted_tax_amount?: number      // 부가세/세액 (면세 품목은 0)
+  extracted_total_price?: number     // 부가세 포함 최종 합계
 
   // 현재 선택된 매칭 (Top 1 또는 사용자 선택)
   cj_match?: SupplierMatch
@@ -95,9 +98,12 @@ export interface ComparisonPageResponse {
 export interface ExtractedItem {
   name: string
   spec?: string
+  unit?: string            // 단위 (EA, KG, BOX 등)
   quantity: number
   unit_price: number
-  total_price?: number
+  supply_amount?: number   // 세액 미포함 공급가액
+  tax_amount?: number      // 부가세/세액 (면세 품목은 0)
+  total_price?: number     // 부가세 포함 최종 합계
 }
 
 // 매칭 후보 (supplier 추가)

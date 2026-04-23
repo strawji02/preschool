@@ -11,8 +11,11 @@ export const maxDuration = 60
 interface ExcelItem {
   name: string
   spec?: string
+  unit?: string
   quantity: number
   unit_price: number
+  supply_amount?: number
+  tax_amount?: number
   total_price: number
   row_index: number
 }
@@ -124,8 +127,11 @@ export async function POST(request: NextRequest) {
           session_id: body.session_id,
           extracted_name: item.name,
           extracted_spec: item.spec,
+          extracted_unit: item.unit,
           extracted_quantity: item.quantity,
           extracted_unit_price: item.unit_price,
+          extracted_supply_amount: item.supply_amount,
+          extracted_tax_amount: item.tax_amount,
           extracted_total_price: item.total_price,
           matched_product_id: bestMatch?.id,
           match_score: safeMatchScore,
@@ -172,8 +178,11 @@ export async function POST(request: NextRequest) {
       id: insertedItems?.[index]?.id || '',
       extracted_name: item.dbRecord.extracted_name,
       extracted_spec: item.dbRecord.extracted_spec,
+      extracted_unit: item.dbRecord.extracted_unit,
       extracted_quantity: item.dbRecord.extracted_quantity,
       extracted_unit_price: item.dbRecord.extracted_unit_price,
+      extracted_supply_amount: item.dbRecord.extracted_supply_amount,
+      extracted_tax_amount: item.dbRecord.extracted_tax_amount,
       extracted_total_price: item.dbRecord.extracted_total_price,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
