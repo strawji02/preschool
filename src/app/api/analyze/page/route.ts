@@ -193,6 +193,7 @@ export async function POST(request: NextRequest) {
       extracted_spec: item.dbRecord.extracted_spec,
       extracted_quantity: item.dbRecord.extracted_quantity,
       extracted_unit_price: item.dbRecord.extracted_unit_price,
+      extracted_total_price: item.dbRecord.extracted_total_price,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
       cj_candidates: item.cj_candidates,

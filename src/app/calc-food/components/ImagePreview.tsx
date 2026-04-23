@@ -50,11 +50,17 @@ export function ImagePreview({
     i.extracted_total_price ?? i.extracted_unit_price * i.extracted_quantity
   const totalAmount = items.reduce((s, i) => s + itemTotal(i), 0)
 
-  // 수량 × 단가 ≠ 총액인 행 수 (1원 허용)
+  // 총액이 "수량×단가 (면세)" 또는 "수량×단가 + 10% 부가세 (과세)" 중 하나와 맞아야 정상
+  // 그 외는 OCR 오인식 가능성
+  const isAmountValid = (supply: number, total: number) => {
+    if (Math.abs(supply - total) <= 1) return true                  // 면세
+    if (Math.abs(Math.round(supply * 1.1) - total) <= 1) return true // 10% 과세
+    return false
+  }
   const mismatchCount = items.filter((i) => {
     if (i.extracted_total_price == null) return false
-    const expected = i.extracted_unit_price * i.extracted_quantity
-    return Math.abs(expected - i.extracted_total_price) > 1
+    const supply = i.extracted_unit_price * i.extracted_quantity
+    return !isAmountValid(supply, i.extracted_total_price)
   }).length
 
   return (
@@ -179,10 +185,10 @@ export function ImagePreview({
 
         <div className="max-h-[50vh] overflow-y-auto">
           {items.map((item, idx) => {
-            const expected = item.extracted_unit_price * item.extracted_quantity
+            const supply = item.extracted_unit_price * item.extracted_quantity
             const mismatch =
               item.extracted_total_price != null &&
-              Math.abs(expected - item.extracted_total_price) > 1
+              !isAmountValid(supply, item.extracted_total_price)
             const displayTotal = itemTotal(item)
 
             return (
