@@ -119,6 +119,24 @@ function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total
   return { items, page_total }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// 429(rate limit) / 503(overloaded) / network 오류인지 판별
+function isRetriableError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  return (
+    msg.includes('429') ||
+    msg.includes('rate') ||
+    msg.includes('quota') ||
+    msg.includes('503') ||
+    msg.includes('overloaded') ||
+    msg.includes('unavailable') ||
+    msg.includes('timeout') ||
+    msg.includes('fetch failed') ||
+    msg.includes('econnreset')
+  )
+}
+
 export async function extractItemsFromImage(
   request: GeminiOCRRequest
 ): Promise<GeminiOCRResponse> {
@@ -132,49 +150,65 @@ export async function extractItemsFromImage(
     }
   }
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const genAI = new GoogleGenerativeAI(apiKey)
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
-    const result = await model.generateContent([
-      { text: EXTRACTION_PROMPT },
-      {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: request.image,
+  // Rate limit / 일시 오류 대응: 최대 3회 재시도 (exponential backoff + jitter)
+  const MAX_ATTEMPTS = 3
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await model.generateContent([
+        { text: EXTRACTION_PROMPT },
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: request.image,
+          },
         },
-      },
-    ])
+      ])
 
-    const text = result.response.text()
-    // 개발용 로그: 합계 열이 있는 거래명세서의 supply/tax/total 추출 여부 확인
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[Gemini OCR raw]', text.slice(0, 2000))
+      const text = result.response.text()
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[Gemini OCR raw]', text.slice(0, 2000))
+      }
+      const { items, page_total } = parseGeminiResponse(text)
+
+      const validItems = items.filter(
+        (item) =>
+          item.name &&
+          item.quantity > 0 &&
+          (item.unit_price > 0 || (item.total_price != null && item.total_price > 0))
+      )
+
+      return {
+        success: true,
+        items: validItems,
+        page_total,
+        raw_response: text,
+      }
+    } catch (error) {
+      lastError = error
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const retriable = isRetriableError(error)
+      console.error(
+        `[Gemini OCR] attempt ${attempt}/${MAX_ATTEMPTS} failed${retriable ? ' (retriable)' : ''}: ${errorMessage}`
+      )
+
+      // 마지막 시도이거나 재시도 불가능한 오류면 중단
+      if (attempt >= MAX_ATTEMPTS || !retriable) break
+
+      // exponential backoff: 1s, 3s, 7s (+ jitter 0-500ms)
+      const delay = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 500)
+      await sleep(delay)
     }
-    const { items, page_total } = parseGeminiResponse(text)
+  }
 
-    // 유효 품목: 이름 + 수량 + (단가 또는 총액) 중 하나라도 있어야 함
-    const validItems = items.filter(
-      (item) =>
-        item.name &&
-        item.quantity > 0 &&
-        (item.unit_price > 0 || (item.total_price != null && item.total_price > 0))
-    )
-
-    return {
-      success: true,
-      items: validItems,
-      page_total,
-      raw_response: text,
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('Gemini OCR error:', errorMessage)
-
-    return {
-      success: false,
-      items: [],
-      error: `OCR failed: ${errorMessage}`,
-    }
+  const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error'
+  return {
+    success: false,
+    items: [],
+    error: `OCR failed after retries: ${errorMessage}`,
   }
 }

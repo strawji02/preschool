@@ -676,10 +676,14 @@ export function useAuditSession() {
 
       dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
 
-      // 3. 페이지 분석 — 병렬 배치 (동시 5개) 로 OCR 속도 개선 (2026-04-23)
-      const BATCH = 5
+      // 3. 페이지 분석 — 병렬 배치 (동시 3개) + 배치 간 지연으로 Gemini rate limit 회피 (2026-04-23)
+      // 이전엔 5개 동시 → 14장 이상 업로드 시 대량 실패 확인됨. 3개로 축소 + 배치 간 1.2초 대기.
+      const BATCH = 3
+      const BATCH_DELAY_MS = 1200
       const collectedTotals: PageTotal[] = []
       let completed = 0
+
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
       for (let batchStart = 0; batchStart < allPages.length; batchStart += BATCH) {
         const batch = allPages.slice(batchStart, batchStart + BATCH)
@@ -724,6 +728,10 @@ export function useAuditSession() {
             }
           }),
         )
+        // 다음 배치로 넘어가기 전 지연 (마지막 배치 이후엔 sleep 불필요)
+        if (batchStart + BATCH < allPages.length) {
+          await sleep(BATCH_DELAY_MS)
+        }
       }
 
       // 4. 페이지별 OCR footer 합계를 session에 일괄 저장 (단일 writer, 경쟁 회피)
