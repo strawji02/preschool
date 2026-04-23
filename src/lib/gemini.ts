@@ -151,10 +151,13 @@ export async function extractItemsFromImage(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  // 2.5-flash: 2.0-flash보다 OCR 품질 개선, 무료 티어 10 RPM / 250K TPM / 500 RPD
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
-  // Rate limit / 일시 오류 대응: 최대 3회 재시도 (exponential backoff + jitter)
-  const MAX_ATTEMPTS = 3
+  // 서버 내 재시도: Vercel maxDuration(60s) 초과 방지 위해 최대 2회 (OCR 7s + 10s + OCR 7s ≈ 24s)
+  // 나머지 재시도는 클라이언트가 실패 페이지 큐를 통해 재실행 (useAuditSession)
+  const MAX_ATTEMPTS = 2
+  const BACKOFF_MS = [10_000] // attempt 1→2 만 (10초)
   let lastError: unknown = null
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -206,8 +209,10 @@ export async function extractItemsFromImage(
       // 마지막 시도이거나 재시도 불가능한 오류면 중단
       if (attempt >= MAX_ATTEMPTS || !retriable) break
 
-      // exponential backoff: 1s, 3s, 7s (+ jitter 0-500ms)
-      const delay = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 500)
+      // 고정 단계적 backoff (429/rate limit 회복 대기): 10s → 30s → 60s → 90s (+ jitter 0-2s)
+      const baseDelay = BACKOFF_MS[attempt - 1] ?? 90_000
+      const delay = baseDelay + Math.floor(Math.random() * 2000)
+      console.log(`[Gemini OCR RETRY] waiting ${Math.round(delay / 1000)}s before attempt ${attempt + 1}/${MAX_ATTEMPTS}`)
       await sleep(delay)
     }
   }

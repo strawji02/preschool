@@ -73,6 +73,10 @@ export interface AuditState {
   stats: SessionStats
   processingPage: number
   totalPages: number
+  // 처리 시간 / 진행률 UX (2026-04-24 추가)
+  processingStartedAt: number | null   // epoch ms — 업로드 시작 시각
+  processingRetryRound: number          // 0=1차 처리, 1+=실패 페이지 재시도 라운드
+  processingFailedPages: number         // 현재까지 실패한 페이지 수 (재시도 대상)
   error: string | null
   fileName: string | null
   supplierName: string | null  // 파일명에서 추출한 공급업체명
@@ -119,6 +123,7 @@ export function extractSupplierName(fileName: string): string {
 // 액션 타입
 type AuditAction =
   | { type: 'START_PROCESSING'; fileName: string; totalPages: number; supplierName: string }
+  | { type: 'SET_RETRY_ROUND'; round: number; failedCount: number }
   | { type: 'SET_SESSION_ID'; sessionId: string }
   | { type: 'SET_PAGES'; pages: PageImage[]; sourceFiles?: string[] }
   | { type: 'ADD_PAGE_TOTAL'; pageNumber: number; ocrTotal: number | null; sourceFile?: string | null }
@@ -179,6 +184,9 @@ const initialState: AuditState = {
   stats: initialStats,
   processingPage: 0,
   totalPages: 0,
+  processingStartedAt: null,
+  processingRetryRound: 0,
+  processingFailedPages: 0,
   error: null,
   fileName: null,
   supplierName: null,
@@ -286,6 +294,18 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         supplierName: action.supplierName,
         totalPages: action.totalPages,
         processingPage: 0,
+        processingStartedAt: Date.now(),
+        processingRetryRound: 0,
+        processingFailedPages: 0,
+      }
+
+    case 'SET_RETRY_ROUND':
+      return {
+        ...state,
+        processingRetryRound: action.round,
+        processingFailedPages: action.failedCount,
+        processingPage: 0,  // 재시도 라운드는 진행률 0부터 재시작
+        totalPages: action.failedCount,
       }
 
     case 'SET_SESSION_ID':
@@ -676,77 +696,99 @@ export function useAuditSession() {
 
       dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
 
-      // 3. 페이지 분석 — 병렬 배치 (동시 3개) + 배치 간 지연으로 Gemini rate limit 회피 (2026-04-23)
-      // 이전엔 5개 동시 → 14장 이상 업로드 시 대량 실패 확인됨. 3개로 축소 + 배치 간 1.2초 대기.
-      const BATCH = 3
-      const BATCH_DELAY_MS = 1200
+      // 3. 페이지 분석 — 순차 처리 + 5초 간격 (Gemini 2.5-flash 무료 티어 10 RPM 대응, 2026-04-24)
+      // 품질 우선 + rate limit 회피. 14장 기준 평균 ~3분, 실패 재시도 포함 5~8분 예상.
+      const DELAY_MS = 5000
       const collectedTotals: PageTotal[] = []
-      let completed = 0
-
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-      for (let batchStart = 0; batchStart < allPages.length; batchStart += BATCH) {
-        const batch = allPages.slice(batchStart, batchStart + BATCH)
-        await Promise.all(
-          batch.map(async (page, idxInBatch) => {
-            const pageNumber = batchStart + idxInBatch + 1
-            const sourceFile = pageSourceFiles[batchStart + idxInBatch]
+      // 단일 페이지 분석 함수 (재사용 가능)
+      const analyzeOnePage = async (
+        pageNumber: number,
+        page: PageImage,
+        sourceFile: string,
+      ): Promise<boolean> => {
+        try {
+          const analyzeRes = await fetch('/api/analyze/page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session_id: initData.session_id,
+              page_number: pageNumber,
+              image: extractBase64(page.dataUrl),
+              source_file_name: sourceFile,
+            }),
+          })
+
+          if (!analyzeRes.ok) {
+            let serverErrMsg = ''
             try {
-              const analyzeRes = await fetch('/api/analyze/page', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  session_id: initData.session_id,
-                  page_number: pageNumber,
-                  image: extractBase64(page.dataUrl),
-                  source_file_name: sourceFile,
-                }),
-              })
-
-              if (!analyzeRes.ok) {
-                // 서버 응답 body에서 에러 원인 추출 (브라우저 console + state 기록)
-                let serverErrMsg = ''
-                try {
-                  const errBody = await analyzeRes.json()
-                  serverErrMsg = errBody?.error || ''
-                } catch {
-                  try {
-                    serverErrMsg = await analyzeRes.text()
-                  } catch { /* ignore */ }
-                }
-                console.error(
-                  `페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status}): ${serverErrMsg || '(no error body)'}`,
-                )
-                return
-              }
-
-              const analyzeData = await analyzeRes.json()
-              if (analyzeData.success && Array.isArray(analyzeData.items)) {
-                dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
-                // page_total을 수집 (null이어도 page 추적용으로 보관)
-                const ocrTotal =
-                  analyzeData.page_total != null ? Number(analyzeData.page_total) : null
-                dispatch({
-                  type: 'ADD_PAGE_TOTAL',
-                  pageNumber,
-                  ocrTotal,
-                  sourceFile,
-                })
-                collectedTotals.push({ page: pageNumber, ocr_total: ocrTotal, source_file: sourceFile })
-              }
-            } finally {
-              completed += 1
-              dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: completed })
+              const errBody = await analyzeRes.json()
+              serverErrMsg = errBody?.error || ''
+            } catch {
+              try { serverErrMsg = await analyzeRes.text() } catch { /* ignore */ }
             }
-          }),
-        )
-        // 다음 배치로 넘어가기 전 지연 (마지막 배치 이후엔 sleep 불필요)
-        if (batchStart + BATCH < allPages.length) {
-          await sleep(BATCH_DELAY_MS)
+            console.error(
+              `페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status}): ${serverErrMsg || '(no error body)'}`,
+            )
+            return false
+          }
+
+          const analyzeData = await analyzeRes.json()
+          if (analyzeData.success && Array.isArray(analyzeData.items)) {
+            dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+            const ocrTotal =
+              analyzeData.page_total != null ? Number(analyzeData.page_total) : null
+            dispatch({ type: 'ADD_PAGE_TOTAL', pageNumber, ocrTotal, sourceFile })
+            collectedTotals.push({ page: pageNumber, ocr_total: ocrTotal, source_file: sourceFile })
+            return true
+          }
+          return false
+        } catch (err) {
+          console.error(`페이지 ${pageNumber} 요청 오류:`, err)
+          return false
         }
       }
 
-      // 4. 페이지별 OCR footer 합계를 session에 일괄 저장 (단일 writer, 경쟁 회피)
+      // 1차 처리: 모든 페이지 순차
+      const failedIndexes: number[] = []   // allPages 기준 인덱스
+      let completedCount = 0
+      for (let i = 0; i < allPages.length; i++) {
+        const pageNumber = i + 1
+        const sourceFile = pageSourceFiles[i]
+        const ok = await analyzeOnePage(pageNumber, allPages[i], sourceFile)
+        completedCount += 1
+        dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: completedCount })
+        if (!ok) failedIndexes.push(i)
+        // 다음 페이지 전 지연 (마지막은 생략)
+        if (i < allPages.length - 1) {
+          await sleep(DELAY_MS)
+        }
+      }
+
+      // 재시도 라운드: 실패한 페이지만 더 긴 지연으로 재처리 (최대 3 라운드)
+      const MAX_RETRY_ROUNDS = 3
+      let remaining = [...failedIndexes]
+      for (let round = 1; round <= MAX_RETRY_ROUNDS && remaining.length > 0; round++) {
+        dispatch({ type: 'SET_RETRY_ROUND', round, failedCount: remaining.length })
+        // 라운드 시작 전 긴 쿨다운 (rate window 회복)
+        await sleep(15_000)
+
+        const stillFailed: number[] = []
+        let retryCompleted = 0
+        for (const i of remaining) {
+          const pageNumber = i + 1
+          const sourceFile = pageSourceFiles[i]
+          const ok = await analyzeOnePage(pageNumber, allPages[i], sourceFile)
+          retryCompleted += 1
+          dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: retryCompleted })
+          if (!ok) stillFailed.push(i)
+          await sleep(DELAY_MS + round * 3000)  // 라운드마다 지연 증가
+        }
+        remaining = stillFailed
+      }
+
+      // 4. 페이지별 OCR footer 합계를 session에 일괄 저장
       if (collectedTotals.length > 0) {
         try {
           await fetch('/api/session/page-totals', {
@@ -758,7 +800,6 @@ export function useAuditSession() {
             }),
           })
         } catch (e) {
-          // 저장 실패해도 UX에는 지장 없음 (로컬 state는 유지됨)
           console.warn('page-totals 저장 실패:', e)
         }
       }

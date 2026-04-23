@@ -164,6 +164,9 @@ export default function CalcFoodPage() {
             fileName={state.fileName || ''}
             currentPage={state.processingPage}
             totalPages={state.totalPages}
+            startedAt={state.processingStartedAt}
+            retryRound={state.processingRetryRound}
+            failedPages={state.processingFailedPages}
           />
         )}
 
