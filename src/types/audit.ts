@@ -43,6 +43,8 @@ export interface ComparisonItem {
   extracted_supply_amount?: number   // 세액 미포함 공급가액
   extracted_tax_amount?: number      // 부가세/세액 (면세 품목은 0)
   extracted_total_price?: number     // 부가세 포함 최종 합계
+  page_number?: number               // 속한 거래명세표 페이지 번호 (그룹핑용, 2026-04-23 추가)
+  source_file_name?: string          // 원본 파일명 (여러 파일 업로드 시 페이지-파일 매핑, 2026-04-23)
 
   // 현재 선택된 매칭 (Top 1 또는 사용자 선택)
   cj_match?: SupplierMatch
@@ -91,6 +93,10 @@ export interface ComparisonPageResponse {
   success: boolean
   page_number: number
   items: ComparisonItem[]
+  // 거래명세표 1장의 하단 합계 (OCR이 footer에서 인식, 없으면 null)
+  page_total?: number | null
+  // 페이지가 속한 원본 파일명 (여러 파일 업로드 시 그룹핑용)
+  source_file_name?: string
   error?: string
 }
 
@@ -189,6 +195,7 @@ export interface GeminiOCRRequest {
 export interface GeminiOCRResponse {
   success: boolean
   items: ExtractedItem[]
+  page_total?: number | null  // 거래명세표 footer의 합계 금액 (OCR이 인식, 없으면 null)
   raw_response?: string
   error?: string
 }
@@ -222,6 +229,7 @@ export interface AnalyzePageRequest {
   session_id: string
   page_number: number
   image: string  // Base64
+  source_file_name?: string  // 원본 파일명 (여러 파일 업로드 시, 2026-04-23 추가)
 }
 
 export interface AnalyzePageResponse {

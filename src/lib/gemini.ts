@@ -2,9 +2,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { GeminiOCRRequest, GeminiOCRResponse, ExtractedItem } from '@/types/audit'
 
 const EXTRACTION_PROMPT = `당신은 식자재 거래명세서 OCR 전문가입니다.
-이미지에서 품목 리스트를 추출하여 JSON 형식으로 반환하세요.
+이미지에서 품목 리스트와 거래명세표 하단의 합계 금액을 추출하여 JSON 형식으로 반환하세요.
 
-추출 대상:
+=== 품목(items) 추출 대상 ===
 - 품목명 (name): 상품 이름
 - 규격 (spec): 용량, 무게 등 (없으면 null)
 - 단위 (unit): EA, KG, BOX, PAC, 봉 등 별도 "단위" 컬럼 값 (없으면 null)
@@ -22,24 +22,30 @@ total_price 결정 규칙 (★매우 중요★):
 3. "금액" 컬럼만 단일로 있으면 그 값을 total_price로 사용
 4. 어떤 경우든 total_price는 "부가세를 모두 포함한 최종 거래 금액"이어야 한다
 
+=== page_total (거래명세표 하단 합계) 추출 ===
+거래명세표는 보통 품목 목록 아래에 "합계", "총 금액", "TOTAL" 등의 이름으로 **페이지 전체 합계 금액**이 인쇄되어 있습니다.
+- 이 금액을 page_total 필드로 반환 (부가세 포함 최종 금액)
+- 하단에 "공급가액 합계 + 세액 합계 = 총 합계" 형태로 3칸이 있으면 **총 합계(부가세 포함)**를 사용
+- 하단 footer에 합계 라인이 없으면 null
+
 응답 형식:
 {
   "items": [
     { "name": "양념치킨소스", "spec": "2kg", "unit": "EA", "quantity": 5, "unit_price": 12000, "supply_amount": 60000, "tax_amount": 6000, "total_price": 66000 },
-    { "name": "바라캣몰", "spec": "1kg 실온", "unit": "EA", "quantity": 1, "unit_price": 20700, "supply_amount": 20700, "tax_amount": 0, "total_price": 20700 },
-    { "name": "간장", "spec": null, "unit": null, "quantity": 10, "unit_price": 3500, "supply_amount": null, "tax_amount": null, "total_price": 35000 }
-  ]
+    { "name": "바라캣몰", "spec": "1kg 실온", "unit": "EA", "quantity": 1, "unit_price": 20700, "supply_amount": 20700, "tax_amount": 0, "total_price": 20700 }
+  ],
+  "page_total": 86700
 }
 
 주의사항:
 - 숫자에서 콤마(,) 제거
-- 합계/소계 행(품명이 "합계", "소계", "총계" 같은 집계 행)은 반드시 제외
+- 합계/소계 행(품명이 "합계", "소계", "총계" 같은 집계 행)은 items 배열에서 제외하고 그 값은 page_total로만 반환
 - 품목명에 브랜드명/한정수량 표시가 있으면 포함
 - JSON만 반환 (설명 없이)
 - 단가가 비어있고 총액만 있는 행도 누락 없이 포함 (unit_price=0으로 두고 total_price는 채울 것)
 `
 
-function parseGeminiResponse(text: string): ExtractedItem[] {
+function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total: number | null } {
   // Remove markdown code blocks if present
   let cleanText = text.trim()
   if (cleanText.startsWith('```json')) {
@@ -58,7 +64,11 @@ function parseGeminiResponse(text: string): ExtractedItem[] {
     throw new Error('Invalid response format: items array not found')
   }
 
-  return parsed.items.map((item: Record<string, unknown>) => {
+  const rawPageTotal = parsed.page_total != null ? Number(parsed.page_total) : NaN
+  const page_total =
+    !Number.isNaN(rawPageTotal) && rawPageTotal > 0 ? rawPageTotal : null
+
+  const items = parsed.items.map((item: Record<string, unknown>) => {
     const quantity = Number(item.quantity) || 0
     const rawUnitPrice = Number(item.unit_price) || 0
     const rawSupply = item.supply_amount != null ? Number(item.supply_amount) : NaN
@@ -105,6 +115,8 @@ function parseGeminiResponse(text: string): ExtractedItem[] {
       total_price: totalPrice,
     }
   })
+
+  return { items, page_total }
 }
 
 export async function extractItemsFromImage(
@@ -139,7 +151,7 @@ export async function extractItemsFromImage(
     if (process.env.NODE_ENV !== 'production') {
       console.log('[Gemini OCR raw]', text.slice(0, 2000))
     }
-    const items = parseGeminiResponse(text)
+    const { items, page_total } = parseGeminiResponse(text)
 
     // 유효 품목: 이름 + 수량 + (단가 또는 총액) 중 하나라도 있어야 함
     const validItems = items.filter(
@@ -152,6 +164,7 @@ export async function extractItemsFromImage(
     return {
       success: true,
       items: validItems,
+      page_total,
       raw_response: text,
     }
   } catch (error) {

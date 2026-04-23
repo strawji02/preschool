@@ -155,6 +155,7 @@ export async function POST(request: NextRequest) {
           loss_amount: savings.max,
           page_number: body.page_number,
           row_index: index,
+          source_file_name: body.source_file_name,
         },
         // Response용 추가 데이터
         cj_match: match.cj_match,
@@ -189,6 +190,9 @@ export async function POST(request: NextRequest) {
     // 7. Update session stats
     await supabase.rpc('update_session_stats', { session_uuid: body.session_id })
 
+    // 페이지별 OCR 합계(page_total)는 client가 모든 페이지 완료 후 한 번에 session에 저장
+    // (여러 페이지 병렬 처리 시 경쟁 조건 회피를 위해 단일 writer 원칙 적용, 2026-04-23)
+
     // 8. Prepare response (Side-by-Side ComparisonItem 포맷)
     const responseItems: ComparisonItem[] = processedItems.map((item, index) => ({
       id: insertedItems?.[index]?.id || '',
@@ -200,6 +204,8 @@ export async function POST(request: NextRequest) {
       extracted_supply_amount: item.dbRecord.extracted_supply_amount,
       extracted_tax_amount: item.dbRecord.extracted_tax_amount,
       extracted_total_price: item.dbRecord.extracted_total_price,
+      page_number: item.dbRecord.page_number,
+      source_file_name: item.dbRecord.source_file_name,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
       cj_candidates: item.cj_candidates,
@@ -217,6 +223,8 @@ export async function POST(request: NextRequest) {
       success: true,
       page_number: body.page_number,
       items: responseItems,
+      page_total: ocrResult.page_total ?? null,
+      source_file_name: body.source_file_name,
     })
   } catch (error) {
     console.error('Analyze page error:', error)

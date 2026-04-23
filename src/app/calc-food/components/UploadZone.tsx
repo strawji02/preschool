@@ -31,65 +31,42 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
     setIsDragOver(false)
   }, [])
 
+  // 여러 파일 선택 시 정규화 규칙 (2026-04-23 업데이트: PDF 여러 개 + 이미지 혼합 지원)
+  const normalizeSelection = useCallback(
+    (input: File[]): File[] => {
+      const valid = input.filter(
+        (f) => f.type === 'application/pdf' || f.type.startsWith('image/') || isExcel(f),
+      )
+      if (valid.length === 0) return []
+
+      // 엑셀은 단일 파일로만 처리 (엑셀과 다른 파일이 섞이면 엑셀 우선)
+      const excelFile = valid.find((f) => isExcel(f))
+      if (excelFile) return [excelFile]
+
+      // PDF + 이미지 혼합 모두 허용 (여러 파일 업로드)
+      return valid.sort((a, b) => a.name.localeCompare(b.name))
+    },
+    [],
+  )
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
       setIsDragOver(false)
-
-      const droppedFiles = Array.from(e.dataTransfer.files)
-      const validFiles = droppedFiles.filter(
-        file => file.type === 'application/pdf' || file.type.startsWith('image/') || isExcel(file)
-      )
-
-      if (validFiles.length > 0) {
-        // 엑셀 파일 우선 처리
-        const excelFile = validFiles.find(f => isExcel(f))
-        if (excelFile) {
-          onFileSelect([excelFile])
-          return
-        }
-
-        // PDF는 단일 파일만, 이미지는 여러 장 허용
-        const hasPDF = validFiles.some(f => f.type === 'application/pdf')
-        if (hasPDF) {
-          // PDF가 있으면 첫 번째 PDF만 사용
-          const pdfFile = validFiles.find(f => f.type === 'application/pdf')!
-          onFileSelect([pdfFile])
-        } else {
-          // 이미지만 있으면 모두 사용
-          onFileSelect(validFiles)
-        }
-      }
+      const files = normalizeSelection(Array.from(e.dataTransfer.files))
+      if (files.length > 0) onFileSelect(files)
     },
-    [onFileSelect]
+    [normalizeSelection, onFileSelect],
   )
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const selectedFiles = e.target.files
       if (!selectedFiles || selectedFiles.length === 0) return
-
-      const filesArray = Array.from(selectedFiles)
-      
-      // 엑셀 파일 우선 처리
-      const excelFile = filesArray.find(f => isExcel(f))
-      if (excelFile) {
-        onFileSelect([excelFile])
-        return
-      }
-
-      const hasPDF = filesArray.some(f => f.type === 'application/pdf')
-
-      if (hasPDF) {
-        // PDF가 있으면 첫 번째 PDF만 사용
-        const pdfFile = filesArray.find(f => f.type === 'application/pdf')!
-        onFileSelect([pdfFile])
-      } else {
-        // 이미지만 있으면 모두 사용
-        onFileSelect(filesArray)
-      }
+      const files = normalizeSelection(Array.from(selectedFiles))
+      if (files.length > 0) onFileSelect(files)
     },
-    [onFileSelect]
+    [normalizeSelection, onFileSelect],
   )
 
   return (
@@ -129,9 +106,11 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
         </h3>
 
         <p className="mb-6 text-center text-gray-500">
-          식자재 명세서 파일을 드래그하거나 클릭하여 선택하세요
+          1개월치 거래명세표 파일들을 드래그하거나 클릭하여 선택하세요
           <br />
-          <span className="text-sm text-gray-400">이미지는 여러 장 선택 가능</span>
+          <span className="text-sm text-gray-400">
+            PDF / 이미지 여러 장 혼합 가능 · Excel은 단일 파일
+          </span>
         </p>
 
         <div className="flex items-center gap-4">

@@ -3,7 +3,7 @@
 import { useReducer, useCallback, useMemo } from 'react'
 import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
-import { extractPagesFromPDF, extractPagesFromImages, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
+import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 
 // 상태 타입
@@ -53,11 +53,21 @@ export interface SessionStats {
   ssgMatchRate: number
 }
 
+// 페이지별 OCR footer 합계 (2026-04-23 추가)
+// 여러 파일의 거래명세표 다중 페이지를 처리할 때 각 페이지의 합계 금액을 담당자가 검증
+export interface PageTotal {
+  page: number              // 전역 페이지 번호
+  ocr_total: number | null  // OCR이 읽은 footer 합계 (없으면 null)
+  source_file?: string | null  // 원본 파일명 (여러 파일 업로드 시)
+}
+
 export interface AuditState {
   status: AuditStatus
   currentStep: AnalysisStep  // 새로 추가: 매칭 → 리포트 단계
   sessionId: string | null
   pages: PageImage[]
+  pageSourceFiles: string[]   // pages[i]가 속한 원본 파일명 (2026-04-23 추가)
+  pageTotals: PageTotal[]     // 페이지별 OCR footer 합계 (2026-04-23 추가)
   currentPage: number
   items: ComparisonItem[]
   stats: SessionStats
@@ -110,7 +120,8 @@ export function extractSupplierName(fileName: string): string {
 type AuditAction =
   | { type: 'START_PROCESSING'; fileName: string; totalPages: number; supplierName: string }
   | { type: 'SET_SESSION_ID'; sessionId: string }
-  | { type: 'SET_PAGES'; pages: PageImage[] }
+  | { type: 'SET_PAGES'; pages: PageImage[]; sourceFiles?: string[] }
+  | { type: 'ADD_PAGE_TOTAL'; pageNumber: number; ocrTotal: number | null; sourceFile?: string | null }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
   | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
@@ -161,6 +172,8 @@ const initialState: AuditState = {
   currentStep: 'matching',  // 기본값: 매칭 단계
   sessionId: null,
   pages: [],
+  pageSourceFiles: [],
+  pageTotals: [],
   currentPage: 1,
   items: [],
   stats: initialStats,
@@ -279,7 +292,23 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
       return { ...state, sessionId: action.sessionId }
 
     case 'SET_PAGES':
-      return { ...state, pages: action.pages }
+      return {
+        ...state,
+        pages: action.pages,
+        pageSourceFiles: action.sourceFiles ?? state.pageSourceFiles,
+      }
+
+    case 'ADD_PAGE_TOTAL': {
+      // 같은 페이지가 이미 있으면 대체, 없으면 추가
+      const rest = state.pageTotals.filter((p) => p.page !== action.pageNumber)
+      return {
+        ...state,
+        pageTotals: [
+          ...rest,
+          { page: action.pageNumber, ocr_total: action.ocrTotal, source_file: action.sourceFile ?? null },
+        ].sort((a, b) => a.page - b.page),
+      }
+    }
 
     case 'UPDATE_PROCESSING_PAGE':
       return { ...state, processingPage: action.page }
@@ -574,31 +603,57 @@ export function useAuditSession() {
         throw new Error('파일을 선택해주세요.')
       }
 
-      // 엑셀 파일인 경우 별도 처리
-      if (isExcelFile(files[0])) {
+      // 엑셀 파일인 경우 별도 처리 (단일 엑셀만 지원)
+      if (files.some((f) => isExcelFile(f))) {
+        if (files.length > 1 || !isExcelFile(files[0])) {
+          throw new Error('엑셀 파일은 단일 파일로만 업로드 가능합니다.')
+        }
         await processExcelFile(files[0])
         return
       }
 
-      // 1. 파일 타입에 따라 페이지 추출
-      let pages: PageImage[]
-      let fileName: string
+      // 1. 파일 타입별 페이지 추출 (PDF/이미지 혼합 지원, 2026-04-23)
+      // 각 파일이 이미지 또는 PDF 중 하나. 여러 PDF + 여러 이미지 혼합도 OK.
+      const allPages: PageImage[] = []
+      const pageSourceFiles: string[] = []
+      let globalPageNum = 1
 
-      // 첫 번째 파일이 PDF인지 확인
-      if (isPDF(files[0])) {
-        pages = await extractPagesFromPDF(files[0])
-        fileName = files[0].name
-      } else if (files.every(f => isImage(f))) {
-        // 모든 파일이 이미지인 경우
-        pages = await extractPagesFromImages(files)
-        fileName = files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}장`
-      } else {
-        throw new Error('지원하지 않는 파일 형식입니다. PDF, 이미지 또는 엑셀 파일을 업로드하세요.')
+      for (const file of files) {
+        if (isPDF(file)) {
+          const pdfPages = await extractPagesFromPDF(file)
+          for (const p of pdfPages) {
+            allPages.push({ ...p, pageNumber: globalPageNum })
+            pageSourceFiles.push(file.name)
+            globalPageNum += 1
+          }
+        } else if (isImage(file)) {
+          const imgPage = await imageFileToPage(file, globalPageNum)
+          allPages.push(imgPage)
+          pageSourceFiles.push(file.name)
+          globalPageNum += 1
+        } else {
+          throw new Error(`지원하지 않는 파일 형식: ${file.name}`)
+        }
       }
 
-      const supplierName = extractSupplierName(fileName)
-      dispatch({ type: 'START_PROCESSING', fileName, totalPages: pages.length, supplierName })
-      dispatch({ type: 'SET_PAGES', pages })
+      if (allPages.length === 0) {
+        throw new Error('추출된 페이지가 없습니다. PDF 또는 이미지 파일을 업로드하세요.')
+      }
+
+      // 파일 여러 개 업로드 시 파일명 조합 표시
+      const fileName =
+        files.length === 1
+          ? files[0].name
+          : `${files[0].name} 외 ${files.length - 1}개 (총 ${allPages.length}페이지)`
+
+      const supplierName = extractSupplierName(files[0].name)
+      dispatch({
+        type: 'START_PROCESSING',
+        fileName,
+        totalPages: allPages.length,
+        supplierName,
+      })
+      dispatch({ type: 'SET_PAGES', pages: allPages, sourceFiles: pageSourceFiles })
 
       // 2. 세션 초기화 API 호출
       const initRes = await fetch('/api/session/init', {
@@ -606,7 +661,7 @@ export function useAuditSession() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: fileName,
-          total_pages: pages.length,
+          total_pages: allPages.length,
         }),
       })
 
@@ -621,32 +676,74 @@ export function useAuditSession() {
 
       dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
 
-      // 3. 각 페이지 분석
-      for (let i = 0; i < pages.length; i++) {
-        dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: i + 1 })
+      // 3. 페이지 분석 — 병렬 배치 (동시 5개) 로 OCR 속도 개선 (2026-04-23)
+      const BATCH = 5
+      const collectedTotals: PageTotal[] = []
+      let completed = 0
 
-        const analyzeRes = await fetch('/api/analyze/page', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: initData.session_id,
-            page_number: i + 1,
-            image: extractBase64(pages[i].dataUrl),
+      for (let batchStart = 0; batchStart < allPages.length; batchStart += BATCH) {
+        const batch = allPages.slice(batchStart, batchStart + BATCH)
+        await Promise.all(
+          batch.map(async (page, idxInBatch) => {
+            const pageNumber = batchStart + idxInBatch + 1
+            const sourceFile = pageSourceFiles[batchStart + idxInBatch]
+            try {
+              const analyzeRes = await fetch('/api/analyze/page', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_id: initData.session_id,
+                  page_number: pageNumber,
+                  image: extractBase64(page.dataUrl),
+                  source_file_name: sourceFile,
+                }),
+              })
+
+              if (!analyzeRes.ok) {
+                console.error(`페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status})`)
+                return
+              }
+
+              const analyzeData = await analyzeRes.json()
+              if (analyzeData.success && Array.isArray(analyzeData.items)) {
+                dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+                // page_total을 수집 (null이어도 page 추적용으로 보관)
+                const ocrTotal =
+                  analyzeData.page_total != null ? Number(analyzeData.page_total) : null
+                dispatch({
+                  type: 'ADD_PAGE_TOTAL',
+                  pageNumber,
+                  ocrTotal,
+                  sourceFile,
+                })
+                collectedTotals.push({ page: pageNumber, ocr_total: ocrTotal, source_file: sourceFile })
+              }
+            } finally {
+              completed += 1
+              dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: completed })
+            }
           }),
-        })
+        )
+      }
 
-        if (!analyzeRes.ok) {
-          console.error(`페이지 ${i + 1} 분석 실패`)
-          continue
-        }
-
-        const analyzeData = await analyzeRes.json()
-        if (analyzeData.success && analyzeData.items) {
-          dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+      // 4. 페이지별 OCR footer 합계를 session에 일괄 저장 (단일 writer, 경쟁 회피)
+      if (collectedTotals.length > 0) {
+        try {
+          await fetch('/api/session/page-totals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session_id: initData.session_id,
+              page_totals: collectedTotals.sort((a, b) => a.page - b.page),
+            }),
+          })
+        } catch (e) {
+          // 저장 실패해도 UX에는 지장 없음 (로컬 state는 유지됨)
+          console.warn('page-totals 저장 실패:', e)
         }
       }
 
-      // 4. OCR + 매칭 완료 → 담당자 확인 단계로 진입 (엑셀과 UX 통일)
+      // 5. OCR + 매칭 완료 → 담당자 확인 단계로 진입 (엑셀과 UX 통일)
       dispatch({ type: 'SHOW_IMAGE_PREVIEW' })
     } catch (error) {
       const message = error instanceof Error ? error.message : '알 수 없는 오류'

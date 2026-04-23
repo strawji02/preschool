@@ -150,6 +150,9 @@ export default function CalcFoodPage() {
             items={state.items}
             fileName={state.fileName || ''}
             supplierName={state.supplierName || '업체'}
+            pageTotals={state.pageTotals}
+            pageSourceFiles={state.pageSourceFiles}
+            totalPages={state.totalPages}
             onSupplierNameChange={updateSupplierName}
             onCancel={reset}
             onConfirm={confirmImagePreview}
