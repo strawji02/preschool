@@ -14,12 +14,14 @@ export async function GET(_request: NextRequest) {
     const supabase = createAdminClient()
 
     // 활성(미아카이브) 세션 + 카운트 정보
+    // 빈 세션(품목 0개)은 자동 숨김 — 업로드 시도했으나 OCR 실패/중도 취소한 누적 row 정리 (2026-04-26)
     const { data, error } = await supabase
       .from('audit_sessions')
       .select(
         'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, pending_items, unmatched_items, current_step, created_at, updated_at',
       )
       .eq('is_archived', false)
+      .gt('total_items', 0)
       .order('updated_at', { ascending: false })
       .limit(50)
 
