@@ -17,12 +17,14 @@
 import { useRef, useState } from 'react'
 import {
   ArrowLeft, CheckCircle2, AlertCircle, FileText, PlusCircle,
-  Edit3, Trash2, Check, X, Plus,
+  Edit3, Trash2, Check, X, Plus, Image as ImageIcon,
 } from 'lucide-react'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem } from '@/types/audit'
+import type { PageImage } from '@/lib/pdf-processor'
 import type { PageTotal } from '../hooks/useAuditSession'
+import { PageImageViewer } from './PageImageViewer'
 
 interface ImagePreviewProps {
   items: ComparisonItem[]
@@ -31,6 +33,9 @@ interface ImagePreviewProps {
   pageTotals: PageTotal[]           // 페이지별 OCR footer 합계
   pageSourceFiles: string[]         // 페이지 번호(0-index) → 원본 파일명
   totalPages: number                // 총 페이지 수 (items 안에 없을 수도 있는 빈 페이지 고려)
+  // 스캔 이미지 뷰어 (2026-04-26): sessionId가 있으면 검수자가 페이지 헤더 클릭 시 원본 표시
+  sessionId?: string | null
+  pages?: PageImage[]               // 새 OCR 직후 base64 dataUrl (저장된 세션 진입은 빈 배열 → API에서 fetch)
   onSupplierNameChange: (name: string) => void
   onCancel: () => void
   onConfirm: () => void
@@ -78,6 +83,8 @@ export function ImagePreview({
   pageTotals,
   pageSourceFiles,
   totalPages,
+  sessionId,
+  pages,
   onSupplierNameChange,
   onCancel,
   onConfirm,
@@ -88,6 +95,8 @@ export function ImagePreview({
   onUpdatePageOcrTotal,
   onTogglePageReviewed,
 }: ImagePreviewProps) {
+  // 페이지 이미지 뷰어 모달 상태 (2026-04-26)
+  const [viewerPageNumber, setViewerPageNumber] = useState<number | null>(null)
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -446,9 +455,21 @@ export function ImagePreview({
             onAddItem={onAddItem}
             onUpdatePageOcrTotal={onUpdatePageOcrTotal}
             onTogglePageReviewed={onTogglePageReviewed}
+            onViewImage={sessionId ? (n) => setViewerPageNumber(n) : undefined}
           />
         ))}
       </div>
+
+      {/* 원본 스캔 이미지 모달 (2026-04-26) */}
+      {viewerPageNumber != null && sessionId && (
+        <PageImageViewer
+          sessionId={sessionId}
+          pageNumber={viewerPageNumber}
+          fileName={pageSourceFiles[viewerPageNumber - 1] || undefined}
+          dataUrl={pages?.find((p) => p.pageNumber === viewerPageNumber)?.dataUrl}
+          onClose={() => setViewerPageNumber(null)}
+        />
+      )}
 
       {/* 하단 액션 영역 */}
       <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-sm">
@@ -531,6 +552,8 @@ interface PageSectionProps {
   ) => void
   onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
   onTogglePageReviewed?: (pageNumber: number) => void
+  // 원본 스캔 이미지 표시 트리거 (2026-04-26)
+  onViewImage?: (pageNumber: number) => void
 }
 
 // 행 편집/추가용 임시 폼 상태
@@ -603,6 +626,7 @@ function PageSection({
   onAddItem,
   onUpdatePageOcrTotal,
   onTogglePageReviewed,
+  onViewImage,
 }: PageSectionProps) {
   const { page, items, itemsSum, ocrTotal, sourceFile, valid, hasOcrTotal, reviewed } = result
   const editable = !!onUpdateItem
@@ -715,15 +739,39 @@ function PageSection({
           </label>
         )}
 
-        <div className="flex items-center gap-2 font-semibold text-gray-900">
-          <FileText size={16} className="text-gray-500" />
-          <span>페이지 {page}</span>
-        </div>
+        {onViewImage ? (
+          <button
+            onClick={() => onViewImage(page)}
+            className="group/img flex items-center gap-2 rounded-md px-1.5 py-0.5 font-semibold text-gray-900 hover:bg-blue-100 hover:text-blue-900"
+            title="원본 스캔 이미지 보기"
+          >
+            <ImageIcon size={16} className="text-blue-500 group-hover/img:text-blue-700" />
+            <span>페이지 {page}</span>
+            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 opacity-0 transition group-hover/img:opacity-100">
+              원본 보기
+            </span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 font-semibold text-gray-900">
+            <FileText size={16} className="text-gray-500" />
+            <span>페이지 {page}</span>
+          </div>
+        )}
 
         {sourceFile && (
-          <span className="truncate text-xs text-gray-500" title={sourceFile}>
-            {sourceFile}
-          </span>
+          onViewImage ? (
+            <button
+              onClick={() => onViewImage(page)}
+              className="truncate rounded text-xs text-blue-600 underline-offset-2 hover:text-blue-800 hover:underline"
+              title={`${sourceFile} 원본 이미지 보기`}
+            >
+              {sourceFile}
+            </button>
+          ) : (
+            <span className="truncate text-xs text-gray-500" title={sourceFile}>
+              {sourceFile}
+            </span>
+          )
         )}
 
         <div className="ml-auto flex items-center gap-4">

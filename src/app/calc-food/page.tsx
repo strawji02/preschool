@@ -166,6 +166,8 @@ export default function CalcFoodPage() {
             pageTotals={state.pageTotals}
             pageSourceFiles={state.pageSourceFiles}
             totalPages={state.totalPages}
+            sessionId={state.sessionId}
+            pages={state.pages}
             onSupplierNameChange={updateSupplierName}
             onCancel={reset}
             onConfirm={confirmImagePreview}
