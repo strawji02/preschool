@@ -82,6 +82,11 @@ export default function CalcFoodPage() {
     // 세션 저장/이어가기/추가 업로드 (2026-04-26)
     loadSession,
     extendSession,
+    // Phase 1 검수 단계 (2026-04-26): 행 수정/삭제/추가, OCR 합계 수정
+    updateItem,
+    removeItem,
+    addItem,
+    updatePageOcrTotal,
   } = useAuditSession()
 
   return (
@@ -170,6 +175,10 @@ export default function CalcFoodPage() {
             onCancel={reset}
             onConfirm={confirmImagePreview}
             onExtendUpload={extendSession}
+            onUpdateItem={updateItem}
+            onRemoveItem={removeItem}
+            onAddItem={addItem}
+            onUpdatePageOcrTotal={updatePageOcrTotal}
           />
         )}
 

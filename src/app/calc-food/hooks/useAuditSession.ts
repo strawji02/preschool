@@ -144,6 +144,11 @@ type AuditAction =
   | { type: 'SET_SESSION_ID'; sessionId: string }
   | { type: 'SET_PAGES'; pages: PageImage[]; sourceFiles?: string[] }
   | { type: 'ADD_PAGE_TOTAL'; pageNumber: number; ocrTotal: number | null; sourceFile?: string | null }
+  // Phase 1 검수 단계 (2026-04-26): 행 inline edit + 추가 + 삭제 + OCR 합계 수정
+  | { type: 'PATCH_ITEM'; itemId: string; patch: Partial<ComparisonItem> }
+  | { type: 'REMOVE_ITEM'; itemId: string }
+  | { type: 'ADD_ITEM'; item: ComparisonItem }
+  | { type: 'UPDATE_PAGE_OCR_TOTAL'; pageNumber: number; ocrTotal: number | null }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
   | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
@@ -378,6 +383,40 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         pageTotals: [
           ...rest,
           { page: action.pageNumber, ocr_total: action.ocrTotal, source_file: action.sourceFile ?? null },
+        ].sort((a, b) => a.page - b.page),
+      }
+    }
+
+    // Phase 1 검수 단계 액션 (2026-04-26)
+    case 'PATCH_ITEM': {
+      const newItems = state.items.map((it) =>
+        it.id === action.itemId ? { ...it, ...action.patch } : it,
+      )
+      return { ...state, items: newItems, stats: calculateStats(newItems) }
+    }
+
+    case 'REMOVE_ITEM': {
+      const newItems = state.items.filter((it) => it.id !== action.itemId)
+      return { ...state, items: newItems, stats: calculateStats(newItems) }
+    }
+
+    case 'ADD_ITEM': {
+      const newItems = [...state.items, action.item]
+      return { ...state, items: newItems, stats: calculateStats(newItems) }
+    }
+
+    case 'UPDATE_PAGE_OCR_TOTAL': {
+      const rest = state.pageTotals.filter((p) => p.page !== action.pageNumber)
+      const existing = state.pageTotals.find((p) => p.page === action.pageNumber)
+      return {
+        ...state,
+        pageTotals: [
+          ...rest,
+          {
+            page: action.pageNumber,
+            ocr_total: action.ocrTotal,
+            source_file: existing?.source_file ?? null,
+          },
         ].sort((a, b) => a.page - b.page),
       }
     }
@@ -724,6 +763,149 @@ export function useAuditSession() {
       dispatch({ type: 'SET_ERROR', error: message })
     }
   }, [])
+
+  // ─── Phase 1 검수 단계 메서드 (2026-04-26) ───────────────────────────────
+  // 행 inline edit (수량/단가/공급가액/세액/총액/품목명/규격/단위)
+  // state 즉시 갱신 + DB 백그라운드 PATCH (낙관적 업데이트)
+  const updateItem = useCallback(
+    async (itemId: string, patch: Partial<ComparisonItem>) => {
+      // state는 즉시 반영
+      dispatch({ type: 'PATCH_ITEM', itemId, patch })
+      // DB 필드 매핑 (ComparisonItem → audit_items 컬럼)
+      const dbPatch: Record<string, unknown> = {}
+      const map: Record<string, string> = {
+        extracted_name: 'extracted_name',
+        extracted_spec: 'extracted_spec',
+        extracted_unit: 'extracted_unit',
+        extracted_quantity: 'extracted_quantity',
+        extracted_unit_price: 'extracted_unit_price',
+        extracted_supply_amount: 'extracted_supply_amount',
+        extracted_tax_amount: 'extracted_tax_amount',
+        extracted_total_price: 'extracted_total_price',
+      }
+      for (const [k, v] of Object.entries(patch)) {
+        if (map[k] !== undefined) dbPatch[map[k]] = v
+      }
+      if (Object.keys(dbPatch).length === 0) return
+      try {
+        await fetch(`/api/audit-items/${itemId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbPatch),
+        })
+      } catch (e) {
+        console.warn('행 DB 업데이트 실패 (state는 유지됨):', e)
+      }
+    },
+    [],
+  )
+
+  // 행 삭제 (state + DB)
+  const removeItem = useCallback(async (itemId: string) => {
+    dispatch({ type: 'REMOVE_ITEM', itemId })
+    try {
+      await fetch(`/api/audit-items/${itemId}`, { method: 'DELETE' })
+    } catch (e) {
+      console.warn('행 삭제 실패 (state는 유지됨):', e)
+    }
+  }, [])
+
+  // 행 추가 (수동 입력) — 페이지에 새 행 추가
+  // 입력 검증은 호출 측에서 수행
+  const addItem = useCallback(
+    async (
+      pageNumber: number,
+      sourceFile: string | null,
+      data: {
+        extracted_name: string
+        extracted_spec?: string
+        extracted_unit?: string
+        extracted_quantity: number
+        extracted_unit_price: number
+        extracted_supply_amount?: number
+        extracted_tax_amount?: number
+        extracted_total_price?: number
+      },
+    ) => {
+      if (!state.sessionId) {
+        dispatch({ type: 'SET_ERROR', error: '세션이 없습니다.' })
+        return
+      }
+      try {
+        const res = await fetch('/api/audit-items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            page_number: pageNumber,
+            source_file_name: sourceFile,
+            ...data,
+          }),
+        })
+        const body = await res.json()
+        if (!body.success || !body.item_id) {
+          throw new Error(body.error || '행 추가 실패')
+        }
+        const newItem: ComparisonItem = {
+          id: body.item_id,
+          extracted_name: data.extracted_name,
+          extracted_spec: data.extracted_spec,
+          extracted_unit: data.extracted_unit,
+          extracted_quantity: data.extracted_quantity,
+          extracted_unit_price: data.extracted_unit_price,
+          extracted_supply_amount: data.extracted_supply_amount,
+          extracted_tax_amount: data.extracted_tax_amount,
+          extracted_total_price: data.extracted_total_price,
+          page_number: pageNumber,
+          source_file_name: sourceFile ?? undefined,
+          cj_match: undefined,
+          ssg_match: undefined,
+          cj_candidates: [],
+          ssg_candidates: [],
+          is_confirmed: false,
+          cj_confirmed: false,
+          ssg_confirmed: false,
+          savings: { cj: 0, ssg: 0, max: 0 },
+          match_status: 'unmatched',
+          is_excluded: false,
+        }
+        dispatch({ type: 'ADD_ITEM', item: newItem })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '행 추가 오류'
+        dispatch({ type: 'SET_ERROR', error: msg })
+      }
+    },
+    [state.sessionId],
+  )
+
+  // 페이지 OCR 합계 수정 — state 즉시 갱신 + DB 일괄 저장 (page_totals 배열 전체 재저장)
+  const updatePageOcrTotal = useCallback(
+    async (pageNumber: number, ocrTotal: number | null) => {
+      dispatch({ type: 'UPDATE_PAGE_OCR_TOTAL', pageNumber, ocrTotal })
+      if (!state.sessionId) return
+      // 즉시 백엔드 동기화 — 최신 pageTotals를 새로 계산해서 보냄
+      const updated = state.pageTotals.map((p) =>
+        p.page === pageNumber ? { ...p, ocr_total: ocrTotal } : p,
+      )
+      // 만약 해당 페이지가 없으면 추가
+      if (!state.pageTotals.some((p) => p.page === pageNumber)) {
+        updated.push({ page: pageNumber, ocr_total: ocrTotal, source_file: null })
+      }
+      try {
+        await fetch('/api/session/page-totals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            page_totals: updated.sort((a, b) => a.page - b.page),
+          }),
+        })
+      } catch (e) {
+        console.warn('OCR 합계 DB 동기화 실패 (state는 유지됨):', e)
+      }
+    },
+    [state.sessionId, state.pageTotals],
+  )
 
   // 추가 업로드 — 기존 세션에 페이지/품목 누적 (2026-04-26)
   // 시작 페이지 번호는 현재 totalPages + 1부터 부여, 같은 session_id로 OCR 호출
@@ -1413,5 +1595,10 @@ export function useAuditSession() {
     // 세션 저장/이어가기/추가 업로드 (2026-04-26 추가)
     loadSession,
     extendSession,
+    // Phase 1 검수 단계 — 행 inline edit / 추가 / 삭제 / OCR 합계 수정 (2026-04-26)
+    updateItem,
+    removeItem,
+    addItem,
+    updatePageOcrTotal,
   }
 }

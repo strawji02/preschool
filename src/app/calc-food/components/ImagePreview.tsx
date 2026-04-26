@@ -15,7 +15,10 @@
  * 4. "매칭 시작" 버튼 → SplitView 진입 (편집은 다음 단계에서)
  */
 import { useRef, useState } from 'react'
-import { ArrowLeft, CheckCircle2, AlertCircle, FileText, PlusCircle } from 'lucide-react'
+import {
+  ArrowLeft, CheckCircle2, AlertCircle, FileText, PlusCircle,
+  Edit3, Trash2, Check, X, Plus,
+} from 'lucide-react'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem } from '@/types/audit'
@@ -33,6 +36,24 @@ interface ImagePreviewProps {
   onConfirm: () => void
   // 기존 세션에 페이지 추가 업로드 (저장된 세션에서 진입한 경우만 의미 있음, 2026-04-26)
   onExtendUpload?: (files: File[]) => void
+  // Phase 1 검수 단계 — 행 수정/삭제/추가 + OCR 합계 수정 (2026-04-26)
+  onUpdateItem?: (itemId: string, patch: Partial<ComparisonItem>) => void
+  onRemoveItem?: (itemId: string) => void
+  onAddItem?: (
+    pageNumber: number,
+    sourceFile: string | null,
+    data: {
+      extracted_name: string
+      extracted_spec?: string
+      extracted_unit?: string
+      extracted_quantity: number
+      extracted_unit_price: number
+      extracted_supply_amount?: number
+      extracted_tax_amount?: number
+      extracted_total_price?: number
+    },
+  ) => void
+  onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
 }
 
 // 합계가 "수량×단가 (면세)" 또는 "수량×단가 + 10% 부가세 (과세)" 중 하나와 일치해야 정상
@@ -59,6 +80,10 @@ export function ImagePreview({
   onCancel,
   onConfirm,
   onExtendUpload,
+  onUpdateItem,
+  onRemoveItem,
+  onAddItem,
+  onUpdatePageOcrTotal,
 }: ImagePreviewProps) {
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
@@ -340,7 +365,14 @@ export function ImagePreview({
       {/* 페이지별 섹션 */}
       <div className="space-y-4">
         {pageVerifyResults.map((result) => (
-          <PageSection key={result.page} result={result} />
+          <PageSection
+            key={result.page}
+            result={result}
+            onUpdateItem={onUpdateItem}
+            onRemoveItem={onRemoveItem}
+            onAddItem={onAddItem}
+            onUpdatePageOcrTotal={onUpdatePageOcrTotal}
+          />
         ))}
       </div>
 
@@ -378,13 +410,166 @@ interface PageSectionProps {
     valid: boolean
     hasOcrTotal: boolean
   }
+  onUpdateItem?: (itemId: string, patch: Partial<ComparisonItem>) => void
+  onRemoveItem?: (itemId: string) => void
+  onAddItem?: (
+    pageNumber: number,
+    sourceFile: string | null,
+    data: {
+      extracted_name: string
+      extracted_spec?: string
+      extracted_unit?: string
+      extracted_quantity: number
+      extracted_unit_price: number
+      extracted_supply_amount?: number
+      extracted_tax_amount?: number
+      extracted_total_price?: number
+    },
+  ) => void
+  onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
 }
 
-function PageSection({ result }: PageSectionProps) {
+// 행 편집/추가용 임시 폼 상태
+interface RowDraft {
+  extracted_name: string
+  extracted_spec: string
+  extracted_unit: string
+  extracted_quantity: number
+  extracted_unit_price: number
+  extracted_supply_amount: number
+  extracted_tax_amount: number
+  extracted_total_price: number
+  // 자동 계산 모드 (단가×수량 → 공급가액/총액 자동, 세액은 0=면세 / 10%=과세)
+  taxMode: 'free' | 'taxable' | 'manual'
+}
+
+function emptyDraft(): RowDraft {
+  return {
+    extracted_name: '',
+    extracted_spec: '',
+    extracted_unit: '',
+    extracted_quantity: 1,
+    extracted_unit_price: 0,
+    extracted_supply_amount: 0,
+    extracted_tax_amount: 0,
+    extracted_total_price: 0,
+    taxMode: 'free',
+  }
+}
+
+function draftFromItem(item: ComparisonItem): RowDraft {
+  const supply = item.extracted_supply_amount ?? item.extracted_unit_price * item.extracted_quantity
+  const tax = item.extracted_tax_amount ?? 0
+  const total = item.extracted_total_price ?? supply + tax
+  // 면세/과세 자동 판별
+  let taxMode: RowDraft['taxMode'] = 'manual'
+  if (Math.abs(supply - total) <= 1) taxMode = 'free'
+  else if (Math.abs(Math.round(supply * 1.1) - total) <= 1) taxMode = 'taxable'
+  return {
+    extracted_name: item.extracted_name,
+    extracted_spec: item.extracted_spec ?? '',
+    extracted_unit: item.extracted_unit ?? '',
+    extracted_quantity: item.extracted_quantity,
+    extracted_unit_price: item.extracted_unit_price,
+    extracted_supply_amount: supply,
+    extracted_tax_amount: tax,
+    extracted_total_price: total,
+    taxMode,
+  }
+}
+
+// 자동 계산: 단가/수량/세금모드를 기반으로 공급가액/세액/총액 자동 산출
+function recalcDraft(d: RowDraft): RowDraft {
+  const supply = Math.round(d.extracted_unit_price * d.extracted_quantity)
+  if (d.taxMode === 'free') {
+    return { ...d, extracted_supply_amount: supply, extracted_tax_amount: 0, extracted_total_price: supply }
+  }
+  if (d.taxMode === 'taxable') {
+    const tax = Math.round(supply * 0.1)
+    return { ...d, extracted_supply_amount: supply, extracted_tax_amount: tax, extracted_total_price: supply + tax }
+  }
+  // manual: 사용자가 직접 입력 (자동 계산 안 함)
+  return d
+}
+
+function PageSection({ result, onUpdateItem, onRemoveItem, onAddItem, onUpdatePageOcrTotal }: PageSectionProps) {
   const { page, items, itemsSum, ocrTotal, sourceFile, valid, hasOcrTotal } = result
+  const editable = !!onUpdateItem
+  const canAddRow = !!onAddItem
+
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<RowDraft | null>(null)
+  const [addingNew, setAddingNew] = useState(false)
+  const [editingOcrTotal, setEditingOcrTotal] = useState(false)
+  const [ocrTotalDraft, setOcrTotalDraft] = useState<string>('')
 
   const itemTotal = (i: ComparisonItem) =>
     i.extracted_total_price ?? i.extracted_unit_price * i.extracted_quantity
+
+  const startEdit = (item: ComparisonItem) => {
+    setEditingItemId(item.id)
+    setDraft(draftFromItem(item))
+    setAddingNew(false)
+  }
+
+  const startAdd = () => {
+    setAddingNew(true)
+    setDraft(emptyDraft())
+    setEditingItemId(null)
+  }
+
+  const cancelEditOrAdd = () => {
+    setEditingItemId(null)
+    setAddingNew(false)
+    setDraft(null)
+  }
+
+  const saveEdit = () => {
+    if (!draft || !editingItemId || !onUpdateItem) return
+    const calc = recalcDraft(draft)
+    onUpdateItem(editingItemId, {
+      extracted_name: calc.extracted_name,
+      extracted_spec: calc.extracted_spec || undefined,
+      extracted_unit: calc.extracted_unit || undefined,
+      extracted_quantity: calc.extracted_quantity,
+      extracted_unit_price: calc.extracted_unit_price,
+      extracted_supply_amount: calc.extracted_supply_amount,
+      extracted_tax_amount: calc.extracted_tax_amount,
+      extracted_total_price: calc.extracted_total_price,
+    })
+    cancelEditOrAdd()
+  }
+
+  const saveAdd = () => {
+    if (!draft || !onAddItem) return
+    if (!draft.extracted_name.trim()) return
+    const calc = recalcDraft(draft)
+    onAddItem(page, sourceFile, {
+      extracted_name: calc.extracted_name,
+      extracted_spec: calc.extracted_spec || undefined,
+      extracted_unit: calc.extracted_unit || undefined,
+      extracted_quantity: calc.extracted_quantity,
+      extracted_unit_price: calc.extracted_unit_price,
+      extracted_supply_amount: calc.extracted_supply_amount,
+      extracted_tax_amount: calc.extracted_tax_amount,
+      extracted_total_price: calc.extracted_total_price,
+    })
+    cancelEditOrAdd()
+  }
+
+  const startEditOcrTotal = () => {
+    setEditingOcrTotal(true)
+    setOcrTotalDraft(ocrTotal != null ? String(ocrTotal) : '')
+  }
+
+  const saveOcrTotal = () => {
+    if (!onUpdatePageOcrTotal) return
+    const v = ocrTotalDraft.trim()
+    const num = v === '' ? null : Number(v)
+    if (num != null && (Number.isNaN(num) || num < 0)) return
+    onUpdatePageOcrTotal(page, num)
+    setEditingOcrTotal(false)
+  }
 
   return (
     <div
@@ -420,14 +605,46 @@ function PageSection({ result }: PageSectionProps) {
             <div className="text-[10px] text-gray-500">품목 합산</div>
             <div className="font-semibold text-gray-900">{formatCurrency(itemsSum)}</div>
           </div>
-          {hasOcrTotal && (
-            <div className="text-right">
-              <div className="text-[10px] text-gray-500">OCR 합계</div>
-              <div className="font-semibold text-gray-900">
-                {formatCurrency(ocrTotal ?? 0)}
+          <div className="text-right">
+            <div className="text-[10px] text-gray-500">OCR 합계</div>
+            {editingOcrTotal ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  value={ocrTotalDraft}
+                  onChange={(e) => setOcrTotalDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveOcrTotal()
+                    if (e.key === 'Escape') setEditingOcrTotal(false)
+                  }}
+                  placeholder="없음"
+                  className="w-24 rounded border border-blue-300 px-2 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+                  autoFocus
+                />
+                <button onClick={saveOcrTotal} className="rounded p-1 text-green-600 hover:bg-green-50">
+                  <Check size={14} />
+                </button>
+                <button onClick={() => setEditingOcrTotal(false)} className="rounded p-1 text-gray-500 hover:bg-gray-100">
+                  <X size={14} />
+                </button>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center justify-end gap-1">
+                <span className="font-semibold text-gray-900">
+                  {hasOcrTotal ? formatCurrency(ocrTotal ?? 0) : '없음'}
+                </span>
+                {onUpdatePageOcrTotal && (
+                  <button
+                    onClick={startEditOcrTotal}
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                    title="OCR 합계 수정"
+                  >
+                    <Edit3 size={11} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <div>
             {!hasOcrTotal ? (
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
@@ -447,13 +664,23 @@ function PageSection({ result }: PageSectionProps) {
       </div>
 
       {/* 품목 테이블 */}
-      {items.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-gray-500">
-          이 페이지에서 추출된 품목이 없습니다. (OCR 실패 또는 빈 페이지)
+      {items.length === 0 && !addingNew ? (
+        <div className="flex items-center justify-between px-4 py-6">
+          <span className="text-sm text-gray-500">
+            이 페이지에서 추출된 품목이 없습니다. (OCR 실패 또는 빈 페이지)
+          </span>
+          {canAddRow && (
+            <button
+              onClick={startAdd}
+              className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
+            >
+              <Plus size={14} /> 행 추가
+            </button>
+          )}
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px] gap-2 border-b bg-gray-50/60 px-3 py-1.5 text-xs font-medium text-gray-600">
+          <div className="grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px_70px] gap-2 border-b bg-gray-50/60 px-3 py-1.5 text-xs font-medium text-gray-600">
             <div className="text-center">No</div>
             <div>품목명</div>
             <div>규격</div>
@@ -463,9 +690,23 @@ function PageSection({ result }: PageSectionProps) {
             <div className="text-right">공급가액</div>
             <div className="text-right">세액</div>
             <div className="text-right">총액</div>
+            <div className="text-center">{editable ? '액션' : ''}</div>
           </div>
           <div>
             {items.map((item, idx) => {
+              const isEditing = editingItemId === item.id
+              if (isEditing && draft) {
+                return (
+                  <RowEditor
+                    key={item.id}
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSave={saveEdit}
+                    onCancel={cancelEditOrAdd}
+                    no={idx + 1}
+                  />
+                )
+              }
               const supply = item.extracted_unit_price * item.extracted_quantity
               const rowMismatch =
                 item.extracted_total_price != null &&
@@ -482,7 +723,7 @@ function PageSection({ result }: PageSectionProps) {
                 <div
                   key={item.id}
                   className={cn(
-                    'grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px] gap-2 border-b px-3 py-2 text-sm last:border-0',
+                    'group grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px_70px] gap-2 border-b px-3 py-2 text-sm last:border-0',
                     rowMismatch ? 'bg-red-50' : 'hover:bg-gray-50',
                   )}
                 >
@@ -508,12 +749,174 @@ function PageSection({ result }: PageSectionProps) {
                   >
                     {formatCurrency(displayTotal)}
                   </div>
+                  <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                    {editable && (
+                      <button
+                        onClick={() => startEdit(item)}
+                        className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                        title="수정"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                    )}
+                    {onRemoveItem && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`"${item.extracted_name}" 행을 삭제하시겠습니까?`)) {
+                            onRemoveItem(item.id)
+                          }
+                        }}
+                        className="rounded p-1 text-red-600 hover:bg-red-50"
+                        title="삭제"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             })}
+            {addingNew && draft && (
+              <RowEditor
+                draft={draft}
+                setDraft={setDraft}
+                onSave={saveAdd}
+                onCancel={cancelEditOrAdd}
+                no={items.length + 1}
+                isNew
+              />
+            )}
           </div>
+          {canAddRow && !addingNew && !editingItemId && (
+            <div className="border-t bg-gray-50/60 px-3 py-2">
+              <button
+                onClick={startAdd}
+                className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
+              >
+                <Plus size={14} /> 행 추가
+              </button>
+            </div>
+          )}
         </>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 행 편집/추가 인풋 그리드 컴포넌트
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RowEditorProps {
+  draft: RowDraft
+  setDraft: (d: RowDraft) => void
+  onSave: () => void
+  onCancel: () => void
+  no: number
+  isNew?: boolean
+}
+
+function RowEditor({ draft, setDraft, onSave, onCancel, no, isNew }: RowEditorProps) {
+  // 입력 변경 시 자동 계산 — taxMode='manual'일 때만 자동 계산 안 함
+  const update = (patch: Partial<RowDraft>) => {
+    const merged = { ...draft, ...patch }
+    setDraft(recalcDraft(merged))
+  }
+
+  return (
+    <div
+      className={cn(
+        'grid grid-cols-[40px_minmax(140px,1fr)_minmax(110px,160px)_60px_70px_95px_100px_90px_105px_70px] gap-2 border-b px-3 py-2 text-sm',
+        isNew ? 'bg-blue-50/40' : 'bg-yellow-50/60',
+      )}
+    >
+      <div className="text-center text-gray-500">{no}</div>
+      <input
+        value={draft.extracted_name}
+        onChange={(e) => update({ extracted_name: e.target.value })}
+        placeholder="품목명"
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-sm focus:border-blue-500 focus:outline-none"
+        autoFocus
+      />
+      <input
+        value={draft.extracted_spec}
+        onChange={(e) => update({ extracted_spec: e.target.value })}
+        placeholder="규격"
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <input
+        value={draft.extracted_unit}
+        onChange={(e) => update({ extracted_unit: e.target.value })}
+        placeholder="단위"
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-center text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <input
+        type="number"
+        value={draft.extracted_quantity}
+        onChange={(e) => update({ extracted_quantity: Number(e.target.value) || 0 })}
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <input
+        type="number"
+        value={draft.extracted_unit_price}
+        onChange={(e) => update({ extracted_unit_price: Number(e.target.value) || 0 })}
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <input
+        type="number"
+        value={draft.extracted_supply_amount}
+        onChange={(e) => setDraft({ ...draft, extracted_supply_amount: Number(e.target.value) || 0, taxMode: 'manual' })}
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+        title="자동 계산 (수량×단가). 수동 변경 시 manual 모드 전환"
+      />
+      <input
+        type="number"
+        value={draft.extracted_tax_amount}
+        onChange={(e) => setDraft({ ...draft, extracted_tax_amount: Number(e.target.value) || 0, taxMode: 'manual' })}
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <input
+        type="number"
+        value={draft.extracted_total_price}
+        onChange={(e) => setDraft({ ...draft, extracted_total_price: Number(e.target.value) || 0, taxMode: 'manual' })}
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-right text-sm focus:border-blue-500 focus:outline-none"
+      />
+      <div className="flex items-center justify-center gap-1">
+        <button onClick={onSave} className="rounded bg-green-600 p-1 text-white hover:bg-green-700" title="저장">
+          <Check size={14} />
+        </button>
+        <button onClick={onCancel} className="rounded border border-gray-300 bg-white p-1 text-gray-700 hover:bg-gray-50" title="취소">
+          <X size={14} />
+        </button>
+      </div>
+      {/* 자동 계산 모드 안내 */}
+      <div className="col-span-10 mt-1 flex items-center gap-3 text-[11px] text-gray-600">
+        <span>자동 계산:</span>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            checked={draft.taxMode === 'free'}
+            onChange={() => setDraft(recalcDraft({ ...draft, taxMode: 'free' }))}
+          />
+          면세 (총액 = 단가×수량)
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            checked={draft.taxMode === 'taxable'}
+            onChange={() => setDraft(recalcDraft({ ...draft, taxMode: 'taxable' }))}
+          />
+          과세 10% (총액 = 단가×수량×1.1)
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            checked={draft.taxMode === 'manual'}
+            onChange={() => setDraft({ ...draft, taxMode: 'manual' })}
+          />
+          수동 입력
+        </label>
+      </div>
     </div>
   )
 }
