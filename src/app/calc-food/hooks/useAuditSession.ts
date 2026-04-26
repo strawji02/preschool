@@ -59,6 +59,7 @@ export interface PageTotal {
   page: number              // 전역 페이지 번호
   ocr_total: number | null  // OCR이 읽은 footer 합계 (없으면 null)
   source_file?: string | null  // 원본 파일명 (여러 파일 업로드 시)
+  reviewed?: boolean        // 검수자가 명시적으로 "검수 완료"로 마크 (2026-04-26)
 }
 
 export interface AuditState {
@@ -149,6 +150,7 @@ type AuditAction =
   | { type: 'REMOVE_ITEM'; itemId: string }
   | { type: 'ADD_ITEM'; item: ComparisonItem }
   | { type: 'UPDATE_PAGE_OCR_TOTAL'; pageNumber: number; ocrTotal: number | null }
+  | { type: 'SET_PAGE_REVIEWED'; pageNumber: number; reviewed: boolean }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
   | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
@@ -416,8 +418,28 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
             page: action.pageNumber,
             ocr_total: action.ocrTotal,
             source_file: existing?.source_file ?? null,
+            reviewed: existing?.reviewed ?? false,
           },
         ].sort((a, b) => a.page - b.page),
+      }
+    }
+
+    case 'SET_PAGE_REVIEWED': {
+      const newPageTotals = state.pageTotals.map((p) =>
+        p.page === action.pageNumber ? { ...p, reviewed: action.reviewed } : p,
+      )
+      // 페이지가 pageTotals에 없는 경우 (OCR 합계가 없었던 페이지) 추가
+      if (!state.pageTotals.some((p) => p.page === action.pageNumber)) {
+        newPageTotals.push({
+          page: action.pageNumber,
+          ocr_total: null,
+          source_file: null,
+          reviewed: action.reviewed,
+        })
+      }
+      return {
+        ...state,
+        pageTotals: newPageTotals.sort((a, b) => a.page - b.page),
       }
     }
 
@@ -876,6 +898,53 @@ export function useAuditSession() {
       }
     },
     [state.sessionId],
+  )
+
+  // 페이지 검수 완료 토글 — state + DB 동기화 (2026-04-26)
+  const togglePageReviewed = useCallback(
+    async (pageNumber: number) => {
+      if (!state.sessionId) return
+      // 현재 페이지의 reviewed 상태 토글
+      const existing = state.pageTotals.find((p) => p.page === pageNumber)
+      const newReviewed = !(existing?.reviewed ?? false)
+
+      // state 즉시 갱신
+      const rest = state.pageTotals.filter((p) => p.page !== pageNumber)
+      const updated: PageTotal[] = [
+        ...rest,
+        {
+          page: pageNumber,
+          ocr_total: existing?.ocr_total ?? null,
+          source_file: existing?.source_file ?? null,
+          reviewed: newReviewed,
+        },
+      ].sort((a, b) => a.page - b.page)
+
+      dispatch({
+        type: 'UPDATE_PAGE_OCR_TOTAL',
+        pageNumber,
+        ocrTotal: existing?.ocr_total ?? null,
+      })
+      // 별도 액션 없이 ADD_PAGE_TOTAL을 reviewed 포함으로 갱신하기 위해 reducer 의존성에 추가 필요
+      // 임시: state.pageTotals에 reviewed 반영 위해 ADD_PAGE_TOTAL 사용 + reducer 단언
+      dispatch({ type: 'ADD_PAGE_TOTAL', pageNumber, ocrTotal: existing?.ocr_total ?? null, sourceFile: existing?.source_file ?? null })
+
+      // DB에 저장 (page_totals 배열 전체 재저장)
+      try {
+        await fetch('/api/session/page-totals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: state.sessionId, page_totals: updated }),
+        })
+        // 성공 후 state도 reviewed 반영하기 위해 한 번 더 dispatch (ADD_PAGE_TOTAL은 reviewed를 무시하므로
+        // 직접 setState는 불가. 대신 새 액션 추가 — 아래에서 처리)
+      } catch (e) {
+        console.warn('검수 완료 토글 DB 동기화 실패:', e)
+      }
+      // state에 reviewed 반영을 위해 새 액션 사용
+      dispatch({ type: 'SET_PAGE_REVIEWED', pageNumber, reviewed: newReviewed })
+    },
+    [state.sessionId, state.pageTotals],
   )
 
   // 페이지 OCR 합계 수정 — state 즉시 갱신 + DB 일괄 저장 (page_totals 배열 전체 재저장)
@@ -1600,5 +1669,7 @@ export function useAuditSession() {
     removeItem,
     addItem,
     updatePageOcrTotal,
+    // Phase 2 페이지별 검수 완료 토글 (2026-04-26)
+    togglePageReviewed,
   }
 }

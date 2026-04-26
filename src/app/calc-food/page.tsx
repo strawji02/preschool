@@ -41,6 +41,11 @@ const SessionList = dynamic(() => import('./components/SessionList').then(mod =>
   loading: () => null,
 })
 
+const WorkflowStepper = dynamic(() => import('./components/WorkflowStepper').then(mod => ({ default: mod.WorkflowStepper })), {
+  ssr: false,
+  loading: () => null,
+})
+
 function LoadingFallback() {
   return (
     <div className="flex min-h-[calc(100vh-200px)] items-center justify-center">
@@ -87,6 +92,8 @@ export default function CalcFoodPage() {
     removeItem,
     addItem,
     updatePageOcrTotal,
+    // Phase 2 페이지별 검수 완료 토글 (2026-04-26)
+    togglePageReviewed,
   } = useAuditSession()
 
   return (
@@ -111,22 +118,7 @@ export default function CalcFoodPage() {
                 ({process.env.NEXT_PUBLIC_BUILD_TIME || '빌드 시간'})
               </span>
             </h1>
-
-            {/* 현재 단계 표시 */}
-            {state.status === 'analysis' && (
-              <>
-                <div className="h-6 w-px bg-gray-300" />
-                <div className="flex items-center gap-2">
-                  <span className={`rounded px-2 py-0.5 text-sm font-medium ${
-                    state.currentStep === 'matching'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-green-100 text-green-700'
-                  }`}>
-                    {state.currentStep === 'matching' ? '1. 매칭 확인' : '2. 리포트'}
-                  </span>
-                </div>
-              </>
-            )}
+            {/* Phase 2: 단계 표시는 WorkflowStepper로 이동 */}
           </div>
 
           {state.status !== 'empty' && (
@@ -140,6 +132,9 @@ export default function CalcFoodPage() {
           )}
         </div>
       </header>
+
+      {/* 검수 워크플로우 단계 표시 (2026-04-26) */}
+      <WorkflowStepper status={state.status} currentStep={state.currentStep} />
 
       {/* 메인 콘텐츠 */}
       <main>
@@ -179,6 +174,7 @@ export default function CalcFoodPage() {
             onRemoveItem={removeItem}
             onAddItem={addItem}
             onUpdatePageOcrTotal={updatePageOcrTotal}
+            onTogglePageReviewed={togglePageReviewed}
           />
         )}
 

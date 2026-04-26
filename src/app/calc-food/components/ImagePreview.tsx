@@ -54,6 +54,8 @@ interface ImagePreviewProps {
     },
   ) => void
   onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
+  // Phase 2: 페이지별 검수 완료 토글 (2026-04-26)
+  onTogglePageReviewed?: (pageNumber: number) => void
 }
 
 // 합계가 "수량×단가 (면세)" 또는 "수량×단가 + 10% 부가세 (과세)" 중 하나와 일치해야 정상
@@ -84,6 +86,7 @@ export function ImagePreview({
   onRemoveItem,
   onAddItem,
   onUpdatePageOcrTotal,
+  onTogglePageReviewed,
 }: ImagePreviewProps) {
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
@@ -178,11 +181,14 @@ export function ImagePreview({
       sourceFile,
       valid: isPageTotalValid(ocrTotal, itemsSum),
       hasOcrTotal: ocrTotal != null,
+      reviewed: pt?.reviewed ?? false,
     }
   })
 
   const pageMismatchCount = pageVerifyResults.filter((r) => !r.valid).length
   const filesInvolved = new Set(pageSourceFiles.filter(Boolean)).size || 1
+  const reviewedCount = pageVerifyResults.filter((r) => r.reviewed).length
+  const allReviewed = reviewedCount === allPageNumbers.length && allPageNumbers.length > 0
 
   return (
     <div
@@ -312,15 +318,15 @@ export function ImagePreview({
       </div>
 
       {/* 요약 KPI */}
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      <div className="mb-4 grid grid-cols-5 gap-3">
         <div className="rounded-xl border bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">파일 수 / 페이지 수</p>
+          <p className="text-xs text-gray-500">파일 / 페이지</p>
           <p className="mt-1 text-2xl font-bold text-gray-900">
             {formatNumber(filesInvolved)} / {formatNumber(allPageNumbers.length)}
           </p>
         </div>
         <div className="rounded-xl border bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">총 품목 수</p>
+          <p className="text-xs text-gray-500">총 품목</p>
           <p className="mt-1 text-2xl font-bold text-gray-900">{formatNumber(items.length)}</p>
         </div>
         <div className="rounded-xl border-2 border-blue-400 bg-blue-50 p-4 shadow-sm">
@@ -328,16 +334,28 @@ export function ImagePreview({
           <p className="mt-1 text-2xl font-bold text-blue-900">{formatCurrency(grandTotal)}</p>
         </div>
         <div className="rounded-xl border bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">페이지 검증</p>
+          <p className="text-xs text-gray-500">합계 검증</p>
           <p
             className={cn(
               'mt-1 text-2xl font-bold',
               pageMismatchCount > 0 ? 'text-red-600' : 'text-green-600',
             )}
           >
-            {pageMismatchCount > 0
-              ? `${pageMismatchCount}개 페이지 불일치`
-              : '✓ 전체 일치'}
+            {pageMismatchCount > 0 ? `${pageMismatchCount}개 불일치` : '✓ 일치'}
+          </p>
+        </div>
+        <div className={cn(
+          'rounded-xl border-2 p-4 shadow-sm',
+          allReviewed ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white',
+        )}>
+          <p className={cn('text-xs font-medium', allReviewed ? 'text-green-700' : 'text-gray-500')}>
+            검수 진행률
+          </p>
+          <p className={cn(
+            'mt-1 text-2xl font-bold',
+            allReviewed ? 'text-green-900' : 'text-gray-900',
+          )}>
+            {reviewedCount} / {allPageNumbers.length}
           </p>
         </div>
       </div>
@@ -372,25 +390,54 @@ export function ImagePreview({
             onRemoveItem={onRemoveItem}
             onAddItem={onAddItem}
             onUpdatePageOcrTotal={onUpdatePageOcrTotal}
+            onTogglePageReviewed={onTogglePageReviewed}
           />
         ))}
       </div>
 
-      {/* 하단 액션 버튼 */}
-      <div className="mt-6 flex items-center justify-end gap-3">
-        <button
-          onClick={onCancel}
-          className="rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          다시 업로드
-        </button>
-        <button
-          onClick={onConfirm}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-        >
-          <CheckCircle2 size={18} />
-          매칭 시작 ({formatNumber(items.length)}개)
-        </button>
+      {/* 하단 액션 영역 */}
+      <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-sm">
+        <div className="text-sm">
+          {allReviewed ? (
+            <span className="flex items-center gap-2 text-green-700">
+              <CheckCircle2 size={18} />
+              <strong>모든 페이지 검수 완료</strong> · 매칭을 시작할 수 있습니다
+            </span>
+          ) : (
+            <span className="text-amber-700">
+              <strong>{allPageNumbers.length - reviewedCount}개 페이지</strong> 검수 미완료 ·
+              각 페이지 헤더의 <em>"검수 완료"</em> 체크박스를 눌러 진행 상태를 표시하세요
+              {pageMismatchCount > 0 && ' (불일치 페이지부터 우선 수정 권장)'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onCancel}
+            className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            다시 업로드
+          </button>
+          <button
+            onClick={() => {
+              if (!allReviewed) {
+                if (!window.confirm(
+                  `검수 미완료 페이지가 ${allPageNumbers.length - reviewedCount}개 있습니다.\n그래도 매칭을 시작하시겠습니까?`,
+                )) return
+              }
+              onConfirm()
+            }}
+            className={cn(
+              'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-semibold shadow-sm transition',
+              allReviewed
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700',
+            )}
+          >
+            <CheckCircle2 size={18} />
+            {allReviewed ? '검수 완료 → 매칭 시작' : `매칭 시작 (${formatNumber(items.length)}개)`}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -409,6 +456,7 @@ interface PageSectionProps {
     sourceFile: string | null
     valid: boolean
     hasOcrTotal: boolean
+    reviewed: boolean
   }
   onUpdateItem?: (itemId: string, patch: Partial<ComparisonItem>) => void
   onRemoveItem?: (itemId: string) => void
@@ -427,6 +475,7 @@ interface PageSectionProps {
     },
   ) => void
   onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
+  onTogglePageReviewed?: (pageNumber: number) => void
 }
 
 // 행 편집/추가용 임시 폼 상태
@@ -492,8 +541,15 @@ function recalcDraft(d: RowDraft): RowDraft {
   return d
 }
 
-function PageSection({ result, onUpdateItem, onRemoveItem, onAddItem, onUpdatePageOcrTotal }: PageSectionProps) {
-  const { page, items, itemsSum, ocrTotal, sourceFile, valid, hasOcrTotal } = result
+function PageSection({
+  result,
+  onUpdateItem,
+  onRemoveItem,
+  onAddItem,
+  onUpdatePageOcrTotal,
+  onTogglePageReviewed,
+}: PageSectionProps) {
+  const { page, items, itemsSum, ocrTotal, sourceFile, valid, hasOcrTotal, reviewed } = result
   const editable = !!onUpdateItem
   const canAddRow = !!onAddItem
 
@@ -575,16 +631,34 @@ function PageSection({ result, onUpdateItem, onRemoveItem, onAddItem, onUpdatePa
     <div
       className={cn(
         'overflow-hidden rounded-xl border-2 bg-white shadow-sm',
-        !valid ? 'border-red-300' : 'border-gray-200',
+        reviewed ? 'border-green-400' : !valid ? 'border-red-300' : 'border-gray-200',
       )}
     >
       {/* 페이지 헤더 */}
       <div
         className={cn(
           'flex flex-wrap items-center gap-3 border-b px-4 py-3 text-sm',
-          !valid ? 'bg-red-50' : 'bg-gray-50',
+          reviewed ? 'bg-green-50' : !valid ? 'bg-red-50' : 'bg-gray-50',
         )}
       >
+        {/* 페이지 검수 완료 체크박스 (Phase 2) */}
+        {onTogglePageReviewed && (
+          <label
+            className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-transparent px-1.5 py-0.5 text-xs hover:border-green-300 hover:bg-white"
+            title="이 페이지 검수 완료로 표시"
+          >
+            <input
+              type="checkbox"
+              checked={reviewed}
+              onChange={() => onTogglePageReviewed(page)}
+              className="h-4 w-4 cursor-pointer accent-green-600"
+            />
+            <span className={cn('font-medium', reviewed ? 'text-green-700' : 'text-gray-600')}>
+              {reviewed ? '검수 완료' : '검수 완료'}
+            </span>
+          </label>
+        )}
+
         <div className="flex items-center gap-2 font-semibold text-gray-900">
           <FileText size={16} className="text-gray-500" />
           <span>페이지 {page}</span>
