@@ -14,8 +14,8 @@
  * 3. 각 섹션 내 품목 테이블 (No/품목명/규격/단위/수량/단가/공급가액/세액/총액)
  * 4. "매칭 시작" 버튼 → SplitView 진입 (편집은 다음 단계에서)
  */
-import { useState } from 'react'
-import { ArrowLeft, CheckCircle2, AlertCircle, FileText } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ArrowLeft, CheckCircle2, AlertCircle, FileText, PlusCircle } from 'lucide-react'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem } from '@/types/audit'
@@ -31,6 +31,8 @@ interface ImagePreviewProps {
   onSupplierNameChange: (name: string) => void
   onCancel: () => void
   onConfirm: () => void
+  // 기존 세션에 페이지 추가 업로드 (저장된 세션에서 진입한 경우만 의미 있음, 2026-04-26)
+  onExtendUpload?: (files: File[]) => void
 }
 
 // 합계가 "수량×단가 (면세)" 또는 "수량×단가 + 10% 부가세 (과세)" 중 하나와 일치해야 정상
@@ -56,9 +58,11 @@ export function ImagePreview({
   onSupplierNameChange,
   onCancel,
   onConfirm,
+  onExtendUpload,
 }: ImagePreviewProps) {
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
+  const extendInputRef = useRef<HTMLInputElement | null>(null)
 
   const saveSupplier = () => {
     const trimmed = supplierDraft.trim()
@@ -134,13 +138,39 @@ export function ImagePreview({
               </p>
             </div>
           </div>
-          <button
-            onClick={onCancel}
-            className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <ArrowLeft size={16} />
-            다시 업로드
-          </button>
+          <div className="flex items-center gap-2">
+            {onExtendUpload && (
+              <>
+                <button
+                  onClick={() => extendInputRef.current?.click()}
+                  className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
+                  title="이 세션에 거래명세표 페이지를 추가합니다 (기존 페이지는 OCR 다시 안 함)"
+                >
+                  <PlusCircle size={16} />
+                  추가 업로드
+                </button>
+                <input
+                  ref={extendInputRef}
+                  type="file"
+                  multiple
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = e.target.files ? Array.from(e.target.files) : []
+                    if (files.length > 0) onExtendUpload(files)
+                    if (extendInputRef.current) extendInputRef.current.value = ''
+                  }}
+                />
+              </>
+            )}
+            <button
+              onClick={onCancel}
+              className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <ArrowLeft size={16} />
+              다시 업로드
+            </button>
+          </div>
         </div>
 
         {/* 업체명 편집 */}

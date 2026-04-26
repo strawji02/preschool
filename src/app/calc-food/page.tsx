@@ -36,6 +36,11 @@ const ImagePreview = dynamic(() => import('./components/ImagePreview').then(mod 
   loading: () => <LoadingFallback />,
 })
 
+const SessionList = dynamic(() => import('./components/SessionList').then(mod => ({ default: mod.SessionList })), {
+  ssr: false,
+  loading: () => null,
+})
+
 function LoadingFallback() {
   return (
     <div className="flex min-h-[calc(100vh-200px)] items-center justify-center">
@@ -74,6 +79,9 @@ export default function CalcFoodPage() {
     updateSupplierName,
     // PDF/이미지 담당자 확인 (2026-04-23)
     confirmImagePreview,
+    // 세션 저장/이어가기/추가 업로드 (2026-04-26)
+    loadSession,
+    extendSession,
   } = useAuditSession()
 
   return (
@@ -130,7 +138,12 @@ export default function CalcFoodPage() {
 
       {/* 메인 콘텐츠 */}
       <main>
-        {state.status === 'empty' && <UploadZone onFileSelect={processFiles} />}
+        {state.status === 'empty' && (
+          <>
+            <UploadZone onFileSelect={processFiles} />
+            <SessionList onSelect={loadSession} />
+          </>
+        )}
 
         {/* 엑셀 담당자 확인 단계 (2026-04-21 추가) */}
         {state.status === 'excel_preview' && state.excelPreview && (
@@ -156,6 +169,7 @@ export default function CalcFoodPage() {
             onSupplierNameChange={updateSupplierName}
             onCancel={reset}
             onConfirm={confirmImagePreview}
+            onExtendUpload={extendSession}
           />
         )}
 

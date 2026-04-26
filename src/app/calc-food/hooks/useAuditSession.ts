@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useCallback, useMemo } from 'react'
+import { useReducer, useCallback, useMemo, useEffect } from 'react'
 import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
@@ -124,6 +124,23 @@ export function extractSupplierName(fileName: string): string {
 type AuditAction =
   | { type: 'START_PROCESSING'; fileName: string; totalPages: number; supplierName: string }
   | { type: 'SET_RETRY_ROUND'; round: number; failedCount: number }
+  // 저장된 세션 불러오기 — 한 번에 state 복원 (2026-04-26)
+  | {
+      type: 'LOAD_SESSION'
+      sessionId: string
+      items: ComparisonItem[]
+      pageTotals: PageTotal[]
+      pageSourceFiles: string[]
+      totalPages: number
+      fileName: string
+      supplierName: string
+      currentStep: AnalysisStep
+      enterStatus: 'image_preview' | 'analysis'
+    }
+  // 추가 업로드 시작 (기존 세션 유지) — pages/items/total은 누적 (2026-04-26)
+  | { type: 'START_EXTEND'; addedPages: number }
+  // 추가 업로드 완료 후 page 확장
+  | { type: 'EXTEND_PAGES'; pages: PageImage[]; sourceFiles: string[] }
   | { type: 'SET_SESSION_ID'; sessionId: string }
   | { type: 'SET_PAGES'; pages: PageImage[]; sourceFiles?: string[] }
   | { type: 'ADD_PAGE_TOTAL'; pageNumber: number; ocrTotal: number | null; sourceFile?: string | null }
@@ -306,6 +323,41 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         processingFailedPages: action.failedCount,
         processingPage: 0,  // 재시도 라운드는 진행률 0부터 재시작
         totalPages: action.failedCount,
+      }
+
+    case 'LOAD_SESSION':
+      return {
+        ...initialState,
+        sessionId: action.sessionId,
+        items: action.items,
+        pageTotals: action.pageTotals,
+        pageSourceFiles: action.pageSourceFiles,
+        totalPages: action.totalPages,
+        fileName: action.fileName,
+        supplierName: action.supplierName,
+        currentStep: action.currentStep,
+        status: action.enterStatus,
+        stats: calculateStats(action.items),
+      }
+
+    case 'START_EXTEND':
+      // 추가 업로드 시작: 기존 세션 유지하되 진행률 표시를 위해 status='processing' 전환
+      return {
+        ...state,
+        status: 'processing',
+        processingPage: 0,
+        totalPages: action.addedPages,
+        processingStartedAt: Date.now(),
+        processingRetryRound: 0,
+        processingFailedPages: 0,
+      }
+
+    case 'EXTEND_PAGES':
+      return {
+        ...state,
+        pages: [...state.pages, ...action.pages],
+        pageSourceFiles: [...state.pageSourceFiles, ...action.sourceFiles],
+        totalPages: state.pages.length + action.pages.length,
       }
 
     case 'SET_SESSION_ID':
@@ -616,6 +668,221 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
 export function useAuditSession() {
   const [state, dispatch] = useReducer(auditReducer, initialState)
+
+  // 저장된 세션 불러오기 (2026-04-26)
+  const loadSession = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`)
+      if (!res.ok) throw new Error(`세션 불러오기 실패 (HTTP ${res.status})`)
+      const data = await res.json()
+      if (!data.success || !data.session) {
+        throw new Error(data.error || '세션 데이터가 비어 있습니다')
+      }
+      const session = data.session as {
+        id: string
+        name: string
+        kindergarten_name: string | null
+        total_pages: number
+        current_step: string
+        page_totals: PageTotal[] | null
+      }
+      const items = (data.items as ComparisonItem[]) ?? []
+      const pageTotals = (session.page_totals ?? []) as PageTotal[]
+      const pageSourceFiles: string[] = []
+      // page_number → source_file_name 매핑 (items에서 추출)
+      const fileByPage = new Map<number, string>()
+      for (const it of items) {
+        if (it.page_number != null && it.source_file_name) {
+          fileByPage.set(it.page_number, it.source_file_name)
+        }
+      }
+      for (let p = 1; p <= session.total_pages; p++) {
+        pageSourceFiles.push(fileByPage.get(p) ?? '')
+      }
+      // 어느 단계로 진입할지: matching/report면 analysis, 아니면 image_preview
+      const enterStatus =
+        session.current_step === 'matching' || session.current_step === 'report'
+          ? 'analysis'
+          : 'image_preview'
+      const currentStep: AnalysisStep =
+        session.current_step === 'report' ? 'report' : 'matching'
+
+      dispatch({
+        type: 'LOAD_SESSION',
+        sessionId: session.id,
+        items,
+        pageTotals,
+        pageSourceFiles,
+        totalPages: session.total_pages,
+        fileName: session.name,
+        supplierName: session.kindergarten_name || extractSupplierName(session.name),
+        currentStep,
+        enterStatus,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '알 수 없는 오류'
+      dispatch({ type: 'SET_ERROR', error: message })
+    }
+  }, [])
+
+  // 추가 업로드 — 기존 세션에 페이지/품목 누적 (2026-04-26)
+  // 시작 페이지 번호는 현재 totalPages + 1부터 부여, 같은 session_id로 OCR 호출
+  const extendSession = useCallback(
+    async (files: File[]) => {
+      if (!state.sessionId) {
+        dispatch({ type: 'SET_ERROR', error: '활성 세션이 없습니다. 먼저 세션을 불러오세요.' })
+        return
+      }
+      if (files.length === 0) {
+        dispatch({ type: 'SET_ERROR', error: '파일을 선택해주세요.' })
+        return
+      }
+      // 엑셀은 추가 업로드 미지원 (단일 시트 가정)
+      if (files.some((f) => isExcelFile(f))) {
+        dispatch({ type: 'SET_ERROR', error: '엑셀은 추가 업로드를 지원하지 않습니다. PDF/이미지만 가능합니다.' })
+        return
+      }
+
+      const baseSessionId = state.sessionId
+      const startPageNum = state.totalPages + 1
+
+      // 1. 새 페이지 추출
+      const newPages: PageImage[] = []
+      const newSourceFiles: string[] = []
+      let nextNum = startPageNum
+      try {
+        for (const file of files) {
+          if (isPDF(file)) {
+            const pdfPages = await extractPagesFromPDF(file)
+            for (const p of pdfPages) {
+              newPages.push({ ...p, pageNumber: nextNum })
+              newSourceFiles.push(file.name)
+              nextNum += 1
+            }
+          } else if (isImage(file)) {
+            const imgPage = await imageFileToPage(file, nextNum)
+            newPages.push(imgPage)
+            newSourceFiles.push(file.name)
+            nextNum += 1
+          } else {
+            throw new Error(`지원하지 않는 파일 형식: ${file.name}`)
+          }
+        }
+        if (newPages.length === 0) throw new Error('추출된 페이지가 없습니다.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '파일 처리 오류'
+        dispatch({ type: 'SET_ERROR', error: message })
+        return
+      }
+
+      dispatch({ type: 'START_EXTEND', addedPages: newPages.length })
+
+      // 2. 페이지별 OCR (순차 + 5초 지연, processFiles와 동일 로직)
+      const DELAY_MS = 5000
+      const collectedTotals: PageTotal[] = []
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+      const analyzeOnePage = async (
+        pageNumber: number,
+        page: PageImage,
+        sourceFile: string,
+      ): Promise<boolean> => {
+        try {
+          const analyzeRes = await fetch('/api/analyze/page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session_id: baseSessionId,
+              page_number: pageNumber,
+              image: extractBase64(page.dataUrl),
+              source_file_name: sourceFile,
+            }),
+          })
+          if (!analyzeRes.ok) {
+            console.error(`추가 페이지 ${pageNumber} 분석 실패 (HTTP ${analyzeRes.status})`)
+            return false
+          }
+          const analyzeData = await analyzeRes.json()
+          if (analyzeData.success && Array.isArray(analyzeData.items)) {
+            dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+            const ocrTotal =
+              analyzeData.page_total != null ? Number(analyzeData.page_total) : null
+            dispatch({ type: 'ADD_PAGE_TOTAL', pageNumber, ocrTotal, sourceFile })
+            collectedTotals.push({ page: pageNumber, ocr_total: ocrTotal, source_file: sourceFile })
+            return true
+          }
+          return false
+        } catch (err) {
+          console.error(`추가 페이지 ${pageNumber} 요청 오류:`, err)
+          return false
+        }
+      }
+
+      let completedCount = 0
+      for (let i = 0; i < newPages.length; i++) {
+        const page = newPages[i]
+        const sourceFile = newSourceFiles[i]
+        const pageNumber = startPageNum + i
+        await analyzeOnePage(pageNumber, page, sourceFile)
+        completedCount += 1
+        dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: completedCount })
+        if (i < newPages.length - 1) await sleep(DELAY_MS)
+      }
+
+      // 3. pages 누적 + total_pages 업데이트
+      dispatch({ type: 'EXTEND_PAGES', pages: newPages, sourceFiles: newSourceFiles })
+
+      // 4. 세션 메타 업데이트 (백엔드)
+      try {
+        await fetch(`/api/sessions/${baseSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            total_pages: startPageNum + newPages.length - 1,
+            current_step: 'image_preview',
+          }),
+        })
+      } catch { /* ignore */ }
+
+      // 5. page_totals append (기존 + 신규)
+      try {
+        await fetch('/api/session/page-totals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: baseSessionId,
+            page_totals: [...state.pageTotals, ...collectedTotals].sort((a, b) => a.page - b.page),
+          }),
+        })
+      } catch { /* ignore */ }
+
+      // 6. 확인 단계로 전환
+      dispatch({ type: 'SHOW_IMAGE_PREVIEW' })
+    },
+    [state.sessionId, state.totalPages, state.pageTotals],
+  )
+
+  // 세션 메타데이터 자동 업데이트 — sessionId/currentStep/status 변경 시 백엔드에 PATCH (2026-04-26)
+  useEffect(() => {
+    if (!state.sessionId) return
+    // 저장 단계 결정
+    let stepToSave: string | null = null
+    if (state.status === 'image_preview') stepToSave = 'image_preview'
+    else if (state.status === 'analysis') {
+      stepToSave = state.currentStep === 'report' ? 'report' : 'matching'
+    }
+    if (!stepToSave) return
+
+    const payload: Record<string, unknown> = { current_step: stepToSave }
+    if (state.supplierName) payload.kindergarten_name = state.supplierName
+
+    // fire-and-forget (실패해도 UX 무영향)
+    fetch(`/api/sessions/${state.sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch((e) => console.warn('세션 자동 업데이트 실패:', e))
+  }, [state.sessionId, state.status, state.currentStep, state.supplierName])
 
   const processFiles = useCallback(async (files: File[]) => {
     try {
@@ -1143,5 +1410,8 @@ export function useAuditSession() {
     clearExcelPreview,
     // PDF/이미지 담당자 확인 단계 (2026-04-23 추가)
     confirmImagePreview,
+    // 세션 저장/이어가기/추가 업로드 (2026-04-26 추가)
+    loadSession,
+    extendSession,
   }
 }

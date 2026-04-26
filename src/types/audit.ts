@@ -217,6 +217,8 @@ export interface InitSessionRequest {
   name: string
   supplier?: Supplier  // optional로 변경 (3rd party 명세서)
   total_pages: number
+  total_files?: number          // 원본 파일 수 (2026-04-26 추가)
+  kindergarten_name?: string    // 사용자 편집 업체명 (2026-04-26 추가)
 }
 
 export interface InitSessionResponse {

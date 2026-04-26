@@ -24,14 +24,20 @@ export async function POST(request: NextRequest) {
 
     const supabase = createAdminClient()
 
-    // Create audit session (supplier는 optional)
+    // Create audit session (supplier는 optional, total_pages/files/kindergarten 추가 2026-04-26)
+    const insertPayload: Record<string, unknown> = {
+      name: body.name,
+      supplier: body.supplier || null,
+      status: 'processing',
+      total_pages: body.total_pages,
+      current_step: 'image_preview',
+    }
+    if (body.kindergarten_name) insertPayload.kindergarten_name = body.kindergarten_name
+    if (body.total_files != null) insertPayload.total_files = body.total_files
+
     const { data, error } = await supabase
       .from('audit_sessions')
-      .insert({
-        name: body.name,
-        supplier: body.supplier || null,  // 3rd party 명세서일 경우 null
-        status: 'processing',
-      })
+      .insert(insertPayload)
       .select('id')
       .single()
 
