@@ -1,16 +1,22 @@
 'use client'
 
 /**
- * 거래명세표 페이지 원본 스캔 이미지 뷰어 (2026-04-26)
+ * 거래명세표 페이지 원본 스캔 이미지 뷰어 (2026-04-26 v2: 사이드 패널 + 회전)
  *
- * 검수자가 OCR 결과를 검증할 때 원본 스캔 이미지를 확인하기 위함.
- * - signed URL을 비동기로 가져와 표시
- * - 줌 인/아웃 (마우스 휠 + 버튼)
- * - 드래그 팬 (확대 시)
- * - ESC / 배경 클릭으로 닫기
+ * 사용자 피드백 반영:
+ *  - 모달 전체화면이 본 화면을 가려서 동시 수정 불가 → 우측 사이드 패널로 전환
+ *  - 카메라/스캔 방향이 다양해서 회전 필요 → ↺ ↻ 90° 회전 + 수평/수직 플립 옵션
+ *
+ * UX:
+ *  - 우측 고정 사이드 패널 (모바일/좁은 화면: 50%, 데스크탑: 480px ~ 절반)
+ *  - 본 화면 우측 padding 자동 조정 (콘텐츠 가려지지 않음)
+ *  - 줌 / 팬 / 회전 / 닫기 컨트롤
  */
 import { useEffect, useRef, useState } from 'react'
-import { X, ZoomIn, ZoomOut, Maximize2, Loader2, AlertCircle } from 'lucide-react'
+import {
+  X, ZoomIn, ZoomOut, Maximize2, Loader2, AlertCircle,
+  RotateCcw, RotateCw,
+} from 'lucide-react'
 
 interface PageImageViewerProps {
   sessionId: string
@@ -20,6 +26,9 @@ interface PageImageViewerProps {
   dataUrl?: string
   onClose: () => void
 }
+
+// 사이드 패널 너비 (Tailwind 기준, lg 이상에선 고정 px)
+const PANEL_CLASS = 'w-1/2 max-w-[640px] min-w-[360px]'
 
 export function PageImageViewer({
   sessionId,
@@ -32,10 +41,29 @@ export function PageImageViewer({
   const [loading, setLoading] = useState(!dataUrl)
   const [error, setError] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [rotation, setRotation] = useState(0)  // 0, 90, 180, 270
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const dragStart = useRef({ x: 0, y: 0 })
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
+  // 본 화면이 패널에 가려지지 않도록 body padding-right 자동 조정
+  useEffect(() => {
+    const updatePadding = () => {
+      if (panelRef.current) {
+        const w = panelRef.current.getBoundingClientRect().width
+        document.body.style.paddingRight = `${w}px`
+      }
+    }
+    updatePadding()
+    window.addEventListener('resize', updatePadding)
+    return () => {
+      window.removeEventListener('resize', updatePadding)
+      document.body.style.paddingRight = ''
+    }
+  }, [])
+
+  // signed URL fetch
   useEffect(() => {
     if (dataUrl) return
     let cancelled = false
@@ -60,15 +88,27 @@ export function PageImageViewer({
     }
   }, [sessionId, pageNumber, dataUrl])
 
-  // ESC 키로 닫기
+  // 키보드 단축키 (다른 입력 필드에 포커스 있을 땐 ESC만 처리)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      const target = e.target as HTMLElement
+      const inEditable =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (inEditable) return
       if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(4, z + 0.25))
-      if (e.key === '-') setZoom((z) => Math.max(0.5, z - 0.25))
-      if (e.key === '0') {
+      else if (e.key === '-') setZoom((z) => Math.max(0.5, z - 0.25))
+      else if (e.key === '0') {
         setZoom(1)
         setPan({ x: 0, y: 0 })
+        setRotation(0)
+      } else if (e.key === 'r' || e.key === 'R') {
+        setRotation((r) => (r + 90) % 360)
       }
     }
     window.addEventListener('keydown', handler)
@@ -94,67 +134,97 @@ export function PageImageViewer({
   const reset = () => {
     setZoom(1)
     setPan({ x: 0, y: 0 })
+    setRotation(0)
   }
+
+  const rotateLeft = () => setRotation((r) => (r + 270) % 360)  // -90
+  const rotateRight = () => setRotation((r) => (r + 90) % 360)
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex flex-col bg-black/85 backdrop-blur-sm"
-      onClick={onClose}
+      ref={panelRef}
+      className={`fixed right-0 top-0 bottom-0 z-[60] flex flex-col border-l border-gray-300 bg-gray-900 shadow-2xl ${PANEL_CLASS}`}
     >
       {/* 상단 툴바 */}
-      <div
-        className="flex shrink-0 items-center justify-between border-b border-white/20 px-4 py-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-sm text-white">
-          <span className="font-semibold">페이지 {pageNumber}</span>
+      <div className="flex shrink-0 items-center justify-between border-b border-white/20 bg-gray-900 px-3 py-2">
+        <div className="min-w-0 text-sm text-white">
+          <div className="font-semibold">페이지 {pageNumber}</div>
           {fileName && (
-            <span className="ml-2 text-xs text-white/70" title={fileName}>
+            <div className="truncate text-[10px] text-white/60" title={fileName}>
               {fileName}
-            </span>
+            </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <button
+          onClick={onClose}
+          className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-white hover:bg-white/10"
+          title="닫기 (ESC)"
+        >
+          <X size={16} />
+          <span>닫기</span>
+        </button>
+      </div>
+
+      {/* 컨트롤 툴바 (회전 + 줌) */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-white/10 bg-gray-800 px-2 py-1.5">
+        {/* 회전 */}
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={rotateLeft}
+            className="rounded p-1 text-white hover:bg-white/10"
+            title="좌로 90° 회전 (R)"
+          >
+            <RotateCcw size={16} />
+          </button>
+          <button
+            onClick={rotateRight}
+            className="rounded p-1 text-white hover:bg-white/10"
+            title="우로 90° 회전"
+          >
+            <RotateCw size={16} />
+          </button>
+          <span className="ml-1 text-[10px] text-white/60">{rotation}°</span>
+        </div>
+
+        <div className="mx-1 h-5 w-px bg-white/20" />
+
+        {/* 줌 */}
+        <div className="flex items-center gap-0.5">
           <button
             onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}
-            className="rounded p-1.5 text-white hover:bg-white/10"
+            className="rounded p-1 text-white hover:bg-white/10"
             title="축소 (-)"
           >
-            <ZoomOut size={18} />
+            <ZoomOut size={16} />
           </button>
-          <span className="min-w-[3rem] text-center text-sm text-white">
+          <span className="min-w-[2.5rem] text-center text-[11px] text-white/80">
             {Math.round(zoom * 100)}%
           </span>
           <button
             onClick={() => setZoom((z) => Math.min(4, z + 0.25))}
-            className="rounded p-1.5 text-white hover:bg-white/10"
+            className="rounded p-1 text-white hover:bg-white/10"
             title="확대 (+)"
           >
-            <ZoomIn size={18} />
-          </button>
-          <button
-            onClick={reset}
-            className="rounded p-1.5 text-white hover:bg-white/10"
-            title="원본 크기 (0)"
-          >
-            <Maximize2 size={18} />
-          </button>
-          <div className="ml-2 h-6 w-px bg-white/30" />
-          <button
-            onClick={onClose}
-            className="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-white hover:bg-white/10"
-            title="닫기 (ESC)"
-          >
-            <X size={18} />
-            <span className="hidden sm:inline">닫기</span>
+            <ZoomIn size={16} />
           </button>
         </div>
+
+        <div className="mx-1 h-5 w-px bg-white/20" />
+
+        {/* 리셋 */}
+        <button
+          onClick={reset}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-white/80 hover:bg-white/10"
+          title="원본 (0)"
+        >
+          <Maximize2 size={14} />
+          원본
+        </button>
       </div>
 
       {/* 이미지 영역 */}
       <div
-        className="flex flex-1 items-center justify-center overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className="flex flex-1 items-center justify-center overflow-hidden bg-gray-900/95"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -169,9 +239,9 @@ export function PageImageViewer({
           </div>
         )}
         {error && (
-          <div className="flex flex-col items-center gap-2 text-amber-300">
+          <div className="flex flex-col items-center gap-2 px-4 text-center text-amber-300">
             <AlertCircle size={32} />
-            <p>{error}</p>
+            <p className="text-sm">{error}</p>
             <p className="text-xs text-white/60">
               세션 {sessionId.slice(0, 8)}… / 페이지 {pageNumber}
             </p>
@@ -182,9 +252,9 @@ export function PageImageViewer({
             src={imageUrl}
             alt={`페이지 ${pageNumber} 스캔 이미지`}
             draggable={false}
-            className="max-h-full max-w-full select-none object-contain shadow-2xl transition-transform"
+            className="max-h-full max-w-full select-none object-contain shadow-lg transition-transform"
             style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`,
               transformOrigin: 'center',
             }}
           />
@@ -192,10 +262,11 @@ export function PageImageViewer({
       </div>
 
       {/* 하단 단축키 안내 */}
-      <div className="shrink-0 border-t border-white/10 px-4 py-2 text-center text-[11px] text-white/60">
-        스크롤로 확대/축소 · 드래그로 이동 · <kbd className="rounded bg-white/10 px-1">+</kbd>/<kbd className="rounded bg-white/10 px-1">-</kbd> 줌 ·
-        <kbd className="ml-1 rounded bg-white/10 px-1">0</kbd> 원본 ·
-        <kbd className="ml-1 rounded bg-white/10 px-1">ESC</kbd> 닫기
+      <div className="shrink-0 border-t border-white/10 bg-gray-900 px-2 py-1.5 text-center text-[10px] text-white/50">
+        휠: 확대/축소 · 드래그: 이동 ·
+        <kbd className="mx-1 rounded bg-white/10 px-1">R</kbd>회전 ·
+        <kbd className="mx-1 rounded bg-white/10 px-1">0</kbd>리셋 ·
+        <kbd className="mx-1 rounded bg-white/10 px-1">ESC</kbd>닫기
       </div>
     </div>
   )
