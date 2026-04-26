@@ -190,6 +190,27 @@ export function ImagePreview({
   const reviewedCount = pageVerifyResults.filter((r) => r.reviewed).length
   const allReviewed = reviewedCount === allPageNumbers.length && allPageNumbers.length > 0
 
+  // Phase 3: 빠른 네비게이션 — 다음 불일치/미검수 페이지로 스크롤 (2026-04-26)
+  const scrollToPage = (pageNum: number) => {
+    const el = document.getElementById(`audit-page-${pageNum}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const findNextIssue = (): number | null => {
+    // 우선순위: 불일치 > 미검수
+    const next = pageVerifyResults.find((r) => !r.valid && r.hasOcrTotal)
+    if (next) return next.page
+    const nextUnreviewed = pageVerifyResults.find((r) => !r.reviewed)
+    return nextUnreviewed ? nextUnreviewed.page : null
+  }
+
+  // Phase 3: 전체 페이지 일괄 검수 완료 (2026-04-26)
+  const markAllReviewed = () => {
+    if (!onTogglePageReviewed) return
+    for (const r of pageVerifyResults) {
+      if (!r.reviewed) onTogglePageReviewed(r.page)
+    }
+  }
+
   return (
     <div
       className="relative mx-auto max-w-6xl p-6"
@@ -343,6 +364,17 @@ export function ImagePreview({
           >
             {pageMismatchCount > 0 ? `${pageMismatchCount}개 불일치` : '✓ 일치'}
           </p>
+          {pageMismatchCount > 0 && (
+            <button
+              onClick={() => {
+                const next = pageVerifyResults.find((r) => !r.valid && r.hasOcrTotal)
+                if (next) scrollToPage(next.page)
+              }}
+              className="mt-1 text-[11px] text-blue-600 underline hover:text-blue-800"
+            >
+              다음 불일치로 이동 →
+            </button>
+          )}
         </div>
         <div className={cn(
           'rounded-xl border-2 p-4 shadow-sm',
@@ -357,6 +389,29 @@ export function ImagePreview({
           )}>
             {reviewedCount} / {allPageNumbers.length}
           </p>
+          {!allReviewed && onTogglePageReviewed && (
+            <div className="mt-1 flex flex-col gap-0.5 text-[11px]">
+              <button
+                onClick={() => {
+                  const next = findNextIssue()
+                  if (next) scrollToPage(next)
+                }}
+                className="text-left text-blue-600 underline hover:text-blue-800"
+              >
+                다음 미검수로 이동 →
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`미검수 페이지 ${allPageNumbers.length - reviewedCount}개를 모두 검수 완료로 표시하시겠습니까?`)) {
+                    markAllReviewed()
+                  }
+                }}
+                className="text-left text-green-700 underline hover:text-green-900"
+              >
+                전체 검수 완료
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -629,8 +684,9 @@ function PageSection({
 
   return (
     <div
+      id={`audit-page-${page}`}
       className={cn(
-        'overflow-hidden rounded-xl border-2 bg-white shadow-sm',
+        'overflow-hidden rounded-xl border-2 bg-white shadow-sm scroll-mt-24',
         reviewed ? 'border-green-400' : !valid ? 'border-red-300' : 'border-gray-200',
       )}
     >
