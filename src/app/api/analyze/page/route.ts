@@ -57,6 +57,20 @@ export async function POST(request: NextRequest) {
     console.log(`[${body.session_id}] Processing page ${body.page_number}...`)
     console.log(`[${body.session_id}] Step 1: Session verified (${Date.now() - startTime}ms)`)
 
+    // replace_existing: 같은 page_number의 기존 audit_items 모두 삭제 후 재처리 (재촬영 모드, 2026-04-26)
+    if (body.replace_existing) {
+      const { error: deleteError } = await supabase
+        .from('audit_items')
+        .delete()
+        .eq('session_id', body.session_id)
+        .eq('page_number', body.page_number)
+      if (deleteError) {
+        console.error(`[${body.session_id}] Replace mode: existing items 삭제 실패 — ${deleteError.message}`)
+      } else {
+        console.log(`[${body.session_id}] Replace mode: page ${body.page_number} existing items 삭제 완료`)
+      }
+    }
+
     // 2. Upload image to Storage
     const imagePath = `${body.session_id}/${body.page_number}.jpg`
     const imageBuffer = Buffer.from(body.image, 'base64')

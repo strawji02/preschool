@@ -17,7 +17,7 @@
 import { useRef, useState } from 'react'
 import {
   ArrowLeft, CheckCircle2, AlertCircle, FileText, PlusCircle,
-  Edit3, Trash2, Check, X, Plus, Image as ImageIcon,
+  Edit3, Trash2, Check, X, Plus, Image as ImageIcon, Camera, Loader2,
 } from 'lucide-react'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -61,6 +61,8 @@ interface ImagePreviewProps {
   onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
   // Phase 2: 페이지별 검수 완료 토글 (2026-04-26)
   onTogglePageReviewed?: (pageNumber: number) => void
+  // 페이지 재촬영 — 같은 page_number의 items + 이미지 교체 (2026-04-26)
+  onReplacePage?: (pageNumber: number, file: File) => Promise<void> | void
 }
 
 // 합계가 "수량×단가 (면세)" 또는 "수량×단가 + 10% 부가세 (과세)" 중 하나와 일치해야 정상
@@ -94,6 +96,7 @@ export function ImagePreview({
   onAddItem,
   onUpdatePageOcrTotal,
   onTogglePageReviewed,
+  onReplacePage,
 }: ImagePreviewProps) {
   // 페이지 이미지 뷰어 모달 상태 (2026-04-26)
   const [viewerPageNumber, setViewerPageNumber] = useState<number | null>(null)
@@ -456,6 +459,7 @@ export function ImagePreview({
             onUpdatePageOcrTotal={onUpdatePageOcrTotal}
             onTogglePageReviewed={onTogglePageReviewed}
             onViewImage={sessionId ? (n) => setViewerPageNumber(n) : undefined}
+            onReplacePage={onReplacePage}
           />
         ))}
       </div>
@@ -554,6 +558,8 @@ interface PageSectionProps {
   onTogglePageReviewed?: (pageNumber: number) => void
   // 원본 스캔 이미지 표시 트리거 (2026-04-26)
   onViewImage?: (pageNumber: number) => void
+  // 페이지 재촬영 (2026-04-26)
+  onReplacePage?: (pageNumber: number, file: File) => Promise<void> | void
 }
 
 // 행 편집/추가용 임시 폼 상태
@@ -627,6 +633,7 @@ function PageSection({
   onUpdatePageOcrTotal,
   onTogglePageReviewed,
   onViewImage,
+  onReplacePage,
 }: PageSectionProps) {
   const { page, items, itemsSum, ocrTotal, sourceFile, valid, hasOcrTotal, reviewed } = result
   const editable = !!onUpdateItem
@@ -637,6 +644,28 @@ function PageSection({
   const [addingNew, setAddingNew] = useState(false)
   const [editingOcrTotal, setEditingOcrTotal] = useState(false)
   const [ocrTotalDraft, setOcrTotalDraft] = useState<string>('')
+  const [replacing, setReplacing] = useState(false)
+  const replaceInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleReplaceClick = () => {
+    if (replacing) return
+    replaceInputRef.current?.click()
+  }
+  const handleReplaceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !onReplacePage) return
+    if (e.target) e.target.value = ''  // 다음에 같은 파일 선택해도 onChange 발생하도록
+    if (!window.confirm(
+      `페이지 ${page}의 OCR 결과를 새 사진으로 교체하시겠습니까?\n` +
+      `기존 ${items.length}개 행과 합계 정보가 새 OCR 결과로 덮어씌워집니다.`
+    )) return
+    setReplacing(true)
+    try {
+      await onReplacePage(page, file)
+    } finally {
+      setReplacing(false)
+    }
+  }
 
   const itemTotal = (i: ComparisonItem) =>
     i.extracted_total_price ?? i.extracted_unit_price * i.extracted_quantity
@@ -823,7 +852,7 @@ function PageSection({
               </div>
             )}
           </div>
-          <div>
+          <div className="flex items-center gap-2">
             {!hasOcrTotal ? (
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
                 OCR 합계 없음
@@ -836,6 +865,39 @@ function PageSection({
               <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
                 ⚠ 불일치 (Δ{formatCurrency(Math.abs((ocrTotal ?? 0) - itemsSum))})
               </span>
+            )}
+            {/* 페이지 재촬영 버튼 (2026-04-26): 같은 page_number의 items + 이미지 교체 */}
+            {onReplacePage && (
+              <>
+                <button
+                  onClick={handleReplaceClick}
+                  disabled={replacing}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition',
+                    replacing
+                      ? 'cursor-wait border-gray-300 bg-gray-100 text-gray-500'
+                      : 'border-orange-300 bg-orange-50 text-orange-700 hover:border-orange-400 hover:bg-orange-100',
+                  )}
+                  title={`페이지 ${page} 다시 촬영하여 OCR 재실행`}
+                >
+                  {replacing ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" /> 재처리 중…
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={12} /> 재촬영
+                    </>
+                  )}
+                </button>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={handleReplaceFile}
+                />
+              </>
             )}
           </div>
         </div>

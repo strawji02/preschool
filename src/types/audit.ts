@@ -232,6 +232,8 @@ export interface AnalyzePageRequest {
   page_number: number
   image: string  // Base64
   source_file_name?: string  // 원본 파일명 (여러 파일 업로드 시, 2026-04-23 추가)
+  // 재촬영 모드 (2026-04-26): true면 같은 page_number의 기존 audit_items 삭제 후 재처리
+  replace_existing?: boolean
 }
 
 export interface AnalyzePageResponse {

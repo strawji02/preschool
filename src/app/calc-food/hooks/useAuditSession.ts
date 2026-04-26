@@ -151,6 +151,8 @@ type AuditAction =
   | { type: 'ADD_ITEM'; item: ComparisonItem }
   | { type: 'UPDATE_PAGE_OCR_TOTAL'; pageNumber: number; ocrTotal: number | null }
   | { type: 'SET_PAGE_REVIEWED'; pageNumber: number; reviewed: boolean }
+  // 페이지 재촬영 — 기존 페이지 items 모두 교체 (2026-04-26)
+  | { type: 'REPLACE_PAGE_ITEMS_AT'; pageNumber: number; items: ComparisonItem[] }
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
   | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
@@ -421,6 +423,17 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
             reviewed: existing?.reviewed ?? false,
           },
         ].sort((a, b) => a.page - b.page),
+      }
+    }
+
+    case 'REPLACE_PAGE_ITEMS_AT': {
+      // 기존 page_number의 items 모두 제거 후 새 items로 교체
+      const filtered = state.items.filter((it) => it.page_number !== action.pageNumber)
+      const newItems = [...filtered, ...action.items]
+      return {
+        ...state,
+        items: newItems,
+        stats: calculateStats(newItems),
       }
     }
 
@@ -974,6 +987,113 @@ export function useAuditSession() {
       }
     },
     [state.sessionId, state.pageTotals],
+  )
+
+  // 페이지 재촬영 — 특정 페이지를 새 사진으로 교체 (2026-04-26)
+  // 기존 audit_items + Storage 이미지 모두 덮어쓰기, page_number 유지
+  const replacePage = useCallback(
+    async (pageNumber: number, file: File) => {
+      if (!state.sessionId) {
+        dispatch({ type: 'SET_ERROR', error: '활성 세션이 없습니다.' })
+        return
+      }
+      if (!isImage(file) && !isPDF(file)) {
+        dispatch({ type: 'SET_ERROR', error: '이미지 또는 PDF만 업로드 가능합니다.' })
+        return
+      }
+      const baseSessionId = state.sessionId
+      const sourceFile = file.name
+
+      try {
+        // 1. 페이지 추출 — 단일 이미지/PDF 첫 페이지만
+        let dataUrl: string
+        if (isImage(file)) {
+          const imgPage = await imageFileToPage(file, pageNumber)
+          dataUrl = imgPage.dataUrl
+        } else {
+          // PDF: 첫 페이지만 사용 (재촬영 시나리오상 단일 페이지가 자연스러움)
+          const pdfPages = await extractPagesFromPDF(file)
+          if (pdfPages.length === 0) throw new Error('PDF에서 페이지를 추출할 수 없습니다')
+          dataUrl = pdfPages[0].dataUrl
+        }
+
+        // 2. analyze API 호출 (replace_existing=true → 기존 items 삭제 후 재처리)
+        const analyzeRes = await fetch('/api/analyze/page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: baseSessionId,
+            page_number: pageNumber,
+            image: extractBase64(dataUrl),
+            source_file_name: sourceFile,
+            replace_existing: true,
+          }),
+        })
+
+        if (!analyzeRes.ok) {
+          let serverErrMsg = ''
+          try {
+            const errBody = await analyzeRes.json()
+            serverErrMsg = errBody?.error || ''
+          } catch { /* ignore */ }
+          throw new Error(serverErrMsg || `재촬영 분석 실패 (HTTP ${analyzeRes.status})`)
+        }
+
+        const analyzeData = await analyzeRes.json()
+        if (!analyzeData.success || !Array.isArray(analyzeData.items)) {
+          throw new Error(analyzeData.error || '재촬영 분석 결과 없음')
+        }
+
+        // 3. state 업데이트 — 기존 페이지 items 삭제 후 새 items로 교체
+        dispatch({
+          type: 'REPLACE_PAGE_ITEMS_AT',
+          pageNumber,
+          items: analyzeData.items as ComparisonItem[],
+        })
+
+        // 4. page_totals 갱신 (해당 페이지의 reviewed=false 리셋)
+        const newOcrTotal =
+          analyzeData.page_total != null ? Number(analyzeData.page_total) : null
+        dispatch({
+          type: 'ADD_PAGE_TOTAL',
+          pageNumber,
+          ocrTotal: newOcrTotal,
+          sourceFile,
+        })
+        // reviewed 상태도 리셋 (재촬영 후 다시 검수 필요)
+        dispatch({ type: 'SET_PAGE_REVIEWED', pageNumber, reviewed: false })
+
+        // 5. pageSourceFiles 업데이트 (해당 페이지의 source 파일명 갱신)
+        // (state.pageSourceFiles는 직접 변경할 수 없으므로 SET_PAGES 액션 활용)
+        const newSources = [...state.pageSourceFiles]
+        newSources[pageNumber - 1] = sourceFile
+        dispatch({ type: 'SET_PAGES', pages: state.pages, sourceFiles: newSources })
+
+        // 6. session 백엔드의 page_totals JSONB 갱신
+        try {
+          const updated = state.pageTotals
+            .filter((p) => p.page !== pageNumber)
+            .concat({
+              page: pageNumber,
+              ocr_total: newOcrTotal,
+              source_file: sourceFile,
+              reviewed: false,
+            })
+            .sort((a, b) => a.page - b.page)
+          await fetch('/api/session/page-totals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: baseSessionId, page_totals: updated }),
+          })
+        } catch (e) {
+          console.warn('재촬영 후 page-totals 동기화 실패:', e)
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '재촬영 처리 오류'
+        dispatch({ type: 'SET_ERROR', error: msg })
+      }
+    },
+    [state.sessionId, state.pages, state.pageSourceFiles, state.pageTotals],
   )
 
   // 추가 업로드 — 기존 세션에 페이지/품목 누적 (2026-04-26)
@@ -1664,6 +1784,8 @@ export function useAuditSession() {
     // 세션 저장/이어가기/추가 업로드 (2026-04-26 추가)
     loadSession,
     extendSession,
+    // Phase 1 검수 단계 — 페이지 재촬영 (2026-04-26)
+    replacePage,
     // Phase 1 검수 단계 — 행 inline edit / 추가 / 삭제 / OCR 합계 수정 (2026-04-26)
     updateItem,
     removeItem,
