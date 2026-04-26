@@ -62,7 +62,44 @@ export function ImagePreview({
 }: ImagePreviewProps) {
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
+  const [isDragOver, setIsDragOver] = useState(false)
   const extendInputRef = useRef<HTMLInputElement | null>(null)
+  // dragenter/leave가 자식 요소 진입 시 깜빡임을 일으키므로 카운터로 안정화
+  const dragCounter = useRef(0)
+
+  // 드래그앤드롭 핸들러 (저장된 세션에서만 활성화 — onExtendUpload prop이 있을 때) (2026-04-26)
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!onExtendUpload) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (!e.dataTransfer.types.includes('Files')) return
+    dragCounter.current += 1
+    setIsDragOver(true)
+  }
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!onExtendUpload) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current = Math.max(0, dragCounter.current - 1)
+    if (dragCounter.current === 0) setIsDragOver(false)
+  }
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!onExtendUpload) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const handleDrop = (e: React.DragEvent) => {
+    if (!onExtendUpload) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current = 0
+    setIsDragOver(false)
+    const dropped = Array.from(e.dataTransfer.files).filter(
+      (f) => f.type === 'application/pdf' || f.type.startsWith('image/'),
+    )
+    if (dropped.length > 0) onExtendUpload(dropped)
+  }
 
   const saveSupplier = () => {
     const trimmed = supplierDraft.trim()
@@ -123,7 +160,26 @@ export function ImagePreview({
   const filesInvolved = new Set(pageSourceFiles.filter(Boolean)).size || 1
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div
+      className="relative mx-auto max-w-6xl p-6"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* 드래그 중 오버레이 (추가 업로드 시각 피드백) */}
+      {isDragOver && onExtendUpload && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-blue-500/20 backdrop-blur-sm">
+          <div className="rounded-2xl border-4 border-dashed border-blue-500 bg-white px-12 py-10 text-center shadow-2xl">
+            <PlusCircle size={48} className="mx-auto mb-3 text-blue-600" />
+            <h3 className="text-xl font-bold text-blue-900">여기에 파일을 놓으세요</h3>
+            <p className="mt-1 text-sm text-blue-700">
+              현재 세션에 페이지를 추가합니다 (PDF · 이미지 여러 장 지원)
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 카드 */}
       <div className="mb-4 rounded-2xl border-2 border-blue-200 bg-blue-50 p-6">
         <div className="flex items-start justify-between">
@@ -144,11 +200,14 @@ export function ImagePreview({
                 <button
                   onClick={() => extendInputRef.current?.click()}
                   className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
-                  title="이 세션에 거래명세표 페이지를 추가합니다 (기존 페이지는 OCR 다시 안 함)"
+                  title="이 세션에 거래명세표 페이지를 추가합니다 (기존 페이지는 OCR 다시 안 함). 화면에 파일을 드래그해서 놓는 것도 가능합니다."
                 >
                   <PlusCircle size={16} />
                   추가 업로드
                 </button>
+                <span className="hidden text-[11px] text-blue-600 lg:inline">
+                  또는 파일을 드래그해서 놓으세요
+                </span>
                 <input
                   ref={extendInputRef}
                   type="file"
