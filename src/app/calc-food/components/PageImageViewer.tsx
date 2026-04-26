@@ -27,8 +27,25 @@ interface PageImageViewerProps {
   onClose: () => void
 }
 
-// 사이드 패널 너비 (Tailwind 기준, lg 이상에선 고정 px)
-const PANEL_CLASS = 'w-1/2 max-w-[640px] min-w-[360px]'
+// 사이드 패널 너비 — 사용자가 드래그로 조정 가능 (2026-04-26)
+const DEFAULT_WIDTH = 640
+const MIN_WIDTH = 320
+const STORAGE_KEY = 'pageImageViewer.width'
+
+function getMaxWidth() {
+  if (typeof window === 'undefined') return 1200
+  return Math.max(MIN_WIDTH, Math.floor(window.innerWidth * 0.85))
+}
+
+function getInitialWidth() {
+  if (typeof window === 'undefined') return DEFAULT_WIDTH
+  const saved = localStorage.getItem(STORAGE_KEY)
+  const num = saved ? Number(saved) : NaN
+  if (Number.isFinite(num) && num >= MIN_WIDTH) {
+    return Math.min(num, getMaxWidth())
+  }
+  return DEFAULT_WIDTH
+}
 
 export function PageImageViewer({
   sessionId,
@@ -44,24 +61,61 @@ export function PageImageViewer({
   const [rotation, setRotation] = useState(0)  // 0, 90, 180, 270
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  const [panelWidth, setPanelWidth] = useState<number>(() => getInitialWidth())
+  const [isResizing, setIsResizing] = useState(false)
   const dragStart = useRef({ x: 0, y: 0 })
   const panelRef = useRef<HTMLDivElement | null>(null)
 
-  // 본 화면이 패널에 가려지지 않도록 body padding-right 자동 조정
+  // 본 화면이 패널에 가려지지 않도록 body padding-right 자동 조정 (2026-04-26: 리사이즈 반영)
   useEffect(() => {
-    const updatePadding = () => {
-      if (panelRef.current) {
-        const w = panelRef.current.getBoundingClientRect().width
-        document.body.style.paddingRight = `${w}px`
-      }
-    }
-    updatePadding()
-    window.addEventListener('resize', updatePadding)
+    document.body.style.paddingRight = `${panelWidth}px`
     return () => {
-      window.removeEventListener('resize', updatePadding)
       document.body.style.paddingRight = ''
     }
+  }, [panelWidth])
+
+  // 너비 변경 시 localStorage 저장 (다음 진입 시 같은 너비로 시작)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(STORAGE_KEY, String(panelWidth))
+  }, [panelWidth])
+
+  // 윈도우 리사이즈 시 max 너비 초과하지 않도록 조정
+  useEffect(() => {
+    const onWinResize = () => {
+      const max = getMaxWidth()
+      setPanelWidth((w) => Math.min(max, w))
+    }
+    window.addEventListener('resize', onWinResize)
+    return () => window.removeEventListener('resize', onWinResize)
   }, [])
+
+  // 리사이즈 핸들 — 패널 좌측 가장자리 드래그
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'ew-resize'
+  }
+
+  useEffect(() => {
+    if (!isResizing) return
+    const handleMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX
+      setPanelWidth(Math.min(getMaxWidth(), Math.max(MIN_WIDTH, newWidth)))
+    }
+    const handleUp = () => {
+      setIsResizing(false)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+  }, [isResizing])
 
   // signed URL fetch
   useEffect(() => {
@@ -143,8 +197,17 @@ export function PageImageViewer({
   return (
     <div
       ref={panelRef}
-      className={`fixed right-0 top-0 bottom-0 z-[60] flex flex-col border-l border-gray-300 bg-gray-900 shadow-2xl ${PANEL_CLASS}`}
+      className="fixed right-0 top-0 bottom-0 z-[60] flex flex-col border-l border-gray-300 bg-gray-900 shadow-2xl"
+      style={{ width: `${panelWidth}px` }}
     >
+      {/* 리사이즈 핸들 — 좌측 가장자리 드래그 (2026-04-26) */}
+      <div
+        onMouseDown={startResize}
+        className={`absolute left-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize transition ${
+          isResizing ? 'bg-blue-500/70' : 'bg-transparent hover:bg-blue-500/40'
+        }`}
+        title="드래그하여 패널 너비 조정"
+      />
       {/* 상단 툴바 */}
       <div className="flex shrink-0 items-center justify-between border-b border-white/20 bg-gray-900 px-3 py-2">
         <div className="min-w-0 text-sm text-white">
