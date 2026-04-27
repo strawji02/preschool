@@ -1,12 +1,16 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { FileText, ClipboardList } from 'lucide-react'
 import type { ComparisonItem, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { InvoiceViewer } from '../InvoiceViewer'
 import { ReportHeader } from './ReportHeader'
 import { ScenarioComparison } from './ScenarioComparison'
 import { ItemBreakdownTable } from './ItemBreakdownTable'
+import { ProposalReport } from './ProposalReport'
 import { formatCurrency, formatNumber } from '@/lib/format'
+import { cn } from '@/lib/cn'
 
 interface ReportViewProps {
   pages: PageImage[]
@@ -22,6 +26,8 @@ interface ReportViewProps {
   onBackToMatching: () => void
   onToggleExclude?: (itemId: string, reason?: string) => void  // 2026-04-21
   onUpdateSupplierName?: (name: string) => void  // 2026-04-21
+  // 제안서 모드 (2026-04-27)
+  sessionId?: string | null
 }
 
 export function ReportView({
@@ -35,7 +41,26 @@ export function ReportView({
   onBackToMatching,
   onToggleExclude,
   onUpdateSupplierName,
+  sessionId,
 }: ReportViewProps) {
+  // 'analysis' = 검수자 분석 화면 (좌측 이미지 + 우측 분석)
+  // 'proposal' = 고객 제출용 제안서 (인포그래픽)
+  const [mode, setMode] = useState<'analysis' | 'proposal'>('analysis')
+
+  // 세션 진입 시 저장된 proposal_extras 로드
+  const [initialExtras, setInitialExtras] = useState<Record<string, unknown> | null>(null)
+  useEffect(() => {
+    if (!sessionId) return
+    fetch(`/api/sessions/${sessionId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.session?.proposal_extras) {
+          setInitialExtras(data.session.proposal_extras)
+        }
+      })
+      .catch((e) => console.warn('proposal_extras 로드 실패:', e))
+  }, [sessionId])
+
   const excludedItems = items.filter(i => i.is_excluded)
   const includedItems = items.filter(i => !i.is_excluded)
   // 세액 포함 총액(원장 총액)으로 집계. extracted_total_price가 없으면 공급가액으로 대체.
@@ -45,6 +70,28 @@ export function ReportView({
   const includedTotal = includedItems.reduce((s, i) => s + itemBilled(i), 0)
   const grandTotal = excludedTotal + includedTotal
 
+  // 제안서 모드: 풀스크린 인포그래픽
+  if (mode === 'proposal') {
+    return (
+      <div className="relative">
+        {/* 모드 전환 버튼 (인쇄 시 숨김) */}
+        <button
+          onClick={() => setMode('analysis')}
+          className="fixed left-4 top-20 z-20 flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow hover:bg-gray-50 print:hidden"
+        >
+          ← 분석 화면
+        </button>
+        <ProposalReport
+          sessionId={sessionId}
+          items={items}
+          ssgScenario={scenarios.ssg}
+          supplierName={supplierName}
+          initialExtras={initialExtras as never}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-[calc(100vh-64px)]">
       {/* 좌측: 이미지 뷰어 (50%) */}
@@ -53,7 +100,7 @@ export function ReportView({
       </div>
 
       {/* 우측: 리포트 (50%) */}
-      <div className="flex w-1/2 flex-col overflow-hidden">
+      <div className="relative flex w-1/2 flex-col overflow-hidden">
         <ReportHeader
           fileName={fileName}
           supplierName={supplierName}
@@ -62,6 +109,15 @@ export function ReportView({
           onBackToMatching={onBackToMatching}
           onUpdateSupplierName={onUpdateSupplierName}
         />
+        {/* 제안서 모드 진입 (2026-04-27) */}
+        <button
+          onClick={() => setMode('proposal')}
+          className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-blue-700"
+          title="고객 제출용 제안서 (인포그래픽 보고서)"
+        >
+          <ClipboardList size={16} />
+          제안서 보기
+        </button>
 
         <div className="flex-1 overflow-y-auto p-6">
           {/* 시나리오 비교 */}

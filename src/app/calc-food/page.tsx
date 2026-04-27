@@ -234,6 +234,7 @@ export default function CalcFoodPage() {
             supplierName={state.supplierName}
             onToggleExclude={toggleExclude}
             onUpdateSupplierName={updateSupplierName}
+            sessionId={state.sessionId}
           />
         )}
 

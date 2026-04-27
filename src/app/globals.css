@@ -43,3 +43,20 @@ input[type='checkbox']:checked {
   background-color: #e67e22;
   border-color: #e67e22;
 }
+
+/* ─── 제안서 인쇄 (2026-04-27) ─── */
+@media print {
+  /* 인쇄 시 색상 정확히 (gradient/배경 보존) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body { background: white !important; }
+  /* A4 여백 */
+  @page { margin: 12mm; size: A4; }
+  /* 페이지 분할 방지 영역 */
+  .print\:break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+  /* placeholder를 인쇄 시 숨김 (편집용 인풋이 완전히 빈칸일 때) */
+  input::placeholder { color: transparent !important; }
+}
+

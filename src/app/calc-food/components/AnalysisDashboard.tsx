@@ -37,6 +37,8 @@ interface AnalysisDashboardProps {
   supplierName?: string | null
   onToggleExclude?: (itemId: string, reason?: string) => void
   onUpdateSupplierName?: (name: string) => void
+  // 제안서 모드 (2026-04-27)
+  sessionId?: string | null
 }
 
 export function AnalysisDashboard({
@@ -60,6 +62,7 @@ export function AnalysisDashboard({
   supplierName,
   onToggleExclude,
   onUpdateSupplierName,
+  sessionId,
 }: AnalysisDashboardProps) {
   if (currentStep === 'matching') {
     return (
@@ -94,6 +97,7 @@ export function AnalysisDashboard({
       onBackToMatching={onBackToMatching}
       onToggleExclude={onToggleExclude}
       onUpdateSupplierName={onUpdateSupplierName}
+      sessionId={sessionId}
     />
   )
 }
