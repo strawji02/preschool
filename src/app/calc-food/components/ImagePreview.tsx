@@ -964,15 +964,21 @@ function PageSection({
                 <div
                   key={item.id}
                   className={cn(
-                    'group grid grid-cols-[32px_minmax(120px,2.2fr)_minmax(72px,1.1fr)_44px_52px_72px_84px_72px_88px_48px] gap-2 border-b px-3 py-2 text-sm last:border-0',
+                    'group grid items-center grid-cols-[32px_minmax(120px,2.2fr)_minmax(72px,1.1fr)_44px_52px_72px_84px_72px_88px_48px] gap-2 border-b px-3 py-2 text-sm last:border-0',
                     rowMismatch ? 'bg-red-50' : 'hover:bg-gray-50',
                   )}
                 >
                   <div className="text-center text-gray-500">{idx + 1}</div>
-                  <div className="truncate" title={item.extracted_name}>
+                  <div
+                    className="line-clamp-2 break-words leading-snug"
+                    title={item.extracted_name}
+                  >
                     {item.extracted_name}
                   </div>
-                  <div className="truncate text-gray-600" title={item.extracted_spec || ''}>
+                  <div
+                    className="line-clamp-2 break-words leading-snug text-gray-600"
+                    title={item.extracted_spec || ''}
+                  >
                     {item.extracted_spec || '-'}
                   </div>
                   <div className="text-center text-gray-600">{item.extracted_unit || '-'}</div>
