@@ -1,6 +1,30 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { GeminiOCRRequest, GeminiOCRResponse, ExtractedItem } from '@/types/audit'
 
+/**
+ * 한국 식자재 OCR 흔한 오인식 보정 사전 (2026-04-28)
+ *
+ * Gemini가 한국어 손글씨/저해상도 스캔에서 자주 혼동하는 문자 → 정확한 표기로 보정.
+ * - 단순 substring replace이므로 부분 일치 케이스도 처리됨 ("판두부 1KG" → "판두부 1KG")
+ * - 사용자 보고 패턴을 모아 점진적으로 추가
+ */
+const OCR_FIXES: Array<{ wrong: string; correct: string }> = [
+  // 두부류 — "판두부"가 표준, "편두부"는 거의 사용되지 않음 (사용자 보고)
+  { wrong: '편두부', correct: '판두부' },
+  // 향후 추가 패턴은 여기에 누적
+]
+
+function applyOcrFixes(text: string | undefined | null): string | undefined {
+  if (!text) return text ?? undefined
+  let fixed = text
+  for (const { wrong, correct } of OCR_FIXES) {
+    if (fixed.includes(wrong)) {
+      fixed = fixed.split(wrong).join(correct)
+    }
+  }
+  return fixed
+}
+
 const EXTRACTION_PROMPT = `당신은 식자재 거래명세서 OCR 전문가입니다.
 이미지에서 품목 리스트와 거래명세표 하단의 합계 금액을 추출하여 JSON 형식으로 반환하세요.
 
@@ -50,6 +74,11 @@ total_price 결정 규칙 (★매우 중요★):
 - ★ 원산지 정보 (국내산/수입산/한국Wn 코드 등) 절대 누락 금지: 식자재 매칭/가격 비교에서 원산지가 핵심 식별 요소이므로 spec 필드에 반드시 보존
 - JSON만 반환 (설명 없이)
 - 단가가 비어있고 총액만 있는 행도 누락 없이 포함 (unit_price=0으로 두고 total_price는 채울 것)
+
+한국어 식자재 표기 가이드 (오인식 방지):
+- 두부 종류는 "판두부 / 모두부 / 손두부 / 연두부 / 순두부"가 표준 표기.
+  "편두부"는 거의 사용되지 않으므로 "편"으로 보이면 "판"의 오독일 가능성이 높음
+- 그 외 "판/편", "솜/송", "켜/거" 등 한국어 자모 비슷한 글자가 보이면 한국 식자재 표준 표기를 우선
 `
 
 function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total: number | null } {
@@ -111,9 +140,13 @@ function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total
       }
     }
 
+    // 한국 식자재 OCR 오인식 보정 (판두부 ↔ 편두부 등)
+    const rawName = String(item.name || '')
+    const rawSpec = item.spec ? String(item.spec) : undefined
+
     return {
-      name: String(item.name || ''),
-      spec: item.spec ? String(item.spec) : undefined,
+      name: applyOcrFixes(rawName) ?? rawName,
+      spec: applyOcrFixes(rawSpec),
       unit: item.unit ? String(item.unit).trim() || undefined : undefined,
       quantity,
       unit_price: unitPrice,
