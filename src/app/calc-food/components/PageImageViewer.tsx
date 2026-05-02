@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   X, ZoomIn, ZoomOut, Maximize2, Loader2, AlertCircle,
-  RotateCcw, RotateCw,
+  RotateCcw, RotateCw, Camera,
 } from 'lucide-react'
 
 interface PageImageViewerProps {
@@ -25,6 +25,8 @@ interface PageImageViewerProps {
   // dataUrl이 있으면(새 OCR 직후) 즉시 사용, 없으면 API에서 signed URL fetch
   dataUrl?: string
   onClose: () => void
+  // 회전 적용 후 재OCR — 같은 page_number로 ImagePreview의 replacePage 호출 (2026-05-04)
+  onReplacePage?: (pageNumber: number, file: File) => Promise<void> | void
 }
 
 // 사이드 패널 너비 — 사용자가 드래그로 조정 가능 (2026-04-26)
@@ -53,6 +55,7 @@ export function PageImageViewer({
   fileName,
   dataUrl,
   onClose,
+  onReplacePage,
 }: PageImageViewerProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(dataUrl ?? null)
   const [loading, setLoading] = useState(!dataUrl)
@@ -203,6 +206,69 @@ export function PageImageViewer({
     setRotation(0)
   }
 
+  // 회전 적용 후 재OCR — Canvas로 회전된 이미지 생성 → File → onReplacePage (2026-05-04)
+  const [applying, setApplying] = useState(false)
+  const handleApplyRotationAndReanalyze = async () => {
+    if (!imageUrl || !onReplacePage) return
+    if (rotation === 0) {
+      window.alert('회전이 적용되어 있지 않습니다. ↺ 또는 ↻ 버튼으로 먼저 회전하세요.')
+      return
+    }
+    if (!window.confirm(
+      `이 페이지를 ${rotation}° 회전된 이미지로 다시 OCR하시겠습니까?\n` +
+      `기존 OCR 결과는 새 결과로 덮어씌워집니다.`
+    )) return
+
+    setApplying(true)
+    try {
+      // 1. 이미지를 fetch로 받아 Blob → ImageBitmap (CORS-safe)
+      let bitmap: ImageBitmap
+      if (imageUrl.startsWith('data:')) {
+        // 새 OCR 직후 dataUrl인 경우 — 직접 변환
+        const blob = await (await fetch(imageUrl)).blob()
+        bitmap = await createImageBitmap(blob)
+      } else {
+        const response = await fetch(imageUrl)
+        if (!response.ok) throw new Error(`이미지 다운로드 실패 (HTTP ${response.status})`)
+        const blob = await response.blob()
+        bitmap = await createImageBitmap(blob)
+      }
+
+      // 2. 회전된 캔버스 생성
+      const radians = (rotation * Math.PI) / 180
+      const isPerpendicular = rotation === 90 || rotation === 270
+      const canvas = document.createElement('canvas')
+      canvas.width = isPerpendicular ? bitmap.height : bitmap.width
+      canvas.height = isPerpendicular ? bitmap.width : bitmap.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('Canvas context 생성 실패')
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate(radians)
+      ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2)
+
+      // 3. Blob → File 변환 (jpeg 0.92 quality)
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('Blob 생성 실패'))),
+          'image/jpeg',
+          0.92,
+        )
+      })
+      const safeFileName = (fileName || `page-${pageNumber}.jpg`).replace(/\.\w+$/, '') + `_rotated_${rotation}.jpg`
+      const file = new File([blob], safeFileName, { type: 'image/jpeg' })
+
+      // 4. 부모로 위임 (replacePage 호출)
+      await onReplacePage(pageNumber, file)
+      onClose()
+    } catch (e) {
+      window.alert('회전 적용 실패: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setApplying(false)
+    }
+  }
+
   const rotateLeft = () => setRotation((r) => (r + 270) % 360)  // -90
   const rotateRight = () => setRotation((r) => (r + 90) % 360)
 
@@ -295,6 +361,39 @@ export function PageImageViewer({
           <Maximize2 size={14} />
           원본
         </button>
+
+        {/* 회전 적용 후 재OCR — rotation > 0이고 onReplacePage prop이 있을 때만 활성 (2026-05-04) */}
+        {onReplacePage && (
+          <>
+            <div className="mx-1 h-5 w-px bg-white/20" />
+            <button
+              onClick={handleApplyRotationAndReanalyze}
+              disabled={applying || rotation === 0 || !imageUrl}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition ${
+                rotation === 0 || !imageUrl
+                  ? 'cursor-not-allowed text-white/30'
+                  : applying
+                  ? 'cursor-wait bg-white/10 text-white/70'
+                  : 'bg-orange-500 text-white hover:bg-orange-600'
+              }`}
+              title={
+                rotation === 0
+                  ? '먼저 ↺/↻로 회전한 후 사용하세요'
+                  : `${rotation}° 회전 적용된 이미지로 OCR 재실행 (기존 결과 덮어쓰기)`
+              }
+            >
+              {applying ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> 처리 중…
+                </>
+              ) : (
+                <>
+                  <Camera size={12} /> 회전 적용 후 재OCR
+                </>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       {/* 이미지 영역 */}

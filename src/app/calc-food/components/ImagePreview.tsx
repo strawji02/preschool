@@ -485,6 +485,7 @@ export function ImagePreview({
           fileName={pageSourceFiles[viewerPageNumber - 1] || undefined}
           dataUrl={pages?.find((p) => p.pageNumber === viewerPageNumber)?.dataUrl}
           onClose={() => setViewerPageNumber(null)}
+          onReplacePage={onReplacePage}
         />
       )}
 
