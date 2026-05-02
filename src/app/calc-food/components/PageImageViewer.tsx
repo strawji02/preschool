@@ -117,8 +117,20 @@ export function PageImageViewer({
     }
   }, [isResizing])
 
-  // signed URL fetch
+  // signed URL fetch — 페이지 변경 시 stale 이미지 방지를 위해 즉시 리셋 (2026-05-04)
   useEffect(() => {
+    // 페이지가 바뀌면 이전 이미지/조작 상태를 즉시 초기화
+    if (dataUrl) {
+      setImageUrl(dataUrl)
+    } else {
+      setImageUrl(null)
+      setLoading(true)
+    }
+    setError(null)
+    setZoom(1)
+    setRotation(0)
+    setPan({ x: 0, y: 0 })
+
     if (dataUrl) return
     let cancelled = false
     fetch(`/api/sessions/${sessionId}/page-image/${pageNumber}`)

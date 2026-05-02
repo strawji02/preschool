@@ -467,6 +467,7 @@ export function ImagePreview({
       {/* 원본 스캔 이미지 모달 (2026-04-26) */}
       {viewerPageNumber != null && sessionId && (
         <PageImageViewer
+          key={viewerPageNumber}
           sessionId={sessionId}
           pageNumber={viewerPageNumber}
           fileName={pageSourceFiles[viewerPageNumber - 1] || undefined}
