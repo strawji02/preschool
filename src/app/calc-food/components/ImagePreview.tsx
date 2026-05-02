@@ -436,6 +436,18 @@ export function ImagePreview({
         </span>
       </div>
 
+      {/* 회전 이미지 안내 (행 누락 방지) — 2026-05-04 */}
+      {pageMismatchCount > 0 && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <AlertCircle size={18} className="shrink-0" />
+          <span>
+            <strong>회전된 사진에서 행 누락이 자주 발생합니다.</strong>{' '}
+            페이지 번호 클릭 → 사이드 패널의 ↺/↻ 회전 버튼으로 정방향 조정 →{' '}
+            페이지 헤더의 <strong>[📷 재촬영]</strong>으로 같은 사진을 다시 업로드하면 OCR 인식률이 개선됩니다.
+          </span>
+        </div>
+      )}
+
       {/* 행 단위 경고 배너 */}
       {rowMismatchCount > 0 && (
         <div className="mb-3 flex items-start gap-2 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
