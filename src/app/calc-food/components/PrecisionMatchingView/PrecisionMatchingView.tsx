@@ -1,19 +1,19 @@
 'use client'
 
 /**
- * 매칭 단계 메인 화면 — 단일 품목 정밀 검수 페이지 (2026-05-04)
+ * 매칭 단계 메인 화면 — 단일 품목 정밀 검수 페이지 (2026-05-04 / r2 2026-05-04)
  *
- * SplitView를 대체. 한 화면에 한 품목만 표시하고 좌→중앙→우 3분할로 비교/조정/선택.
- *  - 좌 (col-3): 기존 업체 품목 정보 (read-only) + 거래명세서 보기
- *  - 중앙 (col-4): 신세계 매칭 + 단위/포장/수량 조정 + 환산 단가 + 절감액
- *  - 우 (col-5): AI 후보 Top 10 (정렬 가능, 절감액 표시) + 수동 DB 검색
- *
- * 네비게이션: ◀ 이전 / 품목 드롭다운 / 다음 ▶ + 키보드 단축키
+ * v2 개선 (스티치 가이드 + ProcureShield AI 참조):
+ *  - 좌(col-3): 정보 카드 그리드 (Spec / Inventory / Unit Price / Total Amount 분리)
+ *  - 중앙(col-4): 매칭 제품 상세 메타 (제품코드 / 카테고리 / 원산지 / 세금구분) + 환산 + 절감액
+ *  - 우(col-5): AI 후보 Top 10 (정규화된 일치율 + 풍부 메타) + 검정 강조 검색 카드 (분리)
+ *  - 일치율 정규화: 후보 중 1등 = 100%, 나머지는 비례
+ *  - 매칭 제품 상세 lazy fetch: /api/products/[id]
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2,
-  AlertTriangle, X, RefreshCw, FileImage, CheckCircle2, CheckCircle,
+  AlertTriangle, FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -37,6 +37,20 @@ interface PrecisionMatchingViewProps {
   onConfirmAllAutoMatched: () => void
   onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
+}
+
+interface ProductDetail {
+  id: string
+  product_code?: string
+  product_name?: string
+  category?: string
+  subcategory?: string
+  origin?: string
+  tax_type?: '과세' | '면세'
+  storage_temp?: string
+  supply_status?: string
+  spec_raw?: string
+  unit_raw?: string
 }
 
 const PACK_UNITS = ['EA', 'BAG', 'BOX', 'PAC', '봉', 'KG', 'L'] as const
@@ -66,7 +80,6 @@ export function PrecisionMatchingView({
   onAutoExcludeUnmatched,
   onProceedToReport,
 }: PrecisionMatchingViewProps) {
-  // 선택된 품목 (전체 items 기준 인덱스)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
   const [sortMode, setSortMode] = useState<SortMode>('match')
@@ -76,7 +89,6 @@ export function PrecisionMatchingView({
 
   const currentItem = items[selectedIndex] ?? null
 
-  // 진행 상태
   const progressStatus = useMemo(
     () => ({
       total: items.length,
@@ -87,7 +99,6 @@ export function PrecisionMatchingView({
     [items],
   )
 
-  // 필터에 맞는 인덱스 목록 (네비게이션용)
   const visibleIndices = useMemo(() => {
     return items
       .map((it, idx) => ({ it, idx }))
@@ -99,13 +110,11 @@ export function PrecisionMatchingView({
       .map(({ idx }) => idx)
   }, [items, filterMode])
 
-  // 현재 위치 (필터 기준)
   const visiblePos = visibleIndices.indexOf(selectedIndex)
 
   const moveToNext = useCallback(() => {
     if (visibleIndices.length === 0) return
     if (visiblePos === -1) {
-      // 필터에서 벗어남: 첫 번째 보이는 항목으로
       setSelectedIndex(visibleIndices[0])
       return
     }
@@ -123,8 +132,6 @@ export function PrecisionMatchingView({
     if (prev != null) setSelectedIndex(prev)
   }, [visibleIndices, visiblePos])
 
-  // ── 신세계 매칭 / 후보 / 검색 상태 (현재 품목 기준) ──
-  // currentItem이 바뀌면 다시 초기화되어야 하므로 key로 관리
   return currentItem ? (
     <div className="flex h-full flex-col bg-gray-50">
       <ProgressBar status={progressStatus} />
@@ -204,9 +211,7 @@ export function PrecisionMatchingView({
               {FILTER_LABEL[m]}
             </button>
           ))}
-          <span className="ml-2 text-xs text-gray-500">
-            ({visibleIndices.length}개)
-          </span>
+          <span className="ml-2 text-xs text-gray-500">({visibleIndices.length}개)</span>
         </div>
       </div>
 
@@ -281,7 +286,6 @@ export function PrecisionMatchingView({
         highlightRowIndex={selectedIndex}
       />
 
-      {/* 키보드 핸들러 */}
       <KeyboardHandler
         onPrev={moveToPrev}
         onNext={moveToNext}
@@ -296,14 +300,12 @@ export function PrecisionMatchingView({
       />
     </div>
   ) : (
-    <div className="flex h-full items-center justify-center text-gray-400">
-      품목이 없습니다.
-    </div>
+    <div className="flex h-full items-center justify-center text-gray-400">품목이 없습니다.</div>
   )
 }
 
 /* ────────────────────────────────────────────────────────── */
-/* 본문: 3분할 (좌: 기존 / 중앙: 신세계 / 우: 후보 + 검색)         */
+/* 본문: 좌(기존) + 중앙(신세계) + 우(후보 + 검색)                */
 /* ────────────────────────────────────────────────────────── */
 
 interface BodyProps {
@@ -325,6 +327,7 @@ function PrecisionMatchBody({
 }: BodyProps) {
   const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>(() => item.ssg_candidates ?? [])
   const [enrichedMatch, setEnrichedMatch] = useState<SupplierMatch | undefined>(item.ssg_match)
+  const [matchDetail, setMatchDetail] = useState<ProductDetail | null>(null)
   const [loadingCandidates, setLoadingCandidates] = useState(false)
   const ssgMatch = enrichedMatch
   const candidates = liveCandidates
@@ -338,7 +341,6 @@ function PrecisionMatchBody({
       ? pricePerKg(item.extracted_unit_price, existingWeightG)
       : null
 
-  // 조정값 (state)
   const [unitWeightG, setUnitWeightG] = useState<number>(() => {
     if (item.adjusted_unit_weight_g) return item.adjusted_unit_weight_g
     if (ssgMatch?.spec_quantity && ssgMatch?.spec_unit) {
@@ -353,12 +355,11 @@ function PrecisionMatchBody({
   const [packUnit, setPackUnit] = useState<string>(item.adjusted_pack_unit ?? ssgMatch?.spec_unit ?? 'EA')
   const [quantity, setQuantity] = useState<number>(item.adjusted_quantity ?? item.extracted_quantity)
 
-  // 검색
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SupplierMatch[]>([])
   const [searching, setSearching] = useState(false)
 
-  // 후보 자동 채움 (세션 복원으로 ssg_candidates가 비었을 때)
+  // 후보 자동 채움
   useEffect(() => {
     if (liveCandidates.length > 0) return
     const q = item.extracted_name?.trim()
@@ -387,7 +388,28 @@ function PrecisionMatchBody({
     }
   }, [item.extracted_name, item.ssg_match, liveCandidates.length])
 
-  // 매칭 정보 enrich 후 단위/포장 자동 채움
+  // 매칭 제품 상세 lazy fetch (제품코드/원산지/카테고리/세금구분)
+  useEffect(() => {
+    if (!ssgMatch?.id) {
+      setMatchDetail(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/products/${ssgMatch.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return
+        if (data.success && data.product) {
+          setMatchDetail(data.product as ProductDetail)
+        }
+      })
+      .catch((e) => console.warn('매칭 제품 상세 fetch 실패:', e))
+    return () => {
+      cancelled = true
+    }
+  }, [ssgMatch?.id])
+
+  // 단위/포장 자동 채우기
   useEffect(() => {
     if (!enrichedMatch) return
     if (item.adjusted_unit_weight_g) return
@@ -406,7 +428,6 @@ function PrecisionMatchBody({
     }
   }, [enrichedMatch, item.adjusted_unit_weight_g, item.adjusted_pack_unit, unitWeightG, packUnit])
 
-  // 신세계 환산 단가
   const ssgPerKg = useMemo(() => {
     if (!ssgMatch) return null
     return computeShinsegaePerKg(
@@ -426,13 +447,15 @@ function PrecisionMatchBody({
   const hasDiscrepancy = useMemo(() => {
     if (!existingWeightG || !unitWeightG) return false
     const ratio =
-      existingWeightG > unitWeightG
-        ? existingWeightG / unitWeightG
-        : unitWeightG / existingWeightG
+      existingWeightG > unitWeightG ? existingWeightG / unitWeightG : unitWeightG / existingWeightG
     return ratio > 4
   }, [existingWeightG, unitWeightG])
 
-  // 후보 정렬
+  // ── 일치율 정규화: 1등 = 100%, 나머지는 비례 ──
+  const maxScore = useMemo(() => {
+    return Math.max(...candidates.map((c) => c.match_score ?? 0), 0.0001)
+  }, [candidates])
+
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
     list.sort((a, b) => {
@@ -440,30 +463,21 @@ function PrecisionMatchBody({
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
       if (sortMode === 'per_kg') {
         const aPk =
-          computeShinsegaePerKg(
-            a.standard_price,
-            { quantity: a.spec_quantity, unit: a.spec_unit },
-            a.ppu,
-          ) ?? Number.MAX_SAFE_INTEGER
+          computeShinsegaePerKg(a.standard_price, { quantity: a.spec_quantity, unit: a.spec_unit }, a.ppu) ??
+          Number.MAX_SAFE_INTEGER
         const bPk =
-          computeShinsegaePerKg(
-            b.standard_price,
-            { quantity: b.spec_quantity, unit: b.spec_unit },
-            b.ppu,
-          ) ?? Number.MAX_SAFE_INTEGER
+          computeShinsegaePerKg(b.standard_price, { quantity: b.spec_quantity, unit: b.spec_unit }, b.ppu) ??
+          Number.MAX_SAFE_INTEGER
         return aPk - bPk
       }
       if (sortMode === 'savings') {
-        const aSav = candidateSavings(a, item, existingTotal)
-        const bSav = candidateSavings(b, item, existingTotal)
-        return bSav - aSav
+        return candidateSavings(b, item, existingTotal) - candidateSavings(a, item, existingTotal)
       }
       return 0
     })
     return list.slice(0, 10)
   }, [candidates, sortMode, item, existingTotal])
 
-  // 수동 검색
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
     setSearching(true)
@@ -482,7 +496,7 @@ function PrecisionMatchBody({
 
   return (
     <div className="grid flex-1 grid-cols-12 gap-3 overflow-hidden p-3">
-      {/* ── 좌: 기존 업체 ── */}
+      {/* ── 좌(col-3): 기존 업체 정보 카드 ── */}
       <section className="col-span-3 flex flex-col rounded-xl border bg-white shadow-sm">
         <div className="flex items-center justify-between border-b px-4 py-2.5 text-sm font-semibold text-gray-700">
           <span>🗄️ 기존 업체 품목 <span className="ml-1 text-xs text-gray-400">Read-only</span></span>
@@ -496,82 +510,132 @@ function PrecisionMatchBody({
           )}
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="mb-3 flex aspect-square w-full items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+          {/* 이미지 + 품목명 */}
+          <div className="mb-3 flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-gray-100 text-gray-300">
             <Package size={48} />
           </div>
-          <div className="space-y-3 text-sm">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-400">Product Name</div>
-              <div className="mt-0.5 font-semibold text-gray-900">{item.extracted_name}</div>
-            </div>
-            {item.extracted_spec && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-gray-400">Specification</div>
-                <div className="mt-0.5 break-all text-gray-700">{item.extracted_spec}</div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-2 border-t pt-3">
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-gray-400">단위 중량</div>
-                <div className="mt-0.5 text-gray-700">
-                  {existingWeightG ? `${formatNumber(existingWeightG)} g` : '-'}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-gray-400">발주 수량</div>
-                <div className="mt-0.5 text-gray-700">
-                  {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
-                </div>
-              </div>
-            </div>
-            <div className="border-t pt-3">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-500">단가 / kg</span>
-                <span className="font-medium text-gray-700">
-                  {existingPerKg ? formatCurrency(existingPerKg) : '-'}
-                </span>
-              </div>
-              <div className="mt-1 flex items-center justify-between">
-                <span className="text-gray-500">단가 / EA</span>
-                <span className="font-medium text-gray-700">{formatCurrency(item.extracted_unit_price)}</span>
-              </div>
-              <div className="mt-3 flex items-center justify-between border-t pt-2 text-base">
-                <span className="font-semibold text-gray-900">총 금액</span>
-                <span className="font-bold text-gray-900">{formatCurrency(existingTotal)}</span>
-              </div>
-            </div>
-            {item.source_file_name && (
-              <div className="border-t pt-2 text-[10px] text-gray-400">
-                📄 {item.source_file_name}
-              </div>
-            )}
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-400">Product Name</div>
+          <div className="mb-3 break-words text-base font-bold text-gray-900">{item.extracted_name}</div>
+
+          {/* SPECIFICATION (전체 폭) */}
+          <div className="mb-3 rounded-lg border bg-gray-50 p-3">
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500">Specification</div>
+            <div className="break-words text-sm text-gray-800">{item.extracted_spec || '-'}</div>
           </div>
+
+          {/* INVENTORY (단위중량 / 발주수량) — 2열 카드 */}
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border bg-gray-50 p-3">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">단위 중량</div>
+              <div className="mt-1 text-base font-semibold text-gray-900">
+                {existingWeightG ? `${formatNumber(existingWeightG)}g` : '-'}
+              </div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 p-3">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">발주 수량</div>
+              <div className="mt-1 text-base font-semibold text-gray-900">
+                {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
+              </div>
+            </div>
+          </div>
+
+          {/* UNIT PRICE / TOTAL — 2열 카드 (강조) */}
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border bg-blue-50 p-3 ring-1 ring-blue-100">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-blue-700">Unit Price</div>
+              <div className="mt-1 text-lg font-bold text-gray-900">
+                {formatCurrency(item.extracted_unit_price)}
+              </div>
+              <div className="text-[10px] text-gray-500">
+                {existingPerKg ? `₩${formatNumber(existingPerKg)}/kg` : `${item.extracted_unit ?? 'EA'}당`}
+              </div>
+            </div>
+            <div className="rounded-lg border bg-blue-100 p-3 ring-1 ring-blue-200">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-blue-800">Total Amount</div>
+              <div className="mt-1 text-lg font-bold text-gray-900">{formatCurrency(existingTotal)}</div>
+              <div className="text-[10px] text-gray-500">총 합계</div>
+            </div>
+          </div>
+
+          {/* 출처 */}
+          {(item.source_file_name || item.page_number) && (
+            <div className="space-y-1 border-t pt-2 text-[11px] text-gray-500">
+              {item.source_file_name && <div className="flex items-center gap-1"><FileImage size={11} /> {item.source_file_name}</div>}
+              {item.page_number != null && <div>페이지: {item.page_number}</div>}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* ── 중앙: 신세계 매칭 + 조정 ── */}
+      {/* ── 중앙(col-4): 신세계 매칭 + 조정 ── */}
       <section className="col-span-4 flex flex-col rounded-xl border-2 border-gray-900 bg-white shadow-md">
         <div className="flex items-center justify-between border-b bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white">
           <span>🛒 신세계 매칭 및 수량 조정</span>
           {ssgMatch && (
-            <span className="rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-medium text-white">
-              ✓ Matched
-            </span>
+            <span className="rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-medium text-white">✓ Matched</span>
           )}
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {!ssgMatch ? (
-            <div className="flex h-40 items-center justify-center text-gray-400">
+            <div className="flex h-40 items-center justify-center text-sm text-gray-400">
               매칭된 신세계 상품이 없습니다. 우측 후보에서 선택하세요.
             </div>
           ) : (
             <>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-500">Matching Product</div>
-              <div className="mb-4 break-all text-base font-semibold text-gray-900">
-                [신세계] {ssgMatch.product_name || (loadingCandidates ? '로딩 중…' : item.extracted_name)}
+              {/* MATCHING PRODUCT */}
+              <div className="mb-3">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500">Matching Product</div>
+                <div className="break-words text-base font-bold text-gray-900">
+                  [신세계] {ssgMatch.product_name || (loadingCandidates ? '로딩 중…' : item.extracted_name)}
+                </div>
+                {/* 메타 chip 행 */}
+                <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                  {matchDetail?.product_code && (
+                    <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                      <Tag size={11} /> {matchDetail.product_code}
+                    </span>
+                  )}
+                  {matchDetail?.category && (
+                    <span className="inline-flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-purple-700">
+                      <Boxes size={11} /> {matchDetail.category}
+                      {matchDetail.subcategory && ` · ${matchDetail.subcategory}`}
+                    </span>
+                  )}
+                  {matchDetail?.origin && (
+                    <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-green-700">
+                      <MapPin size={11} /> {matchDetail.origin}
+                    </span>
+                  )}
+                  {matchDetail?.tax_type && (
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded px-2 py-0.5',
+                        matchDetail.tax_type === '면세'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-amber-100 text-amber-700',
+                      )}
+                    >
+                      {matchDetail.tax_type}
+                    </span>
+                  )}
+                  {matchDetail?.storage_temp && (
+                    <span className="inline-flex items-center gap-1 rounded bg-cyan-100 px-2 py-0.5 text-cyan-700">
+                      <Snowflake size={11} /> {matchDetail.storage_temp}
+                    </span>
+                  )}
+                  {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
+                    <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                      규격 {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                    표준가 {formatCurrency(ssgMatch.standard_price)}
+                  </span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* 조정 인풋 */}
+              <div className="grid grid-cols-2 gap-3 border-t pt-3">
                 <label className="text-sm">
                   <span className="text-xs text-gray-500">단위 중량 (g)</span>
                   <input
@@ -609,16 +673,14 @@ function PrecisionMatchBody({
                 </label>
               </div>
 
+              {/* 환산 단가 */}
               <div className="mt-4 rounded-lg bg-gray-50 p-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600">환산 단가 (₩/kg)</span>
-                  <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
-                    Conversion
-                  </span>
+                  <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">Conversion</span>
                 </div>
                 <div className="mt-1 text-2xl font-bold text-gray-900">
-                  {ssgPerKg ? formatCurrency(ssgPerKg) : '-'}{' '}
-                  <span className="text-sm font-normal text-gray-500">/ kg</span>
+                  {ssgPerKg ? formatCurrency(ssgPerKg) : '-'} <span className="text-sm font-normal text-gray-500">/ kg</span>
                 </div>
                 <div className="mt-1 text-xs text-gray-500">
                   {unitWeightG ? `${unitWeightG}g당 ` : ''}
@@ -626,22 +688,19 @@ function PrecisionMatchBody({
                 </div>
               </div>
 
+              {/* 총 비교 + 절감 */}
               <div
                 className={cn(
                   'mt-3 rounded-lg p-4',
                   savings.isSaving ? 'bg-green-50 ring-1 ring-green-200' : 'bg-red-50 ring-1 ring-red-200',
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-700">총 비교 금액</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700">총 비교 금액</span>
+                  <span className="text-xs text-gray-500">기존 {formatCurrency(existingTotal)}</span>
                 </div>
                 <div className="mt-1 flex items-baseline justify-between">
-                  <span
-                    className={cn(
-                      'text-3xl font-bold',
-                      savings.isSaving ? 'text-green-700' : 'text-red-700',
-                    )}
-                  >
+                  <span className={cn('text-3xl font-bold', savings.isSaving ? 'text-green-700' : 'text-red-700')}>
                     {formatCurrency(ssgTotal)}
                   </span>
                   <span
@@ -650,8 +709,7 @@ function PrecisionMatchBody({
                       savings.isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
                     )}
                   >
-                    {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))} (
-                    {savings.percent.toFixed(1)}%)
+                    {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))} ({savings.percent.toFixed(1)}%)
                   </span>
                 </div>
               </div>
@@ -676,53 +734,63 @@ function PrecisionMatchBody({
         </div>
       </section>
 
-      {/* ── 우: 후보 + 검색 ── */}
-      <section className="col-span-5 flex flex-col rounded-xl border bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b px-4 py-2.5 text-sm font-semibold text-gray-700">
-          <span>🤖 AI 추천 후보 (Top 10)</span>
-          <select
-            value={sortMode}
-            onChange={(e) => onSortChange(e.target.value as SortMode)}
-            className="rounded border border-gray-300 px-2 py-0.5 text-xs"
-          >
-            {(Object.keys(SORT_LABEL) as SortMode[]).map((m) => (
-              <option key={m} value={m}>
-                {SORT_LABEL[m]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3">
-          {sortedCandidates.length === 0 && (
-            <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-center text-xs text-gray-400">
-              {loadingCandidates ? (
-                <span className="flex items-center justify-center gap-1.5">
-                  <Loader2 size={12} className="animate-spin" /> 후보 검색 중…
-                </span>
-              ) : (
-                'AI 추천 후보가 없습니다. 아래 검색을 사용하세요.'
-              )}
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {sortedCandidates.map((c, i) => (
-              <CandidateCard
-                key={c.id}
-                index={i + 1}
-                candidate={c}
-                isSelected={ssgMatch?.id === c.id}
-                item={item}
-                existingTotal={existingTotal}
-                onSelect={() => onSelectCandidate(c)}
-              />
-            ))}
+      {/* ── 우(col-5): 후보 + 검색 (검정 카드 분리) ── */}
+      <section className="col-span-5 flex flex-col gap-3 overflow-hidden">
+        {/* 후보 리스트 (위 70%) */}
+        <div className="flex flex-1 min-h-0 flex-col rounded-xl border bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b px-4 py-2.5 text-sm font-semibold text-gray-700">
+            <span>🤖 AI 추천 후보 (Top 10)</span>
+            <select
+              value={sortMode}
+              onChange={(e) => onSortChange(e.target.value as SortMode)}
+              className="rounded border border-gray-300 px-2 py-0.5 text-xs"
+            >
+              {(Object.keys(SORT_LABEL) as SortMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {SORT_LABEL[m]}
+                </option>
+              ))}
+            </select>
           </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            {sortedCandidates.length === 0 && (
+              <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-center text-xs text-gray-400">
+                {loadingCandidates ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin" /> 후보 검색 중…
+                  </span>
+                ) : (
+                  '아래 검색 카드에서 직접 검색하세요.'
+                )}
+              </div>
+            )}
+            <div className="space-y-2">
+              {sortedCandidates.map((c, i) => (
+                <CandidateCard
+                  key={c.id}
+                  index={i + 1}
+                  candidate={c}
+                  isSelected={ssgMatch?.id === c.id}
+                  item={item}
+                  existingTotal={existingTotal}
+                  maxScore={maxScore}
+                  onSelect={() => onSelectCandidate(c)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
 
-          {/* 수동 검색 */}
-          <div className="mt-5 border-t pt-4">
-            <div className="mb-2 text-[10px] uppercase tracking-wider text-gray-500">수동 DB 검색</div>
-            <div className="flex items-center gap-1 rounded-lg border bg-white px-2 py-1">
+        {/* 검정 강조 검색 카드 (아래 30%) */}
+        <div className="flex max-h-[44%] flex-col overflow-hidden rounded-xl bg-gray-900 shadow-md">
+          <div className="flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-white">
+            <span className="flex items-center gap-1.5">
+              <Search size={14} /> 신세계 DB 직접 검색
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-gray-400">Manual DB Search</span>
+          </div>
+          <div className="border-t border-gray-700 p-3">
+            <div className="flex items-center gap-2 rounded-lg bg-white px-2 py-1">
               <Search size={14} className="text-gray-400" />
               <input
                 type="text"
@@ -731,37 +799,63 @@ function PrecisionMatchBody({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') runSearch(searchQuery)
                 }}
-                placeholder="품목명, 코드 또는 규격 검색…"
+                placeholder="품목명, 코드, 규격으로 신세계 DB 검색…"
                 className="flex-1 border-none bg-transparent text-sm focus:outline-none"
               />
               <button
                 onClick={() => runSearch(searchQuery)}
                 disabled={!searchQuery.trim() || searching}
-                className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {searching ? <Loader2 size={12} className="animate-spin" /> : '검색'}
+                {searching ? <Loader2 size={12} className="animate-spin" /> : 'SEARCH'}
               </button>
             </div>
-            {searchResults.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {searchResults.slice(0, 8).map((r) => (
-                  <CandidateCard
-                    key={r.id}
-                    index={0}
-                    candidate={r}
-                    isSelected={ssgMatch?.id === r.id}
-                    item={item}
-                    existingTotal={existingTotal}
-                    onSelect={() => {
-                      onSelectCandidate(r)
-                      setSearchResults([])
-                      setSearchQuery('')
-                    }}
-                    isSearchResult
-                  />
-                ))}
+            <p className="mt-2 text-[11px] text-gray-400">
+              AI 추천에서 원하는 제품을 찾을 수 없을 때 신세계 DB에서 직접 검색합니다.
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto border-t border-gray-700 p-3">
+            {searching && (
+              <div className="flex items-center justify-center gap-1.5 py-4 text-xs text-gray-400">
+                <Loader2 size={12} className="animate-spin" /> 검색 중…
               </div>
             )}
+            {!searching && searchResults.length === 0 && searchQuery && (
+              <div className="py-2 text-center text-xs text-gray-500">검색 결과가 없습니다.</div>
+            )}
+            <div className="space-y-1.5">
+              {searchResults.slice(0, 10).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    onSelectCandidate(r)
+                    setSearchResults([])
+                    setSearchQuery('')
+                  }}
+                  className="flex w-full items-stretch gap-2 rounded-lg bg-white/5 p-2 text-left ring-1 ring-white/10 transition hover:bg-white/10"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white/10 text-gray-400">
+                    <Package size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium text-white" title={r.product_name}>
+                      {r.product_name}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-gray-300">
+                      <span className="font-semibold text-emerald-400">{formatCurrency(r.standard_price)}</span>
+                      {r.spec_quantity && r.spec_unit && <span>· {r.spec_quantity}{r.spec_unit}</span>}
+                      {(() => {
+                        const pk = computeShinsegaePerKg(r.standard_price, { quantity: r.spec_quantity, unit: r.spec_unit }, r.ppu)
+                        return pk ? <span>· ₩{formatNumber(pk)}/kg</span> : null
+                      })()}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center text-[11px] font-medium text-blue-300 underline">
+                    선택
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -770,7 +864,7 @@ function PrecisionMatchBody({
 }
 
 /* ────────────────────────────────────────────────────────── */
-/* 후보 카드 — 풍부한 정보 (절감액, kg당 단가, 일치율)             */
+/* 후보 카드 — 정규화된 일치율 + 풍부 메타 + 절감액              */
 /* ────────────────────────────────────────────────────────── */
 
 interface CandidateCardProps {
@@ -779,8 +873,8 @@ interface CandidateCardProps {
   isSelected: boolean
   item: ComparisonItem
   existingTotal: number
+  maxScore: number
   onSelect: () => void
-  isSearchResult?: boolean
 }
 
 function CandidateCard({
@@ -789,10 +883,11 @@ function CandidateCard({
   isSelected,
   item,
   existingTotal,
+  maxScore,
   onSelect,
-  isSearchResult,
 }: CandidateCardProps) {
-  const matchPct = Math.round((candidate.match_score ?? 0) * 100) / 1
+  // 정규화된 일치율 (1등 = 100%)
+  const matchPct = Math.min(100, Math.round(((candidate.match_score ?? 0) / maxScore) * 100))
   const perKg = computeShinsegaePerKg(
     candidate.standard_price,
     { quantity: candidate.spec_quantity, unit: candidate.spec_unit },
@@ -805,55 +900,82 @@ function CandidateCard({
     <button
       onClick={onSelect}
       className={cn(
-        'flex w-full items-stretch gap-3 rounded-lg border p-2.5 text-left transition',
+        'flex w-full items-stretch gap-3 rounded-lg border p-3 text-left transition',
         isSelected
-          ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-300'
+          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
           : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40',
       )}
     >
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded bg-gray-100 text-gray-400">
-        <Package size={22} />
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+        <Package size={24} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-gray-900" title={candidate.product_name}>
-              {!isSearchResult && index > 0 && <span className="mr-1 text-gray-400">#{index}</span>}
-              {candidate.product_name}
-              {isSelected && <span className="ml-1 text-blue-600">✓</span>}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-gray-400">#{index}</span>
+              {isSelected && (
+                <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">현재 매칭</span>
+              )}
             </div>
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-500">
-              <span>{formatCurrency(candidate.standard_price)}</span>
+            <div
+              className="mt-0.5 break-words text-sm font-semibold text-gray-900"
+              title={candidate.product_name}
+            >
+              {candidate.product_name}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-600">
+              <span className="font-semibold text-gray-900">{formatCurrency(candidate.standard_price)}</span>
               {candidate.spec_quantity && candidate.spec_unit && (
-                <span>· {candidate.spec_quantity}{candidate.spec_unit}</span>
+                <span>· 규격 {candidate.spec_quantity}{candidate.spec_unit}</span>
               )}
               {perKg && <span>· ₩{formatNumber(perKg)}/kg</span>}
-              {candidate.tax_type && <span>· {candidate.tax_type}</span>}
+              {candidate.tax_type && (
+                <span
+                  className={cn(
+                    'rounded px-1 py-0 text-[10px]',
+                    candidate.tax_type === '면세' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+                  )}
+                >
+                  {candidate.tax_type}
+                </span>
+              )}
+              {candidate.category && (
+                <span className="rounded bg-purple-100 px-1 py-0 text-[10px] text-purple-700">
+                  {candidate.category}
+                </span>
+              )}
             </div>
           </div>
-          {!isSearchResult && (
+          <div className="flex shrink-0 flex-col items-end gap-1">
             <span
               className={cn(
-                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                'rounded-md px-2 py-1 text-xs font-bold',
                 matchPct >= 80
                   ? 'bg-green-100 text-green-700'
-                  : matchPct >= 60
+                  : matchPct >= 50
                   ? 'bg-blue-100 text-blue-700'
                   : 'bg-amber-100 text-amber-800',
               )}
             >
-              {matchPct.toFixed(0)}%
+              {matchPct}%
             </span>
-          )}
+            <span className="text-[10px] text-gray-400">일치율</span>
+          </div>
         </div>
         {sav !== 0 && (
-          <div
-            className={cn(
-              'mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold',
-              isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
-            )}
-          >
-            {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))} {isSaving ? '절감' : '추가비용'}
+          <div className="mt-2 flex items-center justify-between border-t pt-2">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold',
+                isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
+              )}
+            >
+              {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))} {isSaving ? '절감' : '추가비용'}
+            </span>
+            <span className="text-[11px] font-medium text-blue-600 underline">
+              {isSelected ? '선택됨' : '선택'}
+            </span>
           </div>
         )}
       </div>
@@ -861,9 +983,6 @@ function CandidateCard({
   )
 }
 
-/* ────────────────────────────────────────────────────────── */
-/* 후보 절감액 (단순 계산: 후보 표준가 × 발주 수량 vs 기존 총액)     */
-/* 정밀 환산은 매칭 후 중앙 패널에서 처리.                         */
 /* ────────────────────────────────────────────────────────── */
 function candidateSavings(
   candidate: SupplierMatch,
@@ -875,9 +994,6 @@ function candidateSavings(
 }
 
 /* ────────────────────────────────────────────────────────── */
-/* 키보드 단축키 핸들러                                          */
-/* ────────────────────────────────────────────────────────── */
-
 interface KeyHandlerProps {
   onPrev: () => void
   onNext: () => void
