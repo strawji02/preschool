@@ -21,10 +21,16 @@ const AnalysisDashboard = dynamic(() => import('./components/AnalysisDashboard')
   loading: () => <LoadingFallback />,
 })
 
-const SplitView = dynamic(() => import('./components/SplitView').then(mod => ({ default: mod.SplitView })), {
-  ssr: false,
-  loading: () => <LoadingFallback />,
-})
+const PrecisionMatchingView = dynamic(
+  () =>
+    import('./components/PrecisionMatchingView').then((mod) => ({
+      default: mod.PrecisionMatchingView,
+    })),
+  {
+    ssr: false,
+    loading: () => <LoadingFallback />,
+  },
+)
 
 const ExcelPreview = dynamic(() => import('./components/ExcelPreview').then(mod => ({ default: mod.ExcelPreview })), {
   ssr: false,
@@ -193,10 +199,10 @@ export default function CalcFoodPage() {
           />
         )}
 
-        {/* 매칭 단계: SplitView 사용 */}
+        {/* 매칭 단계: PrecisionMatchingView (3분할 풀스크린, 2026-05-04) */}
         {state.status === 'analysis' && state.currentStep === 'matching' && (
           <div className="h-[calc(100vh-64px)]">
-            <SplitView
+            <PrecisionMatchingView
               items={state.items}
               pages={state.pages}
               supplierName={state.supplierName || '업체'}
