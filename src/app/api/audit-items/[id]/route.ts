@@ -17,6 +17,11 @@ const ALLOWED_FIELDS = [
   'extracted_supply_amount',
   'extracted_tax_amount',
   'extracted_total_price',
+  // 정밀 검수 조정값 (2026-05-04)
+  'adjusted_quantity',
+  'adjusted_unit_weight_g',
+  'adjusted_pack_unit',
+  'precision_reviewed_at',
 ] as const
 
 export async function PATCH(

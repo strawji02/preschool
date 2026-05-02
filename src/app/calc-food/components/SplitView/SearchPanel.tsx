@@ -18,6 +18,8 @@ interface SearchPanelProps {
   selectedResultIndex: number
   onSelectResultIndex: (index: number) => void
   invoiceSupplierName?: string // 파일명에서 추출한 공급업체명
+  /** 정밀 검수 모달 열기 (스티치 가이드, 2026-05-04) — 신세계 매칭에만 노출 */
+  onOpenPrecision?: (supplier: 'SHINSEGAE') => void
 }
 
 // 단위를 g으로 변환
@@ -142,6 +144,7 @@ export function SearchPanel({
   selectedResultIndex,
   onSelectResultIndex,
   invoiceSupplierName = '업체',
+  onOpenPrecision,
 }: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -427,6 +430,16 @@ export function SearchPanel({
 
               {/* 버튼들 */}
               <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* 정밀 검수 버튼 — 신세계 매칭에만 (스티치 가이드, 2026-05-04) */}
+                {onOpenPrecision && supplier === 'SHINSEGAE' && (
+                  <button
+                    onClick={() => onOpenPrecision('SHINSEGAE')}
+                    className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    title="단일 품목 정밀 검수 (단위 환산 + 후보 비교)"
+                  >
+                    🔍 정밀
+                  </button>
+                )}
                 {onClearMatch && (
                   <button
                     onClick={() => onClearMatch(supplier)}

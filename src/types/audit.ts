@@ -68,6 +68,14 @@ export interface ComparisonItem {
   // - true면 ScenarioComparison 절감액 계산에서 스킵, "비교 불가 품목" 별지로 이동
   // - 기본 false, 미매칭 품목 자동 제외 + 담당자 수동 토글 가능
   is_excluded?: boolean
+
+  // 정밀 검수 (PrecisionView, 2026-05-04 추가)
+  // - 검수자가 신세계 측 단위 중량/포장 단위/수량을 직접 조정한 값
+  // - NULL이면 매칭된 신세계 제품의 기본값 사용
+  adjusted_quantity?: number
+  adjusted_unit_weight_g?: number
+  adjusted_pack_unit?: string
+  precision_reviewed_at?: string
   exclusion_reason?: string  // 선택: 사유 (예: "매칭 없음", "일회성 구매")
 }
 

@@ -10,6 +10,7 @@ import { InvoicePanel } from './InvoicePanel'
 import { SearchPanel } from './SearchPanel'
 import { ProgressBar } from './ProgressBar'
 import { PdfModal } from './PdfModal'
+import { PrecisionView } from '../PrecisionView'
 
 interface SplitViewProps {
   items: ComparisonItem[]
@@ -67,6 +68,10 @@ export function SplitView({
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
   const [pdfViewItemIndex, setPdfViewItemIndex] = useState<number | null>(null)
+
+  // 정밀 검수 모달 상태 (스티치 가이드, 2026-05-04)
+  const [precisionItemId, setPrecisionItemId] = useState<string | null>(null)
+  const precisionItem = precisionItemId ? items.find((i) => i.id === precisionItemId) ?? null : null
 
   // 현재 선택된 품목
   const currentItem = items[selectedIndex] || null
@@ -258,6 +263,7 @@ export function SplitView({
             selectedResultIndex={selectedResultIndex}
             onSelectResultIndex={setSelectedResultIndex}
             invoiceSupplierName={supplierName}
+            onOpenPrecision={() => currentItem && setPrecisionItemId(currentItem.id)}
           />
         </div>
       </div>
@@ -324,6 +330,43 @@ export function SplitView({
         onPageChange={setPdfCurrentPage}
         highlightRowIndex={pdfViewItemIndex ?? undefined}
       />
+
+      {/* 정밀 검수 모달 (스티치 가이드, 2026-05-04) */}
+      {precisionItem && (
+        <PrecisionView
+          item={precisionItem}
+          onClose={() => setPrecisionItemId(null)}
+          onSelectCandidate={(candidate) => {
+            onSelectCandidate(precisionItem.id, 'SHINSEGAE', candidate)
+          }}
+          onExclude={() => {
+            // 비교 제외는 부모가 처리해야 함 — onAutoExcludeUnmatched는 일괄 처리라
+            // 단일 항목 제외는 미구현. 일단 모달 닫기 + 사용자에게 안내.
+            window.alert('단일 품목 비교 제외는 보고서 단계의 행 메뉴에서 가능합니다.')
+            setPrecisionItemId(null)
+          }}
+          onConfirm={async (adjustments) => {
+            // 1. 조정값 DB 저장 (PATCH /api/audit-items/[id])
+            try {
+              await fetch(`/api/audit-items/${precisionItem.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  adjusted_quantity: adjustments.adjusted_quantity,
+                  adjusted_unit_weight_g: adjustments.adjusted_unit_weight_g,
+                  adjusted_pack_unit: adjustments.adjusted_pack_unit,
+                  precision_reviewed_at: new Date().toISOString(),
+                }),
+              })
+            } catch (e) {
+              console.warn('정밀 검수 조정값 저장 실패:', e)
+            }
+            // 2. 매칭 확정
+            onConfirmItem(precisionItem.id, 'SHINSEGAE')
+            setPrecisionItemId(null)
+          }}
+        />
+      )}
     </div>
   )
 }
