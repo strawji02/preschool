@@ -946,6 +946,7 @@ function PageSection({
                     onSave={saveEdit}
                     onCancel={cancelEditOrAdd}
                     no={idx + 1}
+                    originalName={item.extracted_name}
                   />
                 )
               }
@@ -1063,14 +1064,44 @@ interface RowEditorProps {
   onCancel: () => void
   no: number
   isNew?: boolean
+  /** 편집 전 원본 값 (사전 등록 시 wrong 패턴으로 사용, 신규 행 추가 시는 비어있음) */
+  originalName?: string
 }
 
-function RowEditor({ draft, setDraft, onSave, onCancel, no, isNew }: RowEditorProps) {
+function RowEditor({ draft, setDraft, onSave, onCancel, no, isNew, originalName }: RowEditorProps) {
   // 입력 변경 시 자동 계산 — taxMode='manual'일 때만 자동 계산 안 함
   const update = (patch: Partial<RowDraft>) => {
     const merged = { ...draft, ...patch }
     setDraft(recalcDraft(merged))
   }
+
+  // 📚 OCR 보정 사전 등록 — 검수자가 OCR 오인식을 정정한 경우 즉시 등록
+  // 다음 OCR부터 자동으로 같은 보정이 적용됨
+  const handleRegisterCorrection = async () => {
+    const defaultWrong = originalName ?? draft.extracted_name
+    const wrong = window.prompt('오인식 텍스트 (거래명세표에 잘못 추출된 표기)', defaultWrong)?.trim()
+    if (!wrong) return
+    const correct = window.prompt('정확한 표기 (한국 식자재 표준 표기)', draft.extracted_name)?.trim()
+    if (!correct) return
+    if (wrong === correct) {
+      window.alert('오인식과 정확한 표기가 같으면 등록할 수 없습니다.')
+      return
+    }
+    try {
+      const res = await fetch('/api/ocr-corrections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wrong, correct, category: 'general', note: '검수자 행 편집 시 등록' }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || '등록 실패')
+      window.alert(`사전 등록 완료\n  "${wrong}" → "${correct}"\n다음 OCR부터 자동 적용됩니다.`)
+    } catch (e) {
+      window.alert('사전 등록 실패: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  const showRegisterButton = !isNew && !!originalName && originalName !== draft.extracted_name
 
   return (
     <div
@@ -1137,6 +1168,15 @@ function RowEditor({ draft, setDraft, onSave, onCancel, no, isNew }: RowEditorPr
         <button onClick={onCancel} className="rounded border border-gray-300 bg-white p-1 text-gray-700 hover:bg-gray-50" title="취소">
           <X size={14} />
         </button>
+        {showRegisterButton && (
+          <button
+            onClick={handleRegisterCorrection}
+            className="rounded border border-purple-300 bg-purple-50 p-1 text-purple-700 hover:bg-purple-100"
+            title="이 보정을 OCR 사전에 등록 (다음 OCR부터 자동 적용)"
+          >
+            📚
+          </button>
+        )}
       </div>
       {/* 자동 계산 모드 안내 */}
       <div className="col-span-10 mt-1 flex items-center gap-3 text-[11px] text-gray-600">

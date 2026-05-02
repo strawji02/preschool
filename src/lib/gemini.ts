@@ -1,49 +1,71 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { createAdminClient } from '@/lib/supabase/admin'
 import type { GeminiOCRRequest, GeminiOCRResponse, ExtractedItem } from '@/types/audit'
 
 /**
- * 한국 식자재 OCR 흔한 오인식 보정 사전 (2026-04-28)
+ * 한국 식자재 OCR 흔한 오인식 보정 사전 (2026-04-28 → 2026-05-02 DB 이전)
  *
- * Gemini가 한국어 손글씨/저해상도 스캔에서 자주 혼동하는 문자 → 정확한 표기로 보정.
- * - 단순 substring replace이므로 부분 일치 케이스도 처리됨 ("판두부 1KG" → "판두부 1KG")
- * - 사용자 보고 패턴을 모아 점진적으로 추가
+ * - DB 테이블 ocr_corrections에서 매 OCR 호출 시 로드 (TTL 5분 메모리 캐시)
+ * - 검수자가 행 편집 시 [📚 사전 등록]으로 직접 추가 → 코드 배포 없이 누적
+ * - DB 로드 실패 시 정적 배열(STATIC_FALLBACK)을 fallback으로 사용
  */
-const OCR_FIXES: Array<{ wrong: string; correct: string }> = [
-  // 두부류 — "판두부"가 표준, "편두부"는 거의 사용되지 않음
+
+// DB 로드 실패 시 fallback (배포 직후/네트워크 단절 등에 대비)
+const STATIC_FALLBACK: Array<{ wrong: string; correct: string }> = [
   { wrong: '편두부', correct: '판두부' },
-  // 한국 식자재 공급사명 (사용자 보고, 2026-04-29)
-  { wrong: '이초웰', correct: '이츠웰' },     // 계란/다진마늘 공급사 — 47건
-  { wrong: '증가집', correct: '종가집' },     // 김치 공급사 — 3건
-  // 굿픽 (식자재 공급사) 변형 — 픽 글자가 다양한 글자로 오인식됨 — 총 19건
+  { wrong: '이초웰', correct: '이츠웰' },
+  { wrong: '증가집', correct: '종가집' },
   { wrong: '굿떡', correct: '굿픽' },
   { wrong: '굿팩', correct: '굿픽' },
   { wrong: '굿핏', correct: '굿픽' },
   { wrong: '굿박', correct: '굿픽' },
   { wrong: '굿곡', correct: '굿픽' },
   { wrong: '긋픽', correct: '굿픽' },
-  // 나물 — 숙주가 표준, 속주는 오독 (사용자 보고, 2026-05-02)
   { wrong: '속주', correct: '숙주' },
-  // 마차촌 (어묵 공급사) — 차→자 오독
   { wrong: '마자촌', correct: '마차촌' },
   { wrong: '마자춘', correct: '마차촌' },
-  // 정육 부위 — 앞→암 오독 (사용자 보고, 2026-05-02)
   { wrong: '돈암다리', correct: '돈앞다리' },
-  { wrong: '소암다리', correct: '소앞다리' },  // 예방 (DB에는 미발견)
-  // 무우 — 글자 순서 오독 (사용자 보고, 2026-05-04)
+  { wrong: '소암다리', correct: '소앞다리' },
   { wrong: '세척우무', correct: '세척무우' },
-  // 깐감자 — "쌈/깐", "감/김" 자모 오독 (사용자 보고, 2026-05-05)
   { wrong: '쌈김자', correct: '깐감자' },
   { wrong: '깐김자', correct: '깐감자' },
-  // 삼승 (닭고기 공급사) — "승" → "송" 모음 오독
-  { wrong: '삼송 ', correct: '삼승 ' },         // 단어 경계 보존을 위해 공백 포함
-  { wrong: '삼송프리미엄', correct: '삼승프리미엄' },  // 붙여 쓴 케이스
-  // 향후 추가 패턴은 여기에 누적
+  { wrong: '삼송 ', correct: '삼승 ' },
+  { wrong: '삼송프리미엄', correct: '삼승프리미엄' },
 ]
 
-function applyOcrFixes(text: string | undefined | null): string | undefined {
+// 메모리 캐시 — Vercel serverless에서 cold start마다 초기화되지만 warm 호출 사이엔 재사용됨
+type FixRule = { wrong: string; correct: string }
+const CACHE_TTL_MS = 5 * 60 * 1000  // 5분
+let fixesCache: { fixes: FixRule[]; loadedAt: number } | null = null
+
+async function loadOcrFixes(): Promise<FixRule[]> {
+  if (fixesCache && Date.now() - fixesCache.loadedAt < CACHE_TTL_MS) {
+    return fixesCache.fixes
+  }
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('ocr_corrections')
+      .select('wrong, correct')
+      .eq('is_active', true)
+    if (error) throw error
+    if (data && data.length > 0) {
+      const fixes = data as FixRule[]
+      fixesCache = { fixes, loadedAt: Date.now() }
+      return fixes
+    }
+  } catch (e) {
+    console.warn('[OCR FIXES] DB 로드 실패, 정적 fallback 사용:', e)
+  }
+  // fallback (DB 비어있거나 오류 시)
+  fixesCache = { fixes: STATIC_FALLBACK, loadedAt: Date.now() }
+  return STATIC_FALLBACK
+}
+
+function applyOcrFixesSync(text: string | undefined | null, fixes: FixRule[]): string | undefined {
   if (!text) return text ?? undefined
   let fixed = text
-  for (const { wrong, correct } of OCR_FIXES) {
+  for (const { wrong, correct } of fixes) {
     if (fixed.includes(wrong)) {
       fixed = fixed.split(wrong).join(correct)
     }
@@ -127,7 +149,7 @@ total_price 결정 규칙 (★매우 중요★):
 - 그 외 "판/편", "솜/송", "켜/거", "앞/암", "무/우", "승/송", "감/김" 등 한국어 자모/순서가 비슷한 글자가 보이면 한국 식자재 표준 표기를 우선
 `
 
-function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total: number | null } {
+function parseGeminiResponse(text: string, fixes: FixRule[]): { items: ExtractedItem[]; page_total: number | null } {
   // Remove markdown code blocks if present
   let cleanText = text.trim()
   if (cleanText.startsWith('```json')) {
@@ -191,8 +213,8 @@ function parseGeminiResponse(text: string): { items: ExtractedItem[]; page_total
     const rawSpec = item.spec ? String(item.spec) : undefined
 
     return {
-      name: applyOcrFixes(rawName) ?? rawName,
-      spec: applyOcrFixes(rawSpec),
+      name: applyOcrFixesSync(rawName, fixes) ?? rawName,
+      spec: applyOcrFixesSync(rawSpec, fixes),
       unit: item.unit ? String(item.unit).trim() || undefined : undefined,
       quantity,
       unit_price: unitPrice,
@@ -240,6 +262,9 @@ export async function extractItemsFromImage(
   // 2.5-flash: 2.0-flash보다 OCR 품질 개선, 무료 티어 10 RPM / 250K TPM / 500 RPD
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
+  // 보정 사전 로드 (DB + 5분 캐시) — 첫 호출 시만 DB 조회
+  const fixes = await loadOcrFixes()
+
   // 서버 내 재시도: Vercel maxDuration(60s) 초과 방지 위해 최대 2회 (OCR 7s + 10s + OCR 7s ≈ 24s)
   // 나머지 재시도는 클라이언트가 실패 페이지 큐를 통해 재실행 (useAuditSession)
   const MAX_ATTEMPTS = 2
@@ -262,7 +287,7 @@ export async function extractItemsFromImage(
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Gemini OCR raw]', text.slice(0, 2000))
       }
-      const { items, page_total } = parseGeminiResponse(text)
+      const { items, page_total } = parseGeminiResponse(text, fixes)
 
       const validItems = items.filter(
         (item) =>
