@@ -50,8 +50,13 @@ export function PrecisionView({
   onSelectCandidate,
   onResearch,
 }: PrecisionViewProps) {
-  const ssgMatch = item.ssg_match
-  const candidates = item.ssg_candidates ?? []
+  // 세션 복원 시 ssg_match.product_name이 비어있을 수 있으므로 lazy fetch.
+  // ssg_candidates도 비어있으면 extracted_name으로 자동 검색해 채움.
+  const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>(() => item.ssg_candidates ?? [])
+  const [enrichedMatch, setEnrichedMatch] = useState<SupplierMatch | undefined>(item.ssg_match)
+  const [loadingCandidates, setLoadingCandidates] = useState(false)
+  const ssgMatch = enrichedMatch
+  const candidates = liveCandidates
 
   // 기존 업체 환산 단가 (1kg당)
   const existingWeightG = parseSpecToGrams(item.extracted_spec)
@@ -112,6 +117,25 @@ export function PrecisionView({
     return ratio > 4  // 4배 이상 차이
   }, [existingWeightG, unitWeightG])
 
+  // 매칭 제품 enrich 후 단위 중량/포장 단위 자동 채우기 (검수자가 아직 조정하지 않은 경우)
+  useEffect(() => {
+    if (!enrichedMatch) return
+    if (item.adjusted_unit_weight_g) return // 검수자 조정값 우선
+    if (unitWeightG > 0) return // 이미 채워짐
+    if (enrichedMatch.spec_quantity && enrichedMatch.spec_unit) {
+      const u = enrichedMatch.spec_unit.toUpperCase()
+      let g = 0
+      if (u === 'KG') g = enrichedMatch.spec_quantity * 1000
+      else if (u === 'G') g = enrichedMatch.spec_quantity
+      else if (u === 'L') g = enrichedMatch.spec_quantity * 1000
+      else if (u === 'ML') g = enrichedMatch.spec_quantity
+      if (g > 0) setUnitWeightG(g)
+    }
+    if (!item.adjusted_pack_unit && enrichedMatch.spec_unit && packUnit === 'EA') {
+      setPackUnit(enrichedMatch.spec_unit.toUpperCase())
+    }
+  }, [enrichedMatch, item.adjusted_unit_weight_g, item.adjusted_pack_unit, unitWeightG, packUnit])
+
   // ESC 닫기
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -125,15 +149,15 @@ export function PrecisionView({
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  // Manual DB 검색
+  // Manual DB 검색 — API 응답: { success, products: [...] }
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
     setSearching(true)
     try {
       const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
       const data = await res.json()
-      if (data.success && Array.isArray(data.results)) {
-        setSearchResults(data.results)
+      if (data.success && Array.isArray(data.products)) {
+        setSearchResults(data.products as SupplierMatch[])
       }
     } catch (e) {
       console.warn('manual search 실패:', e)
@@ -141,6 +165,33 @@ export function PrecisionView({
       setSearching(false)
     }
   }, [])
+
+  // AI 후보 자동 채움 — 세션 복원 시 ssg_candidates가 비어있으면 extracted_name으로 검색.
+  // 매칭된 제품 product_name이 비어있으면 검색 결과에서 동일 id를 찾아 enrich.
+  useEffect(() => {
+    if (liveCandidates.length > 0) return
+    const q = item.extracted_name?.trim()
+    if (!q) return
+    let cancelled = false
+    setLoadingCandidates(true)
+    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return
+        if (data.success && Array.isArray(data.products)) {
+          const products = data.products as SupplierMatch[]
+          setLiveCandidates(products)
+          // 매칭 제품명이 비어있으면 후보 목록에서 같은 id 찾아 enrich
+          if (item.ssg_match && !item.ssg_match.product_name) {
+            const found = products.find((p) => p.id === item.ssg_match!.id)
+            if (found) setEnrichedMatch({ ...item.ssg_match, ...found })
+          }
+        }
+      })
+      .catch((e) => console.warn('candidates 자동 검색 실패:', e))
+      .finally(() => { if (!cancelled) setLoadingCandidates(false) })
+    return () => { cancelled = true }
+  }, [item.extracted_name, item.ssg_match, liveCandidates.length])
 
   const handleResearch = async () => {
     if (!onResearch) return
@@ -277,7 +328,7 @@ export function PrecisionView({
                 </div>
                 <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-500">Matching Product</div>
                 <div className="mb-4 text-base font-semibold text-gray-900">
-                  [신세계] {ssgMatch.product_name}
+                  [신세계] {ssgMatch.product_name || (loadingCandidates ? '로딩 중…' : item.extracted_name)}
                 </div>
 
                 {/* 조정 인풋 그리드 */}
@@ -379,7 +430,13 @@ export function PrecisionView({
             <div className="space-y-2">
               {candidates.length === 0 && (
                 <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-center text-xs text-gray-400">
-                  AI 추천 후보가 없습니다.
+                  {loadingCandidates ? (
+                    <span className="flex items-center justify-center gap-1.5">
+                      <Loader2 size={12} className="animate-spin" /> 후보 검색 중…
+                    </span>
+                  ) : (
+                    'AI 추천 후보가 없습니다.'
+                  )}
                 </div>
               )}
               {candidates.slice(0, 5).map((c, i) => {
