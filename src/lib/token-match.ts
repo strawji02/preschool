@@ -61,15 +61,32 @@ export function getTokenMatchRatio(
       matched += 1
       continue
     }
-    // 4자 이상 토큰: prefix 2~4자가 product에 substring으로 포함되면 부분 매칭 (0.5점)
+    // 4자 이상 토큰: 한국어 합성어 prefix/suffix 부분 매칭
+    // 한국어 관행: 메인 명사가 뒤에 옴 → suffix 매칭에 더 높은 가중치
+    // 예: "데친우거지" suffix "우거지" → "데친배추우거지" 매칭 (메인 명사) → 0.7
+    //     "데친우거지" prefix "데친" → "건데친무청시래기" 매칭 (수식어) → 0.3
     if (t.length >= 4) {
-      for (let len = Math.min(t.length, 4); len >= 2; len--) {
-        const sub = t.slice(0, len)
+      let suffixMatched = false
+      let prefixMatched = false
+      // 1) suffix 매칭 (메인 명사 — 한국어 합성어 뒷부분이 보통 핵심)
+      for (let len = Math.min(t.length - 1, 4); len >= 2; len--) {
+        const sub = t.slice(t.length - len)
         if (sub.length >= 2 && n.includes(sub)) {
-          matched += 0.5
+          suffixMatched = true
           break
         }
       }
+      // 2) prefix 매칭 (수식어 — 약한 신호)
+      for (let len = Math.min(t.length, 4); len >= 2; len--) {
+        const sub = t.slice(0, len)
+        if (sub.length >= 2 && n.includes(sub)) {
+          prefixMatched = true
+          break
+        }
+      }
+      if (suffixMatched && prefixMatched) matched += 1.0  // 둘 다 매칭 → 강함
+      else if (suffixMatched) matched += 0.7  // 메인 명사 매칭
+      else if (prefixMatched) matched += 0.3  // 수식어만 매칭
     }
   }
   return queryTokens.length > 0 ? matched / queryTokens.length : 0
