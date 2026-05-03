@@ -68,6 +68,116 @@ const FILTER_LABEL: Record<FilterMode, string> = {
 }
 
 /* ────────────────────────────────────────────────────────── */
+/* 토큰화 + 공통 토큰 헬퍼 (한국어 어절 단순 분리)                 */
+/* ────────────────────────────────────────────────────────── */
+function tokenize(text: string | undefined | null): string[] {
+  if (!text) return []
+  return text
+    .toLowerCase()
+    .split(/[\s,./()※*+|·#\-\[\]]+/)
+    .filter((t) => t.length >= 2)
+}
+
+function getCommonTokens(...texts: (string | undefined | null)[]): Set<string> {
+  // 모든 텍스트에 공통으로 등장하는 토큰 (2자 이상)
+  const allSets = texts.filter(Boolean).map((t) => new Set(tokenize(t)))
+  if (allSets.length < 2) return new Set()
+  const [first, ...rest] = allSets
+  const common = new Set<string>()
+  for (const tok of first) {
+    if (rest.every((s) => s.has(tok))) common.add(tok)
+  }
+  return common
+}
+
+/** 텍스트 내 공통 토큰을 강조 표시 (녹색 굵게) */
+function HighlightedText({
+  text,
+  commonTokens,
+  baseClassName = '',
+  highlightClassName = 'font-bold text-emerald-600',
+}: {
+  text: string | undefined | null
+  commonTokens: Set<string>
+  baseClassName?: string
+  highlightClassName?: string
+}) {
+  if (!text) return null
+  // 공백/구두점 단위로 분할 (구두점도 보존)
+  const parts = text.split(/(\s+|[,.()/])/)
+  return (
+    <span className={baseClassName}>
+      {parts.map((p, i) => {
+        const lower = p.toLowerCase()
+        const isCommon = lower.length >= 2 && commonTokens.has(lower)
+        return (
+          <span key={i} className={isCommon ? highlightClassName : undefined}>
+            {p}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+/* ────────────────────────────────────────────────────────── */
+/* 토큰 기반 신뢰도 — 검색어와 후보 product_name 비교             */
+/* ────────────────────────────────────────────────────────── */
+interface MatchConfidence {
+  label: string
+  bgColor: string
+  textColor: string
+  matchRatio: number  // 정렬용 (확실=1.5, 토큰비율 0~1)
+  fullContains: boolean
+}
+
+function getTokenMatchConfidence(
+  query: string | undefined | null,
+  productName: string | undefined | null,
+): MatchConfidence {
+  const q = (query ?? '').toLowerCase().replace(/\s+/g, '')
+  const n = (productName ?? '').toLowerCase().replace(/\s+/g, '')
+  const fullContains = q.length >= 2 && (n.includes(q) || q.includes(n))
+
+  if (fullContains) {
+    return {
+      label: '확실',
+      bgColor: 'bg-emerald-200',
+      textColor: 'text-emerald-900',
+      matchRatio: 1.5,
+      fullContains: true,
+    }
+  }
+
+  // 한국어 합성어 대응: 토큰 자체 매칭 + substring 부분 매칭
+  const queryTokens = tokenize(query)
+  const productSet = new Set(tokenize(productName))
+  let matched = 0
+  for (const t of queryTokens) {
+    if (productSet.has(t)) {
+      matched += 1
+      continue
+    }
+    // 4자 이상 토큰: prefix 2~3자가 product 어딘가에 포함되면 부분 매칭 (절반 점수)
+    if (t.length >= 4) {
+      for (let len = Math.min(t.length, 4); len >= 2; len--) {
+        const sub = t.slice(0, len)
+        if (sub.length >= 2 && n.includes(sub)) {
+          matched += 0.5
+          break
+        }
+      }
+    }
+  }
+  const ratio = queryTokens.length > 0 ? matched / queryTokens.length : 0
+
+  if (ratio >= 0.7) return { label: '강함', bgColor: 'bg-green-100', textColor: 'text-green-700', matchRatio: ratio, fullContains: false }
+  if (ratio >= 0.4) return { label: '보통', bgColor: 'bg-blue-100', textColor: 'text-blue-700', matchRatio: ratio, fullContains: false }
+  if (ratio > 0)    return { label: '약함', bgColor: 'bg-amber-100', textColor: 'text-amber-700', matchRatio: ratio, fullContains: false }
+  return { label: '참고', bgColor: 'bg-gray-100', textColor: 'text-gray-500', matchRatio: 0, fullContains: false }
+}
+
+/* ────────────────────────────────────────────────────────── */
 /* 단순 환산 절감액 (후보별) — 표준가 × 수량                     */
 /* ────────────────────────────────────────────────────────── */
 function candidateSavings(c: SupplierMatch, item: ComparisonItem, existingTotal: number): number {
@@ -122,6 +232,8 @@ export function PrecisionMatchingView({
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
   const [rematching, setRematching] = useState(false)
   const [rematchResult, setRematchResult] = useState<{ rematched: number; stillUnmatched: number; total: number } | null>(null)
+  // 매칭 제품 상세 (부모로 끌어올려 양쪽 패널의 commonTokens 계산용)
+  const [matchDetail, setMatchDetail] = useState<ProductDetail | null>(null)
 
   const runRematch = useCallback(async () => {
     if (!sessionId || rematching) return
@@ -261,22 +373,45 @@ export function PrecisionMatchingView({
           filterMode={filterMode}
         />
 
-        {/* 중앙(col-5): 상하 분할 */}
-        <section className="col-span-5 flex min-h-0 flex-col gap-3">
-          <ExistingItemDetail
-            item={currentItem}
-            onOpenImage={pages.length > 0 ? () => setIsPdfModalOpen(true) : undefined}
-          />
-          <ShinsegaeMatching
-            key={currentItem.id}
-            item={currentItem}
-            onSelectCandidate={(c) => onSelectCandidate(currentItem.id, 'SHINSEGAE', c)}
-            onConfirm={() => {
-              onConfirmItem(currentItem.id, 'SHINSEGAE')
-              moveToNext()
-            }}
-          />
-        </section>
+        {/* 중앙(col-5): 상하 분할 — commonTokens로 동일 텍스트 색상 매칭 */}
+        {(() => {
+          const existingText = [
+            currentItem.extracted_name,
+            currentItem.extracted_spec,
+            currentItem.extracted_unit,
+          ].filter(Boolean).join(' ')
+          const ssgText = [
+            currentItem.ssg_match?.product_name,
+            matchDetail?.origin,
+            matchDetail?.category,
+            matchDetail?.subcategory,
+            currentItem.ssg_match?.spec_quantity != null && currentItem.ssg_match?.spec_unit
+              ? `${currentItem.ssg_match.spec_quantity}${currentItem.ssg_match.spec_unit}`
+              : undefined,
+          ].filter(Boolean).join(' ')
+          const commonTokens = getCommonTokens(existingText, ssgText)
+          return (
+            <section className="col-span-5 flex min-h-0 flex-col gap-3">
+              <ExistingItemDetail
+                item={currentItem}
+                onOpenImage={pages.length > 0 ? () => setIsPdfModalOpen(true) : undefined}
+                commonTokens={commonTokens}
+              />
+              <ShinsegaeMatching
+                key={currentItem.id}
+                item={currentItem}
+                onSelectCandidate={(c) => onSelectCandidate(currentItem.id, 'SHINSEGAE', c)}
+                onConfirm={() => {
+                  onConfirmItem(currentItem.id, 'SHINSEGAE')
+                  moveToNext()
+                }}
+                commonTokens={commonTokens}
+                matchDetail={matchDetail}
+                setMatchDetail={setMatchDetail}
+              />
+            </section>
+          )
+        })()}
 
         {/* 우(col-4): 후보 + 검색 (검색은 하단 고정) */}
         <CandidatesAndSearchPanel
@@ -560,9 +695,11 @@ function ItemListPanel({
 function ExistingItemDetail({
   item,
   onOpenImage,
+  commonTokens,
 }: {
   item: ComparisonItem
   onOpenImage?: () => void
+  commonTokens: Set<string>
 }) {
   const existingWeightG = parseSpecToGrams(item.extracted_spec)
   const total = getExistingTotal(item)
@@ -570,6 +707,18 @@ function ExistingItemDetail({
     existingWeightG && item.extracted_quantity > 0
       ? pricePerKg(item.extracted_unit_price, existingWeightG)
       : null
+
+  // 부가세 (extracted_tax_amount가 있으면 사용, 없으면 supply/total 차이로 추정)
+  const taxAmount = item.extracted_tax_amount ?? (
+    item.extracted_supply_amount && item.extracted_total_price
+      ? Math.max(0, item.extracted_total_price - item.extracted_supply_amount)
+      : null
+  )
+  const supplyAmount = item.extracted_supply_amount ?? (
+    item.extracted_total_price && taxAmount != null
+      ? item.extracted_total_price - taxAmount
+      : null
+  )
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-white shadow-sm">
@@ -585,47 +734,52 @@ function ExistingItemDetail({
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-400">Product Name</div>
-        <div className="mb-3 break-words text-lg font-bold text-gray-900">{item.extracted_name}</div>
-
-        {/* 4분할 정보 그리드 */}
-        <div className="grid grid-cols-4 gap-2">
-          {/* SPEC (col 2) */}
-          <div className="col-span-2 rounded-lg border bg-gray-50 p-2.5">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">Specification</div>
-            <div className="mt-1 break-words text-xs font-semibold text-gray-800">
-              {item.extracted_spec || '-'}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-gray-50 p-2.5">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">단위 중량</div>
-            <div className="mt-1 text-sm font-semibold text-gray-900">
-              {existingWeightG ? `${formatNumber(existingWeightG)}g` : '-'}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-gray-50 p-2.5">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">발주 수량</div>
-            <div className="mt-1 text-sm font-semibold text-gray-900">
-              {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
-            </div>
-          </div>
-
-          {/* UNIT PRICE / TOTAL (col 4 두 줄) */}
-          <div className="col-span-2 rounded-lg border bg-blue-50 p-2.5 ring-1 ring-blue-100">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-blue-700">Unit Price</div>
-            <div className="mt-1 text-base font-bold text-gray-900">
-              {formatCurrency(item.extracted_unit_price)}
-              <span className="ml-1 text-[10px] font-normal text-gray-500">/{item.extracted_unit ?? 'EA'}</span>
-            </div>
-            {perKg && (
-              <div className="text-[10px] text-gray-500">₩{formatNumber(perKg)} / kg</div>
+        {/* ── 영역 1: 매칭 포인트 (제품명 + 메타 chips) ── */}
+        <div className="mb-3 border-b pb-3">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-400">매칭 포인트</div>
+          <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
+            <HighlightedText text={item.extracted_name} commonTokens={commonTokens} />
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            {item.extracted_spec && (
+              <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                <Boxes size={11} />
+                <HighlightedText text={item.extracted_spec} commonTokens={commonTokens} />
+              </span>
+            )}
+            {item.extracted_unit && (
+              <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                단위 <HighlightedText text={item.extracted_unit} commonTokens={commonTokens} />
+              </span>
             )}
           </div>
-          <div className="col-span-2 rounded-lg border bg-blue-100 p-2.5 ring-1 ring-blue-200">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-blue-800">Total Amount</div>
-            <div className="mt-1 text-base font-bold text-gray-900">{formatCurrency(total)}</div>
-            <div className="text-[10px] text-gray-500">총 합계</div>
-          </div>
+        </div>
+
+        {/* ── 영역 2: 금액 검증 (한 줄 5분할) ── */}
+        <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-gray-400">금액 검증</div>
+        <div className="grid grid-cols-5 gap-1.5">
+          <FinanceCard label="단위 중량" value={existingWeightG ? `${formatNumber(existingWeightG)}g` : '-'} />
+          <FinanceCard
+            label="발주 수량"
+            value={`${formatNumber(item.extracted_quantity)} ${item.extracted_unit ?? 'EA'}`}
+          />
+          <FinanceCard
+            label="Unit Price"
+            value={formatCurrency(item.extracted_unit_price)}
+            sub={perKg ? `₩${formatNumber(perKg)}/kg` : undefined}
+            highlight="blue"
+          />
+          <FinanceCard
+            label="부가세"
+            value={taxAmount != null ? formatCurrency(taxAmount) : '-'}
+            sub={taxAmount === 0 ? '면세' : undefined}
+          />
+          <FinanceCard
+            label="총액"
+            value={formatCurrency(total)}
+            sub={supplyAmount != null && supplyAmount !== total ? `공급가 ${formatCurrency(supplyAmount)}` : undefined}
+            highlight="indigo"
+          />
         </div>
 
         {(item.source_file_name || item.page_number) && (
@@ -641,40 +795,94 @@ function ExistingItemDetail({
   )
 }
 
+/* 금액 검증 카드 (양쪽 패널 공유) */
+function FinanceCard({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string
+  value: string
+  sub?: string
+  highlight?: 'blue' | 'indigo' | 'green' | 'red'
+}) {
+  const colorMap = {
+    blue: 'bg-blue-50 ring-blue-200',
+    indigo: 'bg-indigo-50 ring-indigo-200',
+    green: 'bg-green-50 ring-green-200',
+    red: 'bg-red-50 ring-red-200',
+  } as const
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-2 ring-1',
+        highlight ? colorMap[highlight] : 'bg-gray-50 ring-gray-100',
+      )}
+    >
+      <div className="text-[9px] font-medium uppercase tracking-wider text-gray-500">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-bold text-gray-900" title={value}>{value}</div>
+      {sub && <div className="text-[9px] text-gray-500">{sub}</div>}
+    </div>
+  )
+}
+
 /* ────────────────────────────────────────────────────────── */
 /* 중앙 하단: 신세계 매칭 + 조정                                 */
 /* ────────────────────────────────────────────────────────── */
 function ShinsegaeMatching({
   item,
-  onSelectCandidate,
+  onSelectCandidate: _onSelectCandidate,
   onConfirm,
+  commonTokens,
+  matchDetail,
+  setMatchDetail,
 }: {
   item: ComparisonItem
   onSelectCandidate: (c: SupplierMatch) => void
   onConfirm: () => void
+  commonTokens: Set<string>
+  matchDetail: ProductDetail | null
+  setMatchDetail: (d: ProductDetail | null) => void
 }) {
+  // ssg_match가 부모에서 props로 변경되면 즉시 반영 (P0 버그 fix)
   const [enrichedMatch, setEnrichedMatch] = useState<SupplierMatch | undefined>(item.ssg_match)
-  const [matchDetail, setMatchDetail] = useState<ProductDetail | null>(null)
+  useEffect(() => {
+    setEnrichedMatch(item.ssg_match)
+  }, [item.ssg_match?.id, item.ssg_match])
   const ssgMatch = enrichedMatch
 
   const existingWeightG = parseSpecToGrams(item.extracted_spec)
   const existingTotal = getExistingTotal(item)
 
-  const [unitWeightG, setUnitWeightG] = useState<number>(() => {
-    if (item.adjusted_unit_weight_g) return item.adjusted_unit_weight_g
-    if (ssgMatch?.spec_quantity && ssgMatch?.spec_unit) {
-      const u = ssgMatch.spec_unit.toUpperCase()
-      if (u === 'KG') return ssgMatch.spec_quantity * 1000
-      if (u === 'G') return ssgMatch.spec_quantity
-      if (u === 'L') return ssgMatch.spec_quantity * 1000
-      if (u === 'ML') return ssgMatch.spec_quantity
-    }
-    return 0
-  })
-  const [packUnit, setPackUnit] = useState<string>(item.adjusted_pack_unit ?? ssgMatch?.spec_unit ?? 'EA')
+  // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
+  const [unitWeightG, setUnitWeightG] = useState<number>(0)
+  const [packUnit, setPackUnit] = useState<string>('EA')
   const [quantity, setQuantity] = useState<number>(item.adjusted_quantity ?? item.extracted_quantity)
 
-  // 매칭 상세 lazy fetch
+  // 매칭 변경 시 unitWeightG/packUnit 자동 갱신 (P0 버그 fix — 후보 선택 반영)
+  useEffect(() => {
+    if (!ssgMatch) {
+      if (!item.adjusted_unit_weight_g) setUnitWeightG(0)
+      if (!item.adjusted_pack_unit) setPackUnit('EA')
+      return
+    }
+    // 검수자 조정값 우선
+    if (item.adjusted_unit_weight_g) {
+      setUnitWeightG(item.adjusted_unit_weight_g)
+    } else if (ssgMatch.spec_quantity && ssgMatch.spec_unit) {
+      const u = ssgMatch.spec_unit.toUpperCase()
+      let g = 0
+      if (u === 'KG') g = ssgMatch.spec_quantity * 1000
+      else if (u === 'G') g = ssgMatch.spec_quantity
+      else if (u === 'L') g = ssgMatch.spec_quantity * 1000
+      else if (u === 'ML') g = ssgMatch.spec_quantity
+      setUnitWeightG(g)
+    }
+    setPackUnit(item.adjusted_pack_unit ?? ssgMatch.spec_unit?.toUpperCase() ?? 'EA')
+  }, [ssgMatch?.id, ssgMatch?.spec_quantity, ssgMatch?.spec_unit, item.adjusted_unit_weight_g, item.adjusted_pack_unit])
+
+  // 매칭 상세 lazy fetch (부모로 끌어올림 — commonTokens 계산용)
   useEffect(() => {
     if (!ssgMatch?.id) {
       setMatchDetail(null)
@@ -687,7 +895,6 @@ function ShinsegaeMatching({
         if (cancelled) return
         if (data.success && data.product) {
           setMatchDetail(data.product as ProductDetail)
-          // 매칭 제품명 enrich
           if (!ssgMatch.product_name && data.product.product_name) {
             setEnrichedMatch({ ...ssgMatch, product_name: data.product.product_name })
           }
@@ -697,7 +904,7 @@ function ShinsegaeMatching({
     return () => {
       cancelled = true
     }
-  }, [ssgMatch?.id])
+  }, [ssgMatch?.id, setMatchDetail])
 
   // ssg_candidates에서 enrich (product_name이 비어있을 때)
   useEffect(() => {
@@ -705,25 +912,6 @@ function ShinsegaeMatching({
     const found = (item.ssg_candidates ?? []).find((c) => c.id === ssgMatch.id)
     if (found && found.product_name) setEnrichedMatch({ ...ssgMatch, ...found })
   }, [item.ssg_candidates, ssgMatch])
-
-  // 단위/포장 자동 채우기
-  useEffect(() => {
-    if (!enrichedMatch) return
-    if (item.adjusted_unit_weight_g) return
-    if (unitWeightG > 0) return
-    if (enrichedMatch.spec_quantity && enrichedMatch.spec_unit) {
-      const u = enrichedMatch.spec_unit.toUpperCase()
-      let g = 0
-      if (u === 'KG') g = enrichedMatch.spec_quantity * 1000
-      else if (u === 'G') g = enrichedMatch.spec_quantity
-      else if (u === 'L') g = enrichedMatch.spec_quantity * 1000
-      else if (u === 'ML') g = enrichedMatch.spec_quantity
-      if (g > 0) setUnitWeightG(g)
-    }
-    if (!item.adjusted_pack_unit && enrichedMatch.spec_unit && packUnit === 'EA') {
-      setPackUnit(enrichedMatch.spec_unit.toUpperCase())
-    }
-  }, [enrichedMatch, item.adjusted_unit_weight_g, item.adjusted_pack_unit, unitWeightG, packUnit])
 
   const ssgPerKg = useMemo(() => {
     if (!ssgMatch) return null
@@ -739,23 +927,31 @@ function ShinsegaeMatching({
     return Math.round((ssgPerKg / 1000) * unitWeightG)
   }, [ssgPerKg, unitWeightG, ssgMatch])
 
-  const ssgTotal = ssgPricePerPack * quantity
+  const ssgSubtotal = ssgPricePerPack * quantity
+  const ssgTaxAmount = matchDetail?.tax_type === '과세' ? Math.round(ssgSubtotal * 0.1) : 0
+  const ssgTotal = ssgSubtotal + ssgTaxAmount
   const savings = computeSavings(existingTotal, ssgTotal)
   const hasDiscrepancy = useMemo(() => {
     if (!existingWeightG || !unitWeightG) return false
-    const ratio =
-      existingWeightG > unitWeightG ? existingWeightG / unitWeightG : unitWeightG / existingWeightG
+    const ratio = existingWeightG > unitWeightG ? existingWeightG / unitWeightG : unitWeightG / existingWeightG
     return ratio > 4
+  }, [existingWeightG, unitWeightG])
+
+  // 차이 항목 검사 (검수자 직관 보조)
+  const diffs = useMemo(() => {
+    const list: { label: string; existing: string; ssg: string }[] = []
+    if (existingWeightG && unitWeightG && existingWeightG !== unitWeightG) {
+      list.push({ label: '단위 중량', existing: `${existingWeightG}g`, ssg: `${unitWeightG}g` })
+    }
+    return list
   }, [existingWeightG, unitWeightG])
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border-2 border-gray-900 bg-white shadow-md">
       <div className="flex items-center justify-between border-b bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white">
-        <span>🛒 신세계 매칭 및 수량 조정</span>
+        <span>🛒 신세계 매칭 자료</span>
         {ssgMatch && (
-          <span className="rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-medium text-white">
-            ✓ Matched
-          </span>
+          <span className="rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-medium text-white">✓ Matched</span>
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
@@ -765,28 +961,40 @@ function ShinsegaeMatching({
           </div>
         ) : (
           <>
-            <div className="mb-3">
-              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                Matching Product
-              </div>
-              <div className="break-words text-base font-bold text-gray-900">
-                [신세계] {ssgMatch.product_name || item.extracted_name}
-              </div>
+            {/* ── 영역 1: 매칭 포인트 ── */}
+            <div className="mb-3 border-b pb-3">
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500">매칭 포인트</div>
+              <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
+                <HighlightedText
+                  text={ssgMatch.product_name || item.extracted_name}
+                  commonTokens={commonTokens}
+                />
+              </h3>
               <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                 {matchDetail?.product_code && (
                   <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
                     <Tag size={11} /> {matchDetail.product_code}
                   </span>
                 )}
-                {matchDetail?.category && (
-                  <span className="inline-flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-purple-700">
-                    <Boxes size={11} /> {matchDetail.category}
-                    {matchDetail.subcategory && ` · ${matchDetail.subcategory}`}
+                {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
+                  <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
+                    <Boxes size={11} /> 규격 {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
                   </span>
                 )}
                 {matchDetail?.origin && (
                   <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-green-700">
-                    <MapPin size={11} /> {matchDetail.origin}
+                    <MapPin size={11} />
+                    <HighlightedText
+                      text={matchDetail.origin}
+                      commonTokens={commonTokens}
+                      highlightClassName="font-bold"
+                    />
+                  </span>
+                )}
+                {matchDetail?.category && (
+                  <span className="inline-flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-purple-700">
+                    {matchDetail.category}
+                    {matchDetail.subcategory && ` · ${matchDetail.subcategory}`}
                   </span>
                 )}
                 {matchDetail?.tax_type && (
@@ -806,98 +1014,101 @@ function ShinsegaeMatching({
                     <Snowflake size={11} /> {matchDetail.storage_temp}
                   </span>
                 )}
-                {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
-                  <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
-                    규격 {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
-                  </span>
-                )}
-                <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-gray-700">
-                  표준가 {formatCurrency(ssgMatch.standard_price)}
-                </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 border-t pt-3">
-              <label className="text-sm">
-                <span className="text-xs text-gray-500">단위 중량 (g)</span>
-                <input
-                  type="number"
-                  value={unitWeightG || ''}
-                  onChange={(e) => setUnitWeightG(Number(e.target.value) || 0)}
-                  className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-base focus:border-blue-500 focus:outline-none"
-                />
-              </label>
-              <label className="text-sm">
-                <span className="text-xs text-gray-500">포장 단위</span>
+            {/* ── 영역 2: 금액 검증 + 조정 (한 줄 5분할) ── */}
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">금액 검증 (수정 가능)</span>
+              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">환산 적용</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              <FinanceInputCard
+                label="단위 중량"
+                value={unitWeightG}
+                suffix="g"
+                onChange={setUnitWeightG}
+              />
+              <FinanceInputCard
+                label="발주 수량"
+                value={quantity}
+                suffix={packUnit}
+                onChange={setQuantity}
+              />
+              <FinanceCard
+                label="환산 단가"
+                value={formatCurrency(ssgPricePerPack)}
+                sub={ssgPerKg ? `₩${formatNumber(ssgPerKg)}/kg` : undefined}
+                highlight="blue"
+              />
+              <FinanceCard
+                label="부가세"
+                value={formatCurrency(ssgTaxAmount)}
+                sub={matchDetail?.tax_type === '면세' ? '면세' : matchDetail?.tax_type === '과세' ? '10%' : undefined}
+              />
+              <FinanceCard
+                label="총액"
+                value={formatCurrency(ssgTotal)}
+                sub={ssgTaxAmount > 0 ? `공급가 ${formatCurrency(ssgSubtotal)}` : undefined}
+                highlight="indigo"
+              />
+            </div>
+
+            {/* 포장 단위 (별도 행) */}
+            <div className="mt-1.5 grid grid-cols-5 gap-1.5">
+              <label className="col-span-2 rounded-lg border bg-gray-50 p-2">
+                <span className="text-[9px] font-medium uppercase tracking-wider text-gray-500">포장 단위</span>
                 <select
                   value={packUnit}
                   onChange={(e) => setPackUnit(e.target.value)}
-                  className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-base focus:border-blue-500 focus:outline-none"
+                  className="mt-0.5 w-full rounded border border-gray-300 bg-white px-1 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
                 >
                   {PACK_UNITS.map((u) => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
               </label>
-              <label className="text-sm">
-                <span className="text-xs text-gray-500">수량</span>
-                <input
-                  type="number"
-                  value={quantity || ''}
-                  onChange={(e) => setQuantity(Number(e.target.value) || 0)}
-                  className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-base focus:border-blue-500 focus:outline-none"
-                />
-              </label>
+              <div className="col-span-3" />
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div className="rounded-lg bg-gray-50 p-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-600">환산 단가</span>
-                  <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
-                    Conversion
-                  </span>
-                </div>
-                <div className="mt-1 text-xl font-bold text-gray-900">
-                  {ssgPerKg ? formatCurrency(ssgPerKg) : '-'}
-                  <span className="ml-1 text-xs font-normal text-gray-500">/ kg</span>
-                </div>
-                <div className="text-[10px] text-gray-500">
-                  {unitWeightG ? `${unitWeightG}g당 ` : ''}
-                  {formatCurrency(ssgPricePerPack)}
-                </div>
-              </div>
-              <div
-                className={cn(
-                  'rounded-lg p-3',
-                  savings.isSaving ? 'bg-green-50 ring-1 ring-green-200' : 'bg-red-50 ring-1 ring-red-200',
-                )}
-              >
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-700">총 비교 금액</span>
-                  <span className="text-gray-500">기존 {formatCurrency(existingTotal)}</span>
-                </div>
-                <div className="mt-1 flex items-baseline justify-between gap-1">
-                  <span className={cn('text-xl font-bold', savings.isSaving ? 'text-green-700' : 'text-red-700')}>
-                    {formatCurrency(ssgTotal)}
-                  </span>
-                  <span
-                    className={cn(
-                      'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-                      savings.isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
-                    )}
-                  >
-                    {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))}
-                  </span>
-                </div>
-                <div className="mt-0.5 text-[10px] text-gray-500">{savings.percent.toFixed(1)}% {savings.isSaving ? '절감' : '추가비용'}</div>
+            {/* 절감 카드 */}
+            <div
+              className={cn(
+                'mt-3 rounded-lg p-3',
+                savings.isSaving ? 'bg-green-50 ring-1 ring-green-200' : 'bg-red-50 ring-1 ring-red-200',
+              )}
+            >
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-gray-700">기존 {formatCurrency(existingTotal)} → 신세계</span>
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-xs font-bold',
+                    savings.isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
+                  )}
+                >
+                  {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))} ({savings.percent.toFixed(1)}%)
+                </span>
               </div>
             </div>
+
+            {/* 차이 항목 강조 (P2 — 검수 직관) */}
+            {diffs.length > 0 && (
+              <div className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-800 ring-1 ring-amber-200">
+                <div className="mb-1 flex items-center gap-1 font-semibold">
+                  <AlertTriangle size={12} /> 차이 발견 — 검수 필요
+                </div>
+                {diffs.map((d, i) => (
+                  <div key={i} className="ml-4">
+                    • {d.label}: <span className="font-semibold">{d.existing}</span> ≠ <span className="font-semibold">{d.ssg}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {hasDiscrepancy && (
-              <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+              <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-50 p-2 text-xs text-red-800 ring-1 ring-red-200">
                 <AlertTriangle size={14} className="shrink-0" />
-                규격 차이가 큽니다 ({existingWeightG}g vs {unitWeightG}g). 환산 결과를 다시 확인하세요.
+                ⚠️ 규격 4배 이상 차이 — 환산 결과 신뢰 불가, 다시 확인하세요.
               </div>
             )}
 
@@ -913,6 +1124,34 @@ function ShinsegaeMatching({
         )}
       </div>
     </section>
+  )
+}
+
+/* 금액 입력 카드 (수정 가능) */
+function FinanceInputCard({
+  label,
+  value,
+  suffix,
+  onChange,
+}: {
+  label: string
+  value: number
+  suffix?: string
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="rounded-lg border bg-gray-50 p-2">
+      <div className="text-[9px] font-medium uppercase tracking-wider text-gray-500">{label}</div>
+      <div className="mt-0.5 flex items-center gap-1">
+        <input
+          type="number"
+          value={value || ''}
+          onChange={(e) => onChange(Number(e.target.value) || 0)}
+          className="w-full rounded border border-gray-300 bg-white px-1 py-0.5 text-sm font-bold focus:border-blue-500 focus:outline-none"
+        />
+        {suffix && <span className="text-[10px] text-gray-500">{suffix}</span>}
+      </div>
+    </label>
   )
 }
 
@@ -963,15 +1202,25 @@ function CandidatesAndSearchPanel({
     }
   }, [item.extracted_name, liveCandidates.length])
 
-  const maxScore = useMemo(
-    () => Math.max(...candidates.map((c) => c.match_score ?? 0), 0.0001),
-    [candidates],
-  )
+  // 토큰 매칭 비율 캐시 (정렬용 + UI 표시용)
+  const candidateConfidences = useMemo(() => {
+    const map = new Map<string, MatchConfidence>()
+    for (const c of candidates) {
+      map.set(c.id, getTokenMatchConfidence(item.extracted_name, c.product_name))
+    }
+    return map
+  }, [candidates, item.extracted_name])
 
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
     list.sort((a, b) => {
-      if (sortMode === 'match') return (b.match_score ?? 0) - (a.match_score ?? 0)
+      if (sortMode === 'match') {
+        // 토큰 매칭 비율 우선 → "참고" 항목은 자동으로 맨 아래
+        const aR = candidateConfidences.get(a.id)?.matchRatio ?? 0
+        const bR = candidateConfidences.get(b.id)?.matchRatio ?? 0
+        if (aR !== bR) return bR - aR
+        return (b.match_score ?? 0) - (a.match_score ?? 0)
+      }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
       if (sortMode === 'per_kg') {
         const aPk =
@@ -988,7 +1237,7 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences])
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
@@ -1045,7 +1294,7 @@ function CandidatesAndSearchPanel({
                 isSelected={ssgMatch?.id === c.id}
                 item={item}
                 existingTotal={existingTotal}
-                maxScore={maxScore}
+                confidence={candidateConfidences.get(c.id) ?? getTokenMatchConfidence(item.extracted_name, c.product_name)}
                 onSelect={() => onSelectCandidate(c)}
               />
             ))}
@@ -1149,27 +1398,8 @@ interface CandidateCardProps {
   isSelected: boolean
   item: ComparisonItem
   existingTotal: number
-  maxScore: number
+  confidence: MatchConfidence  // 토큰 기반 신뢰도 (부모에서 계산)
   onSelect: () => void
-}
-
-/**
- * 절대 점수 기반 신뢰도 4단계 (정규화 % 표시는 거짓 정보 — 0.008과 0.0082가 99% vs 100%로 보이는 문제)
- *  - >= 0.05: 강함 (녹색) — 키워드 다수 일치
- *  - >= 0.02: 보통 (파란) — 부분 일치
- *  - >= 0.01: 약함 (노랑) — trigram 중첩 정도
- *  - <  0.01: 매우 약함 (회색) — 사실상 무관, "참고" 표시
- */
-function getMatchConfidence(score: number): {
-  label: string
-  bgColor: string
-  textColor: string
-  showAsReference: boolean
-} {
-  if (score >= 0.05) return { label: '강함', bgColor: 'bg-green-100', textColor: 'text-green-700', showAsReference: false }
-  if (score >= 0.02) return { label: '보통', bgColor: 'bg-blue-100', textColor: 'text-blue-700', showAsReference: false }
-  if (score >= 0.01) return { label: '약함', bgColor: 'bg-amber-100', textColor: 'text-amber-700', showAsReference: false }
-  return { label: '참고', bgColor: 'bg-gray-100', textColor: 'text-gray-500', showAsReference: true }
 }
 
 function CandidateCard({
@@ -1178,11 +1408,10 @@ function CandidateCard({
   isSelected,
   item,
   existingTotal,
-  maxScore: _maxScore,
+  confidence: conf,
   onSelect,
 }: CandidateCardProps) {
   const score = candidate.match_score ?? 0
-  const conf = getMatchConfidence(score)
   const perKg = computeShinsegaePerKg(
     candidate.standard_price,
     { quantity: candidate.spec_quantity, unit: candidate.spec_unit },
@@ -1239,11 +1468,11 @@ function CandidateCard({
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
               className={cn('rounded-md px-1.5 py-0.5 text-[10px] font-bold', conf.bgColor, conf.textColor)}
-              title={`매칭 점수: ${score.toFixed(4)}`}
+              title={`토큰 매칭 ${(conf.matchRatio * 100).toFixed(0)}% · score ${score.toFixed(4)}`}
             >
-              {conf.label}
+              {conf.label} {conf.matchRatio > 0 && conf.matchRatio < 1.5 ? `${Math.round(conf.matchRatio * 100)}%` : ''}
             </span>
-            <span className="text-[9px] text-gray-400" title={`hybrid score = ${score.toFixed(4)}`}>
+            <span className="text-[9px] text-gray-400">
               점수 {(score * 1000).toFixed(1)}
             </span>
           </div>
