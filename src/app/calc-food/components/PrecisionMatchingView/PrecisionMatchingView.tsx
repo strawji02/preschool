@@ -24,6 +24,7 @@ import {
 } from '@/lib/unit-conversion'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
+  normalizeOrigin, originMatchScore,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -108,24 +109,6 @@ function HighlightedText({
 function candidateSavings(c: SupplierMatch, item: ComparisonItem, existingTotal: number): number {
   const candTotal = c.standard_price * (item.adjusted_quantity ?? item.extracted_quantity)
   return existingTotal - candTotal
-}
-
-/**
- * 원산지 정규화 (KR/CN/US/AU/JP/RU/EU/IMPORT/UNKNOWN)
- * 기존 업체 spec ("한국Wn※국내산")과 후보 origin ("국내산"/"중국") 매칭에 사용.
- */
-function normalizeOrigin(text: string | undefined | null): string {
-  if (!text) return 'UNKNOWN'
-  const t = text.toLowerCase()
-  if (/국내산|한국산|국산|한국/.test(t)) return 'KR'
-  if (/중국/.test(t)) return 'CN'
-  if (/미국|usa/.test(t)) return 'US'
-  if (/호주|aus/.test(t)) return 'AU'
-  if (/일본|일산/.test(t)) return 'JP'
-  if (/러시아|러산/.test(t)) return 'RU'
-  if (/eu|유럽|네덜란드|독일|프랑스|스페인|이태리|이탈리아/.test(t)) return 'EU'
-  if (/수입/.test(t)) return 'IMPORT'
-  return 'UNKNOWN'
 }
 
 /** 기존 업체 품목의 원산지 추출 (extracted_name + extracted_spec 둘 다 검사) */
@@ -1206,6 +1189,22 @@ function CandidatesAndSearchPanel({
     return list.slice(0, 10)
   }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin])
 
+  // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
+  const sortedSearchResults = useMemo(() => {
+    if (searchResults.length === 0) return [] as SupplierMatch[]
+    return [...searchResults].sort((a, b) => {
+      const aR = getMatchConfidence(item.extracted_name, a.product_name).matchRatio
+      const bR = getMatchConfidence(item.extracted_name, b.product_name).matchRatio
+      if (aR !== bR) return bR - aR
+      if (itemOrigin !== 'UNKNOWN') {
+        const aOriginMatch = normalizeOrigin(a.origin) === itemOrigin
+        const bOriginMatch = normalizeOrigin(b.origin) === itemOrigin
+        if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
+      }
+      return (b.match_score ?? 0) - (a.match_score ?? 0)
+    })
+  }, [searchResults, item.extracted_name, itemOrigin])
+
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
     setSearching(true)
@@ -1318,7 +1317,7 @@ function CandidatesAndSearchPanel({
               </div>
             )}
             <div className="space-y-1.5">
-              {searchResults.slice(0, 8).map((r) => {
+              {sortedSearchResults.slice(0, 8).map((r) => {
                 const pk = computeShinsegaePerKg(
                   r.standard_price,
                   { quantity: r.spec_quantity, unit: r.spec_unit },

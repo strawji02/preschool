@@ -121,3 +121,47 @@ export function getCommonTokens(...texts: (string | undefined | null)[]): Set<st
   }
   return common
 }
+
+
+/* ────────────────────────────────────────────────────────── */
+/* 원산지 정규화 + 매칭 (백엔드/프론트 공통)                      */
+/* ────────────────────────────────────────────────────────── */
+
+/**
+ * 원산지 정규화 — origin 컬럼 값 또는 텍스트 (extracted_name/extracted_spec/product_name)에서 ISO 풍 코드 추출.
+ * "국내산" / "국내제조" / "한국" → KR
+ * "중국" → CN
+ * 등 16종 + UNKNOWN
+ */
+export function normalizeOrigin(text: string | undefined | null): string {
+  if (!text) return 'UNKNOWN'
+  const t = text.toLowerCase()
+  if (/국내산|한국산|국산|한국|국내제조/.test(t)) return 'KR'
+  if (/중국/.test(t)) return 'CN'
+  if (/미국|usa/.test(t)) return 'US'
+  if (/호주|aus/.test(t)) return 'AU'
+  if (/일본|일산/.test(t)) return 'JP'
+  if (/러시아|러산/.test(t)) return 'RU'
+  if (/eu|유럽|네덜란드|독일|프랑스|스페인|이태리|이탈리아|벨기에/.test(t)) return 'EU'
+  if (/베트남/.test(t)) return 'VN'
+  if (/태국/.test(t)) return 'TH'
+  if (/캐나다/.test(t)) return 'CA'
+  if (/말레이시아/.test(t)) return 'MY'
+  if (/페루/.test(t)) return 'PE'
+  if (/칠레/.test(t)) return 'CL'
+  if (/외국산|수입/.test(t)) return 'IMPORT'
+  return 'UNKNOWN'
+}
+
+/**
+ * 원산지 매칭 점수 (정렬 가중치용)
+ *  - 1.0: 완전 일치 (KR == KR)
+ *  - 0.5: 한쪽이 미상 (정보 부족, 중립)
+ *  - 0.0: 불일치 (KR vs CN)
+ */
+export function originMatchScore(itemOrigin: string | undefined | null, candOrigin: string | undefined | null): number {
+  const a = normalizeOrigin(itemOrigin)
+  const b = normalizeOrigin(candOrigin)
+  if (a === 'UNKNOWN' || b === 'UNKNOWN') return 0.5
+  return a === b ? 1.0 : 0.0
+}

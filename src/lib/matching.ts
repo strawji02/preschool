@@ -6,7 +6,7 @@ import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
 import type { InvoiceItem } from '@/lib/funnel/excel-parser'
 import type { DBProduct } from '@/lib/funnel/price-cluster'
-import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO, normalizeOrigin } from '@/lib/token-match'
 
 // Matching thresholds (legacy — used by findMatches; superseded by token-based validation in findComparisonMatches)
 const AUTO_MATCH_THRESHOLD = 0.8
@@ -1174,9 +1174,56 @@ export async function findComparisonMatches(
     cj_candidates = cj_candidates.slice(0, 5)
     ssg_candidates = ssg_candidates.slice(0, 5)
 
-    // ── 토큰 매칭 검증 (2026-05-04) ──
-    // hybrid score는 변별력 부족 (0.005~0.05). 토큰 일치율로 의미있는 매칭만 채택.
-    // 콩나물 → 파인애플 같은 무관 매칭 차단.
+    // ── 후보 origin / spec_raw enrichment (2026-05-04) ──
+    // RPC가 origin/spec_raw 반환 안 함 → 별도 SELECT로 enrich. matching/UI 양쪽에서 활용.
+    const allCandIds = [...cj_candidates.map((c) => c.id), ...ssg_candidates.map((c) => c.id)].filter(Boolean)
+    if (allCandIds.length > 0) {
+      const { data: extras } = await supabase
+        .from('products')
+        .select('id, origin, spec_raw, unit_raw, storage_temp, product_code, subcategory')
+        .in('id', allCandIds)
+      if (extras && extras.length > 0) {
+        const map = new Map<string, { origin?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string }>()
+        for (const e of extras) {
+          map.set(e.id as string, {
+            origin: e.origin as string | undefined,
+            spec_raw: e.spec_raw as string | undefined,
+            unit_raw: e.unit_raw as string | undefined,
+            storage_temp: e.storage_temp as string | undefined,
+            product_code: e.product_code as string | undefined,
+            subcategory: e.subcategory as string | undefined,
+          })
+        }
+        cj_candidates = cj_candidates.map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
+        ssg_candidates = ssg_candidates.map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
+      }
+    }
+
+    // ── 토큰 매칭 + 원산지 가중치 검증 (2026-05-04) ──
+    // hybrid score는 변별력 부족 (0.005~0.05). 토큰 + origin으로 의미있는 매칭 선택.
+    // 콩나물 → 파인애플, 국내산 → 중국 같은 부적절 매칭 차단/후순위.
+    const itemOrigin = extractedItem
+      ? normalizeOrigin(`${extractedItem.name} ${extractedItem.spec ?? ''}`)
+      : 'UNKNOWN'
+
+    // 토큰 + origin 가중치로 후보 재정렬
+    const reorderByOrigin = (cands: SupplierMatch[]): SupplierMatch[] => {
+      return [...cands].sort((a, b) => {
+        const aR = getTokenMatchRatio(itemName, a.product_name)
+        const bR = getTokenMatchRatio(itemName, b.product_name)
+        if (aR !== bR) return bR - aR
+        // 토큰 동률 → origin 일치 우선 (item이 명확한 origin인 경우만)
+        if (itemOrigin !== 'UNKNOWN') {
+          const aMatch = normalizeOrigin(a.origin) === itemOrigin
+          const bMatch = normalizeOrigin(b.origin) === itemOrigin
+          if (aMatch !== bMatch) return aMatch ? -1 : 1
+        }
+        return (b.match_score ?? 0) - (a.match_score ?? 0)
+      })
+    }
+    cj_candidates = reorderByOrigin(cj_candidates)
+    ssg_candidates = reorderByOrigin(ssg_candidates)
+
     const cj_top = cj_candidates[0]
     const ssg_top = ssg_candidates[0]
     const cjTokenRatio = cj_top ? getTokenMatchRatio(itemName, cj_top.product_name) : 0
@@ -1200,6 +1247,12 @@ export async function findComparisonMatches(
     }
     if (!ssgAccepted && ssg_top) {
       console.log(`  [TokenValidation] SSG 매칭 차단: "${itemName}" → "${ssg_top.product_name}" (ratio=${ssgTokenRatio.toFixed(2)})`)
+    }
+    if (itemOrigin !== 'UNKNOWN' && ssg_match) {
+      const matchOrigin = normalizeOrigin(ssg_match.origin)
+      if (matchOrigin !== 'UNKNOWN' && matchOrigin !== itemOrigin) {
+        console.log(`  [OriginMismatch] "${itemName}" (${itemOrigin}) → "${ssg_match.product_name}" (${matchOrigin}) — 동일 origin 후보 없어 채택`)
+      }
     }
 
     // 상태 결정: 토큰 매칭 비율 기반
