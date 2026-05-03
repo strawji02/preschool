@@ -1212,8 +1212,9 @@ function CandidatesAndSearchPanel({
 
         // 2) 토큰 동률 → 원산지 일치 우선 (기존 "국내산"이면 후보 "국내산"이 위로)
         if (itemOrigin !== 'UNKNOWN') {
-          const aOriginMatch = normalizeOrigin(a.origin) === itemOrigin
-          const bOriginMatch = normalizeOrigin(b.origin) === itemOrigin
+          // origin 컬럼 누락 시 product_name에서 추출 (예: "세척당근 중국 실온" → CN)
+          const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
+          const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
@@ -1246,8 +1247,9 @@ function CandidatesAndSearchPanel({
       const bR = getMatchConfidence(item.extracted_name, b.product_name).matchRatio
       if (aR !== bR) return bR - aR
       if (itemOrigin !== 'UNKNOWN') {
-        const aOriginMatch = normalizeOrigin(a.origin) === itemOrigin
-        const bOriginMatch = normalizeOrigin(b.origin) === itemOrigin
+        // origin 컬럼 누락 시 product_name에서 추출 (예: "세척당근 중국 실온" → CN)
+        const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
+        const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
         if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
       }
       return (b.match_score ?? 0) - (a.match_score ?? 0)
@@ -1461,7 +1463,8 @@ function CandidateCard({
 
   // 원산지 일치 여부 (검수자 직관 — 국내산 vs 중국 등)
   const itemOriginCard = getItemOrigin(item)
-  const candOriginCard = normalizeOrigin(candidate.origin)
+  // origin 컬럼 누락 시 product_name에서 추출 (예: "세척당근 중국" → CN)
+  const candOriginCard = normalizeOrigin(candidate.origin || candidate.product_name)
   const originMismatch =
     itemOriginCard !== 'UNKNOWN' && candOriginCard !== 'UNKNOWN' && itemOriginCard !== candOriginCard
 

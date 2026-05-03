@@ -1215,8 +1215,9 @@ export async function findComparisonMatches(
         if (aR !== bR) return bR - aR
         // 토큰 동률 → origin 일치 우선 (item이 명확한 origin인 경우만)
         if (itemOrigin !== 'UNKNOWN') {
-          const aMatch = normalizeOrigin(a.origin) === itemOrigin
-          const bMatch = normalizeOrigin(b.origin) === itemOrigin
+          // origin 컬럼 누락 시 product_name에서 추출
+          const aMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
+          const bMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
           if (aMatch !== bMatch) return aMatch ? -1 : 1
         }
         return (b.match_score ?? 0) - (a.match_score ?? 0)
