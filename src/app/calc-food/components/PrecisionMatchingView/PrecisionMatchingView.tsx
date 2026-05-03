@@ -110,6 +110,29 @@ function candidateSavings(c: SupplierMatch, item: ComparisonItem, existingTotal:
   return existingTotal - candTotal
 }
 
+/**
+ * 원산지 정규화 (KR/CN/US/AU/JP/RU/EU/IMPORT/UNKNOWN)
+ * 기존 업체 spec ("한국Wn※국내산")과 후보 origin ("국내산"/"중국") 매칭에 사용.
+ */
+function normalizeOrigin(text: string | undefined | null): string {
+  if (!text) return 'UNKNOWN'
+  const t = text.toLowerCase()
+  if (/국내산|한국산|국산|한국/.test(t)) return 'KR'
+  if (/중국/.test(t)) return 'CN'
+  if (/미국|usa/.test(t)) return 'US'
+  if (/호주|aus/.test(t)) return 'AU'
+  if (/일본|일산/.test(t)) return 'JP'
+  if (/러시아|러산/.test(t)) return 'RU'
+  if (/eu|유럽|네덜란드|독일|프랑스|스페인|이태리|이탈리아/.test(t)) return 'EU'
+  if (/수입/.test(t)) return 'IMPORT'
+  return 'UNKNOWN'
+}
+
+/** 기존 업체 품목의 원산지 추출 (extracted_name + extracted_spec 둘 다 검사) */
+function getItemOrigin(item: ComparisonItem): string {
+  return normalizeOrigin(`${item.extracted_name ?? ''} ${item.extracted_spec ?? ''}`)
+}
+
 function getExistingTotal(item: ComparisonItem): number {
   return item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
 }
@@ -1143,14 +1166,26 @@ function CandidatesAndSearchPanel({
     return map
   }, [candidates, item.extracted_name])
 
+  // 기존 업체 품목 원산지 (정렬 가중치용)
+  const itemOrigin = useMemo(() => getItemOrigin(item), [item])
+
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
     list.sort((a, b) => {
       if (sortMode === 'match') {
-        // 토큰 매칭 비율 우선 → "참고" 항목은 자동으로 맨 아래
+        // 1) 토큰 매칭 비율 우선 → "참고" 항목은 자동으로 맨 아래
         const aR = candidateConfidences.get(a.id)?.matchRatio ?? 0
         const bR = candidateConfidences.get(b.id)?.matchRatio ?? 0
         if (aR !== bR) return bR - aR
+
+        // 2) 토큰 동률 → 원산지 일치 우선 (기존 "국내산"이면 후보 "국내산"이 위로)
+        if (itemOrigin !== 'UNKNOWN') {
+          const aOriginMatch = normalizeOrigin(a.origin) === itemOrigin
+          const bOriginMatch = normalizeOrigin(b.origin) === itemOrigin
+          if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
+        }
+
+        // 3) 마지막 tiebreak — score
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
@@ -1169,7 +1204,7 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal, candidateConfidences])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin])
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
@@ -1374,6 +1409,12 @@ function CandidateCard({
   const sav = candidateSavings(candidate, item, existingTotal)
   const isSaving = sav > 0
 
+  // 원산지 일치 여부 (검수자 직관 — 국내산 vs 중국 등)
+  const itemOriginCard = getItemOrigin(item)
+  const candOriginCard = normalizeOrigin(candidate.origin)
+  const originMismatch =
+    itemOriginCard !== 'UNKNOWN' && candOriginCard !== 'UNKNOWN' && itemOriginCard !== candOriginCard
+
   // 자세한 규격 텍스트 조립 (사용자 요청 #2/#3): 시각적으로 분리된 회색 라인
   const specParts: string[] = []
   if (candidate.spec_raw) specParts.push(candidate.spec_raw)
@@ -1414,11 +1455,21 @@ function CandidateCard({
                 {candidate.product_name}
               </h4>
             </div>
-            {isSelected && (
-              <span className="mt-1 inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
-                현재 매칭
-              </span>
-            )}
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {isSelected && (
+                <span className="inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
+                  현재 매칭
+                </span>
+              )}
+              {originMismatch && (
+                <span
+                  className="inline-flex items-center gap-0.5 rounded bg-red-100 px-1.5 py-0 text-[10px] font-semibold text-red-700"
+                  title={`원산지 다름 — 기존: ${itemOriginCard}, 후보: ${candOriginCard}`}
+                >
+                  ⚠️ 원산지 다름 ({candidate.origin})
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
@@ -1431,9 +1482,11 @@ function CandidateCard({
           </div>
         </div>
 
-        {/* 자세한 규격 라인 (시각적 분리 — 회색 작은 텍스트) */}
+        {/* 자세한 규격 라인 (시각적 분리 — 회색 작은 텍스트, 원산지 mismatch면 빨간 강조) */}
         {specText && (
-          <div className="mt-1 break-words text-[11px] text-gray-500">{specText}</div>
+          <div className={cn('mt-1 break-words text-[11px]', originMismatch ? 'text-red-600' : 'text-gray-500')}>
+            {specText}
+          </div>
         )}
 
         {/* 가격 / 환산단가 / 면세 */}
