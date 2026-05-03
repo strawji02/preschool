@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
+import { getTokenMatchRatio } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -137,12 +138,17 @@ export async function GET(request: NextRequest) {
       if (tokens.length > 0) {
         const lastTok = tokens[tokens.length - 1]
         if (lastTok.length >= 2 && lastTok !== query) candidateKws.push(lastTok)
-        // 한국어 합성어 분해: 마지막 어절의 suffix 추출 (메인 명사가 뒤에 옴)
-        // "신선한계란" → "계란"(2자) / "한계란"(3자)
+        // 한국어 합성어 분해: 마지막 어절의 suffix + prefix 추출
+        // "신선한계란" → suffix "계란"(2자) / "한계란"(3자) [메인 명사]
+        // "칼집비엔나" → suffix "비엔나"(3자) + prefix "칼집"(2자) [둘 다 명사]
         if (lastTok.length >= 4) {
-          for (let len = 2; len <= 3; len++) {
+          for (let len = 3; len >= 2; len--) {
             const suffix = lastTok.slice(lastTok.length - len)
             if (!candidateKws.includes(suffix)) candidateKws.push(suffix)
+          }
+          for (let len = 3; len >= 2; len--) {
+            const prefix = lastTok.slice(0, len)
+            if (!candidateKws.includes(prefix)) candidateKws.push(prefix)
           }
         }
       }
@@ -171,12 +177,22 @@ export async function GET(request: NextRequest) {
               ...results.filter((p) => !seen.has(p.id)),
             ].slice(0, limit)
             console.log(`  [Search] Fallback applied: "${query}" → "${fbKw}" (score ${topScore.toFixed(4)} → ${fbTopScore.toFixed(4)})`)
-            break  // 첫 번째 성공한 fallback 사용
+            // ⚠️ break 제거 — 모든 fallback 후보 시도해서 결과 누적 (예: 칼집비엔나 → 비엔나 + 칼집 둘 다)
           }
         } catch (e) {
           console.warn(`Fallback search "${fbKw}" 실패:`, e)
         }
       }
+
+      // 누적 결과를 토큰 매칭 비율로 재정렬 (정확한 매칭이 위로)
+      // 예: "칼집비엔나" → "칼집비엔나 진주햄"(ratio=1.0)이 일반 "비엔나"(ratio=0.7)보다 위로
+      results.sort((a, b) => {
+        const aR = getTokenMatchRatio(query, a.product_name)
+        const bR = getTokenMatchRatio(query, b.product_name)
+        if (aR !== bR) return bR - aR
+        return (b.match_score ?? 0) - (a.match_score ?? 0)
+      })
+      results = results.slice(0, limit)
     }
 
     // ── 자세한 규격 정보 enrichment (2026-05-04 추가) ──
