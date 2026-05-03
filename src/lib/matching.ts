@@ -6,10 +6,17 @@ import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
 import type { InvoiceItem } from '@/lib/funnel/excel-parser'
 import type { DBProduct } from '@/lib/funnel/price-cluster'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
 
-// Matching thresholds
+// Matching thresholds (legacy — used by findMatches; superseded by token-based validation in findComparisonMatches)
 const AUTO_MATCH_THRESHOLD = 0.8
 const PENDING_THRESHOLD = 0.3
+
+// findComparisonMatches용 현실적 임계값 (hybrid score 분포: 0.005~0.05)
+// 토큰 매칭 비율과 함께 사용하여 의미있는 매칭만 채택
+const COMPARISON_MIN_SCORE = 0.005
+const COMPARISON_AUTO_RATIO = 0.7    // 토큰 70%+ 매칭 → auto_matched
+const COMPARISON_PENDING_RATIO = 0.4 // 토큰 40%+ 매칭 → pending
 
 // ========================================
 // Domain-Specific Matching Rules
@@ -1167,21 +1174,46 @@ export async function findComparisonMatches(
     cj_candidates = cj_candidates.slice(0, 5)
     ssg_candidates = ssg_candidates.slice(0, 5)
 
-    // Top 1 = 자동 선택
-    const cj_match = cj_candidates[0]
-    const ssg_match = ssg_candidates[0]
+    // ── 토큰 매칭 검증 (2026-05-04) ──
+    // hybrid score는 변별력 부족 (0.005~0.05). 토큰 일치율로 의미있는 매칭만 채택.
+    // 콩나물 → 파인애플 같은 무관 매칭 차단.
+    const cj_top = cj_candidates[0]
+    const ssg_top = ssg_candidates[0]
+    const cjTokenRatio = cj_top ? getTokenMatchRatio(itemName, cj_top.product_name) : 0
+    const ssgTokenRatio = ssg_top ? getTokenMatchRatio(itemName, ssg_top.product_name) : 0
 
-    // 상태 결정: 둘 중 하나라도 고득점이면 auto_matched
-    const topScore = Math.max(
-      cj_match?.match_score ?? 0,
-      ssg_match?.match_score ?? 0
-    )
+    // 매칭 채택: 점수 + 토큰 비율 모두 통과
+    const cjAccepted =
+      !!cj_top &&
+      (cj_top.match_score ?? 0) >= COMPARISON_MIN_SCORE &&
+      cjTokenRatio >= MIN_VALID_MATCH_RATIO
+    const ssgAccepted =
+      !!ssg_top &&
+      (ssg_top.match_score ?? 0) >= COMPARISON_MIN_SCORE &&
+      ssgTokenRatio >= MIN_VALID_MATCH_RATIO
 
+    const cj_match = cjAccepted ? cj_top : undefined
+    const ssg_match = ssgAccepted ? ssg_top : undefined
+
+    if (!cjAccepted && cj_top) {
+      console.log(`  [TokenValidation] CJ 매칭 차단: "${itemName}" → "${cj_top.product_name}" (ratio=${cjTokenRatio.toFixed(2)})`)
+    }
+    if (!ssgAccepted && ssg_top) {
+      console.log(`  [TokenValidation] SSG 매칭 차단: "${itemName}" → "${ssg_top.product_name}" (ratio=${ssgTokenRatio.toFixed(2)})`)
+    }
+
+    // 상태 결정: 토큰 매칭 비율 기반
+    const maxTokenRatio = Math.max(cjAccepted ? cjTokenRatio : 0, ssgAccepted ? ssgTokenRatio : 0)
     let status: MatchStatus = 'unmatched'
-    if (topScore > AUTO_MATCH_THRESHOLD) {
-      status = 'auto_matched'
-    } else if (topScore >= PENDING_THRESHOLD) {
-      status = 'pending'
+    if (cj_match || ssg_match) {
+      if (maxTokenRatio >= COMPARISON_AUTO_RATIO) {
+        status = 'auto_matched'
+      } else if (maxTokenRatio >= COMPARISON_PENDING_RATIO) {
+        status = 'pending'
+      } else {
+        // 토큰 0.3~0.4: 후보로는 표시되지만 자동 확정 안 함
+        status = 'pending'
+      }
     }
 
     return { cj_match, ssg_match, cj_candidates, ssg_candidates, status }

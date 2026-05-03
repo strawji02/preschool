@@ -22,6 +22,9 @@ import { formatCurrency, formatNumber } from '@/lib/format'
 import {
   parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings,
 } from '@/lib/unit-conversion'
+import {
+  getCommonTokens, getMatchConfidence, type MatchConfidence,
+} from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
   items: ComparisonItem[]
@@ -68,29 +71,8 @@ const FILTER_LABEL: Record<FilterMode, string> = {
 }
 
 /* ────────────────────────────────────────────────────────── */
-/* 토큰화 + 공통 토큰 헬퍼 (한국어 어절 단순 분리)                 */
+/* 텍스트 내 공통 토큰 강조 표시 (녹색 굵게)                      */
 /* ────────────────────────────────────────────────────────── */
-function tokenize(text: string | undefined | null): string[] {
-  if (!text) return []
-  return text
-    .toLowerCase()
-    .split(/[\s,./()※*+|·#\-\[\]]+/)
-    .filter((t) => t.length >= 2)
-}
-
-function getCommonTokens(...texts: (string | undefined | null)[]): Set<string> {
-  // 모든 텍스트에 공통으로 등장하는 토큰 (2자 이상)
-  const allSets = texts.filter(Boolean).map((t) => new Set(tokenize(t)))
-  if (allSets.length < 2) return new Set()
-  const [first, ...rest] = allSets
-  const common = new Set<string>()
-  for (const tok of first) {
-    if (rest.every((s) => s.has(tok))) common.add(tok)
-  }
-  return common
-}
-
-/** 텍스트 내 공통 토큰을 강조 표시 (녹색 굵게) */
 function HighlightedText({
   text,
   commonTokens,
@@ -118,63 +100,6 @@ function HighlightedText({
       })}
     </span>
   )
-}
-
-/* ────────────────────────────────────────────────────────── */
-/* 토큰 기반 신뢰도 — 검색어와 후보 product_name 비교             */
-/* ────────────────────────────────────────────────────────── */
-interface MatchConfidence {
-  label: string
-  bgColor: string
-  textColor: string
-  matchRatio: number  // 정렬용 (확실=1.5, 토큰비율 0~1)
-  fullContains: boolean
-}
-
-function getTokenMatchConfidence(
-  query: string | undefined | null,
-  productName: string | undefined | null,
-): MatchConfidence {
-  const q = (query ?? '').toLowerCase().replace(/\s+/g, '')
-  const n = (productName ?? '').toLowerCase().replace(/\s+/g, '')
-  const fullContains = q.length >= 2 && (n.includes(q) || q.includes(n))
-
-  if (fullContains) {
-    return {
-      label: '확실',
-      bgColor: 'bg-emerald-200',
-      textColor: 'text-emerald-900',
-      matchRatio: 1.5,
-      fullContains: true,
-    }
-  }
-
-  // 한국어 합성어 대응: 토큰 자체 매칭 + substring 부분 매칭
-  const queryTokens = tokenize(query)
-  const productSet = new Set(tokenize(productName))
-  let matched = 0
-  for (const t of queryTokens) {
-    if (productSet.has(t)) {
-      matched += 1
-      continue
-    }
-    // 4자 이상 토큰: prefix 2~3자가 product 어딘가에 포함되면 부분 매칭 (절반 점수)
-    if (t.length >= 4) {
-      for (let len = Math.min(t.length, 4); len >= 2; len--) {
-        const sub = t.slice(0, len)
-        if (sub.length >= 2 && n.includes(sub)) {
-          matched += 0.5
-          break
-        }
-      }
-    }
-  }
-  const ratio = queryTokens.length > 0 ? matched / queryTokens.length : 0
-
-  if (ratio >= 0.7) return { label: '강함', bgColor: 'bg-green-100', textColor: 'text-green-700', matchRatio: ratio, fullContains: false }
-  if (ratio >= 0.4) return { label: '보통', bgColor: 'bg-blue-100', textColor: 'text-blue-700', matchRatio: ratio, fullContains: false }
-  if (ratio > 0)    return { label: '약함', bgColor: 'bg-amber-100', textColor: 'text-amber-700', matchRatio: ratio, fullContains: false }
-  return { label: '참고', bgColor: 'bg-gray-100', textColor: 'text-gray-500', matchRatio: 0, fullContains: false }
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -1206,7 +1131,7 @@ function CandidatesAndSearchPanel({
   const candidateConfidences = useMemo(() => {
     const map = new Map<string, MatchConfidence>()
     for (const c of candidates) {
-      map.set(c.id, getTokenMatchConfidence(item.extracted_name, c.product_name))
+      map.set(c.id, getMatchConfidence(item.extracted_name, c.product_name))
     }
     return map
   }, [candidates, item.extracted_name])
@@ -1294,7 +1219,7 @@ function CandidatesAndSearchPanel({
                 isSelected={ssgMatch?.id === c.id}
                 item={item}
                 existingTotal={existingTotal}
-                confidence={candidateConfidences.get(c.id) ?? getTokenMatchConfidence(item.extracted_name, c.product_name)}
+                confidence={candidateConfidences.get(c.id) ?? getMatchConfidence(item.extracted_name, c.product_name)}
                 onSelect={() => onSelectCandidate(c)}
               />
             ))}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { ComparisonItem, MatchStatus, SupplierMatch } from '@/types/audit'
 import { calculateComparisonSavings } from '@/lib/matching'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
 
 /**
  * GET /api/sessions/:id
@@ -43,8 +44,9 @@ export async function GET(
       return NextResponse.json({ success: false, error: itemsErr.message }, { status: 500 })
     }
 
-    // ComparisonItem 형태로 매핑 — supplier 검증 통과한 매칭만 ssg_match로 복원
+    // ComparisonItem 형태로 매핑 — 3중 검증 (supplier + 토큰 매칭 + status 일관성)
     let invalidCjMatchCount = 0
+    let lowConfidenceMatchCount = 0
     const items: ComparisonItem[] = (itemsRaw ?? []).map((it) => {
       const supplyAmount = it.extracted_supply_amount ?? undefined
       const taxAmount = it.extracted_tax_amount ?? undefined
@@ -67,7 +69,18 @@ export async function GET(
       const isValidSsg = !!mp && mp.supplier === 'SHINSEGAE'
       if (mp && mp.supplier !== 'SHINSEGAE') invalidCjMatchCount++
 
-      const ssgMatch: SupplierMatch | undefined = isValidSsg && it.matched_product_id
+      // 토큰 매칭 비율 검증 — 콩나물 vs 파인애플 같은 무관한 매칭 차단
+      // 검증 기준: extracted_name과 product_name의 토큰 일치율 >= MIN_VALID_MATCH_RATIO (0.3)
+      let tokenRatio = 0
+      let isTokenValid = true
+      if (isValidSsg && mp) {
+        tokenRatio = getTokenMatchRatio(it.extracted_name ?? '', mp.product_name)
+        isTokenValid = tokenRatio >= MIN_VALID_MATCH_RATIO
+        if (!isTokenValid) lowConfidenceMatchCount++
+      }
+      const isAcceptedMatch = isValidSsg && isTokenValid
+
+      const ssgMatch: SupplierMatch | undefined = isAcceptedMatch && it.matched_product_id
         ? {
             id: it.matched_product_id,
             product_name: mp!.product_name ?? '',
@@ -81,10 +94,16 @@ export async function GET(
           }
         : undefined
 
-      // 매칭 상태: 잘못된 CJ 매칭은 unmatched로 강등
-      const matchStatus: MatchStatus = ssgMatch
-        ? ((it.match_status ?? 'unmatched') as MatchStatus)
-        : 'unmatched'
+      // 매칭 상태 정합성:
+      //  - 매칭이 검증 통과: DB의 match_status 사용 (auto_matched/manual_matched/pending)
+      //  - 매칭 검증 실패 (CJ/저신뢰): 'unmatched'로 강등
+      const dbStatus = (it.match_status ?? 'unmatched') as MatchStatus
+      const matchStatus: MatchStatus = ssgMatch ? dbStatus : 'unmatched'
+
+      // is_confirmed 정의 명확화: status가 명시적 확정 상태일 때만 true
+      // (이전: ssg_match 있으면 무조건 true → 거짓 KPI 100% 문제)
+      const isExplicitlyConfirmed =
+        matchStatus === 'auto_matched' || matchStatus === 'manual_matched'
 
       const savings = calculateComparisonSavings(
         it.extracted_unit_price ?? 0,
@@ -109,9 +128,9 @@ export async function GET(
         ssg_match: ssgMatch,
         cj_candidates: [],
         ssg_candidates: [],
-        is_confirmed: !!ssgMatch, // 잘못된 CJ 매칭은 미확정 처리
+        is_confirmed: isExplicitlyConfirmed,
         cj_confirmed: false,
-        ssg_confirmed: !!ssgMatch,
+        ssg_confirmed: isExplicitlyConfirmed,
         savings,
         match_status: matchStatus,
         is_excluded: it.is_excluded ?? false,
@@ -122,7 +141,13 @@ export async function GET(
       }
     })
 
-    return NextResponse.json({ success: true, session, items, invalidCjMatchCount })
+    return NextResponse.json({
+      success: true,
+      session,
+      items,
+      invalidCjMatchCount,
+      lowConfidenceMatchCount,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })

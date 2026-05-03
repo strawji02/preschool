@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { findComparisonMatches } from '@/lib/matching'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
 
 /**
  * POST /api/sessions/:id/rematch-cj
- * 잘못된 CJ 매칭 / unmatched 항목을 SHINSEGAE 카탈로그에서 자동 재매칭.
+ * 잘못된 매칭 (CJ + 저신뢰 SHINSEGAE) + unmatched 항목을 SHINSEGAE 카탈로그에서 자동 재매칭.
  *
- * 동작:
- *  1) 세션의 audit_items 중 (matched_product가 CJ supplier) 또는 (matched_product 없음) 추출
- *  2) 각 item.extracted_name으로 SHINSEGAE 매칭 검색 (findComparisonMatches)
- *  3) ssg_match가 있고 점수가 임계값(0.005) 이상이면 matched_product_id 업데이트
- *  4) 점수 미만 또는 매칭 없음 → matched_product_id=NULL, match_status='unmatched'
+ * 재매칭 대상 (3종):
+ *  1) matched_product가 CJ supplier (잘못된 공급사)
+ *  2) matched_product가 SHINSEGAE이지만 토큰 매칭 비율 < 0.3 (콩나물 → 파인애플 같은 무관 매칭)
+ *  3) matched_product 없음 (unmatched)
  *
- * 반환: { rematched: number, stillUnmatched: number, total: number }
+ * 매칭 채택 기준 (양 조건 모두 만족):
+ *  - hybrid score >= MIN_MATCH_SCORE (0.005)
+ *  - 토큰 매칭 비율 >= MIN_VALID_MATCH_RATIO (0.3)
+ *
+ * 반환: { rematched, stillUnmatched, total, ... }
  */
 const MIN_MATCH_SCORE = 0.005
 export const maxDuration = 60
@@ -28,11 +32,11 @@ export async function POST(
     }
     const supabase = createAdminClient()
 
-    // 1) 대상 audit_items 가져오기 (CJ 매칭 + unmatched)
+    // 1) 대상 audit_items 가져오기 — product_name까지 가져와서 토큰 매칭 검증
     const { data: itemsRaw, error: fetchErr } = await supabase
       .from('audit_items')
       .select(
-        'id, extracted_name, extracted_spec, extracted_quantity, extracted_unit, extracted_unit_price, matched_product_id, match_status, matched_product:products!matched_product_id(supplier)',
+        'id, extracted_name, extracted_spec, extracted_quantity, extracted_unit, extracted_unit_price, matched_product_id, match_status, matched_product:products!matched_product_id(supplier, product_name)',
       )
       .eq('session_id', id)
 
@@ -40,7 +44,10 @@ export async function POST(
       return NextResponse.json({ success: false, error: fetchErr.message }, { status: 500 })
     }
 
-    // 재매칭 대상: CJ 공급사 매칭이거나, 매칭이 없는 항목
+    // 재매칭 대상 분류:
+    //  - 1) CJ 매칭 (잘못된 공급사)
+    //  - 2) 매칭 없음 (unmatched)
+    //  - 3) SHINSEGAE 매칭이지만 토큰 비율 < 0.3 (콩나물 → 파인애플 같은 무관 매칭)
     type ItemRow = {
       id: string
       extracted_name: string
@@ -50,11 +57,30 @@ export async function POST(
       extracted_unit_price?: number
       matched_product_id?: string
       match_status?: string
-      matched_product?: { supplier?: string } | null
+      matched_product?: { supplier?: string; product_name?: string } | null
     }
+    let cjMatchTargets = 0
+    let unmatchedTargets = 0
+    let lowConfidenceTargets = 0
     const targets = (itemsRaw as ItemRow[] | null ?? []).filter((it) => {
       const mp = it.matched_product
-      return !mp || mp.supplier !== 'SHINSEGAE'
+      // 1) 매칭 없음
+      if (!mp) {
+        unmatchedTargets++
+        return true
+      }
+      // 2) CJ 매칭
+      if (mp.supplier !== 'SHINSEGAE') {
+        cjMatchTargets++
+        return true
+      }
+      // 3) SHINSEGAE 매칭이지만 토큰 매칭 비율 낮음 (저신뢰)
+      const ratio = getTokenMatchRatio(it.extracted_name ?? '', mp.product_name ?? '')
+      if (ratio < MIN_VALID_MATCH_RATIO) {
+        lowConfidenceTargets++
+        return true
+      }
+      return false
     })
 
     let rematched = 0
@@ -75,7 +101,17 @@ export async function POST(
         })
 
         const ssgMatch = result.ssg_match
-        if (ssgMatch && ssgMatch.id && (ssgMatch.match_score ?? 0) >= MIN_MATCH_SCORE) {
+        // 채택 기준: hybrid score >= 0.005 AND 토큰 매칭 비율 >= 0.3
+        const tokenRatio = ssgMatch
+          ? getTokenMatchRatio(itemName, ssgMatch.product_name ?? '')
+          : 0
+        const isAccepted =
+          !!ssgMatch &&
+          !!ssgMatch.id &&
+          (ssgMatch.match_score ?? 0) >= MIN_MATCH_SCORE &&
+          tokenRatio >= MIN_VALID_MATCH_RATIO
+
+        if (isAccepted && ssgMatch) {
           await supabase
             .from('audit_items')
             .update({
@@ -126,6 +162,11 @@ export async function POST(
       rematched,
       stillUnmatched,
       total: targets.length,
+      breakdown: {
+        cjMatchTargets,
+        unmatchedTargets,
+        lowConfidenceTargets,
+      },
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
