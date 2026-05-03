@@ -1,6 +1,23 @@
 import { expandWithSynonyms } from '@/lib/synonyms'
 
 /**
+ * 공급사/브랜드 토큰 — 매칭 변별력 없음 (모든 제품에 등장).
+ * "이츠웰 하이스데이" → 의미있는 토큰 = ["하이스데이"] (이츠웰 제거).
+ * SHINSEGAE 자체 브랜드 + 주요 식자재 공급사 브랜드.
+ */
+const SUPPLIER_BRANDS: Set<string> = new Set([
+  // SHINSEGAE 자체 브랜드 (다수 제품에 등장 → 변별력 0)
+  '이츠웰', '굿픽', '미아토', '산지기획', '아이누리', '키즈웰',
+  '쉐프초이스', '굿초이스', '스위트웰', '데이웰',
+  // CJ
+  'cj', 'CJ', '씨제이', '비비고', 'cj이츠웰',
+  // 주요 식자재 공급사
+  '대상', '청정원', '오뚜기', '풀무원', '동원', '사조', '종가집',
+  '롯데', '해태', '농심', '삼립', '샘표', '한성', '한성기업',
+  '효성', '효성어묵',
+])
+
+/**
  * 토큰 기반 매칭 신뢰도 계산 (2026-05-04)
  *
  * 한국어 검색어와 후보 제품명의 의미적 유사도 측정.
@@ -38,11 +55,15 @@ export function getTokenMatchRatio(
   // Full substring match → 확실
   if (q.length >= 2 && (n.includes(q) || q.includes(n))) return 1.5
 
-  // 토큰 매칭: query 토큰 또는 그 동의어가 product 텍스트에 substring으로 포함되는지
-  // 예: "소앞다리" 토큰의 동의어 "부채살" → "부채살 호주 냉동" 매칭 ✅
-  const queryTokens = tokenize(query)
+  // 토큰 분리 + 공급사 브랜드 제거 (식자재명만 매칭에 사용)
+  // "이츠웰 하이스데이" → 의미있는 토큰 = ["하이스데이"] (이츠웰은 SHINSEGAE 자체 브랜드라 모든 제품에 등장 → 변별력 0)
+  const allQueryTokens = tokenize(query)
+  const queryTokens = allQueryTokens.filter((t) => !SUPPLIER_BRANDS.has(t))
+  // 모든 토큰이 brand면 fallback으로 원본 사용 (검색어 자체가 brand-only인 케이스)
+  const effectiveTokens = queryTokens.length > 0 ? queryTokens : allQueryTokens
+
   let matched = 0
-  for (const t of queryTokens) {
+  for (const t of effectiveTokens) {
     if (n.includes(t)) {
       matched += 1
       continue
@@ -63,8 +84,6 @@ export function getTokenMatchRatio(
     }
     // 4자 이상 토큰: 한국어 합성어 prefix/suffix 부분 매칭
     // 한국어 관행: 메인 명사가 뒤에 옴 → suffix 매칭에 더 높은 가중치
-    // 예: "데친우거지" suffix "우거지" → "데친배추우거지" 매칭 (메인 명사) → 0.7
-    //     "데친우거지" prefix "데친" → "건데친무청시래기" 매칭 (수식어) → 0.3
     if (t.length >= 4) {
       let suffixMatched = false
       let prefixMatched = false
@@ -84,12 +103,12 @@ export function getTokenMatchRatio(
           break
         }
       }
-      if (suffixMatched && prefixMatched) matched += 1.0  // 둘 다 매칭 → 강함
-      else if (suffixMatched) matched += 0.7  // 메인 명사 매칭
-      else if (prefixMatched) matched += 0.3  // 수식어만 매칭
+      if (suffixMatched && prefixMatched) matched += 1.0
+      else if (suffixMatched) matched += 0.7
+      else if (prefixMatched) matched += 0.3
     }
   }
-  return queryTokens.length > 0 ? matched / queryTokens.length : 0
+  return effectiveTokens.length > 0 ? matched / effectiveTokens.length : 0
 }
 
 /**
