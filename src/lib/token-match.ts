@@ -56,24 +56,38 @@ export function getTokenMatchRatio(
   if (q.length >= 2 && (n.includes(q) || q.includes(n))) return 1.5
 
   // 토큰 분리 + 공급사 브랜드 제거 (식자재명만 매칭에 사용)
-  // "이츠웰 하이스데이" → 의미있는 토큰 = ["하이스데이"] (이츠웰은 SHINSEGAE 자체 브랜드라 모든 제품에 등장 → 변별력 0)
   const allQueryTokens = tokenize(query)
   const queryTokens = allQueryTokens.filter((t) => !SUPPLIER_BRANDS.has(t))
   // 모든 토큰이 brand면 fallback으로 원본 사용 (검색어 자체가 brand-only인 케이스)
   const effectiveTokens = queryTokens.length > 0 ? queryTokens : allQueryTokens
 
+  // 부정 prefix — 동의어/토큰 substring 매칭 시 의미 반전 방지
+  // 예: "익은것"이 "덜익은것" 안에 substring으로 포함되어도 의미 반대 → 매칭 안 함
+  const NEGATIVE_PREFIXES = ['덜', '안', '못', '비', '무', '미']
+  const isNegatedSubstring = (text: string, sub: string): boolean => {
+    const idx = text.indexOf(sub)
+    if (idx <= 0) return false
+    const prev = text[idx - 1]
+    return NEGATIVE_PREFIXES.includes(prev)
+  }
+  // 토큰이 product 안에 substring 매칭되지만 부정 prefix가 앞에 있으면 false
+  const includesPositive = (text: string, sub: string): boolean => {
+    if (!text.includes(sub)) return false
+    return !isNegatedSubstring(text, sub)
+  }
+
   let matched = 0
   for (const t of effectiveTokens) {
-    if (n.includes(t)) {
+    if (includesPositive(n, t)) {
       matched += 1
       continue
     }
-    // 동의어 확장 매칭 (예: 소앞다리 → 부채살, 소부채살, 우부채살)
+    // 동의어 확장 매칭 (예: 소앞다리 → 부채살, 적숙 → 중숙/익은것)
     let synMatched = false
     const syns = expandWithSynonyms(t)
     for (const s of syns) {
       const sLower = s.toLowerCase()
-      if (sLower.length >= 2 && sLower !== t && n.includes(sLower)) {
+      if (sLower.length >= 2 && sLower !== t && includesPositive(n, sLower)) {
         synMatched = true
         break
       }
@@ -83,22 +97,21 @@ export function getTokenMatchRatio(
       continue
     }
     // 4자 이상 토큰: 한국어 합성어 prefix/suffix 부분 매칭
-    // 한국어 관행: 메인 명사가 뒤에 옴 → suffix 매칭에 더 높은 가중치
     if (t.length >= 4) {
       let suffixMatched = false
       let prefixMatched = false
-      // 1) suffix 매칭 (메인 명사 — 한국어 합성어 뒷부분이 보통 핵심)
+      // suffix 매칭 (메인 명사 — 한국어 합성어 뒷부분이 핵심)
       for (let len = Math.min(t.length - 1, 4); len >= 2; len--) {
         const sub = t.slice(t.length - len)
-        if (sub.length >= 2 && n.includes(sub)) {
+        if (sub.length >= 2 && includesPositive(n, sub)) {
           suffixMatched = true
           break
         }
       }
-      // 2) prefix 매칭 (수식어 — 약한 신호)
+      // prefix 매칭 (수식어 — 약한 신호)
       for (let len = Math.min(t.length, 4); len >= 2; len--) {
         const sub = t.slice(0, len)
-        if (sub.length >= 2 && n.includes(sub)) {
+        if (sub.length >= 2 && includesPositive(n, sub)) {
           prefixMatched = true
           break
         }
