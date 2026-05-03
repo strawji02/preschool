@@ -176,6 +176,7 @@ export async function GET(request: NextRequest) {
       spec_raw?: string
       unit_raw?: string
       origin?: string
+      origin_detail?: string
       category?: string
       subcategory?: string
       tax_type?: '과세' | '면세'
@@ -184,7 +185,7 @@ export async function GET(request: NextRequest) {
     if (ids.length > 0) {
       const { data: extras } = await supabase
         .from('products')
-        .select('id, product_code, spec_raw, unit_raw, origin, category, subcategory, tax_type, storage_temp')
+        .select('id, product_code, spec_raw, unit_raw, origin, origin_detail, category, subcategory, tax_type, storage_temp')
         .in('id', ids)
       if (extras) {
         extraMap = Object.fromEntries(
@@ -195,6 +196,7 @@ export async function GET(request: NextRequest) {
               spec_raw: e.spec_raw as string | undefined,
               unit_raw: e.unit_raw as string | undefined,
               origin: e.origin as string | undefined,
+              origin_detail: e.origin_detail as string | undefined,
               category: e.category as string | undefined,
               subcategory: e.subcategory as string | undefined,
               tax_type: e.tax_type as '과세' | '면세' | undefined,
@@ -221,6 +223,7 @@ export async function GET(request: NextRequest) {
         spec_raw: extra.spec_raw,
         unit_raw: extra.unit_raw,
         origin: extra.origin,
+        origin_detail: extra.origin_detail,
         category: extra.category,
         subcategory: extra.subcategory,
         tax_type: extra.tax_type,

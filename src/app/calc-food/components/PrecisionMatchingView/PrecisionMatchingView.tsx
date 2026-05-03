@@ -1328,7 +1328,9 @@ function CandidatesAndSearchPanel({
                 if (r.spec_raw) parts.push(r.spec_raw)
                 else if (r.spec_quantity != null && r.spec_unit) parts.push(`${r.spec_quantity}${r.spec_unit}`)
                 if (r.unit_raw && !parts.some((s) => s.toLowerCase().includes(r.unit_raw!.toLowerCase()))) parts.push(`/${r.unit_raw}`)
-                if (r.origin) parts.push(`· ${r.origin}`)
+                if (r.origin) {
+                  parts.push(`· ${r.origin}${r.origin_detail ? ` (${r.origin_detail})` : ''}`)
+                }
                 if (r.storage_temp) parts.push(`· ${r.storage_temp}`)
                 if (r.category) parts.push(`· ${r.category}${r.subcategory ? ` / ${r.subcategory}` : ''}`)
                 if (r.product_code) parts.push(`· #${r.product_code}`)
@@ -1423,7 +1425,12 @@ function CandidateCard({
   if (candidate.unit_raw && !specParts.some((s) => s.toLowerCase().includes(candidate.unit_raw!.toLowerCase()))) {
     specParts.push(`/${candidate.unit_raw}`)
   }
-  if (candidate.origin) specParts.push(`· ${candidate.origin}`)
+  if (candidate.origin) {
+    // 원산지상세가 있으면 함께 표시 (예: "외국산 (호주 등)")
+    specParts.push(
+      `· ${candidate.origin}${candidate.origin_detail ? ` (${candidate.origin_detail})` : ''}`,
+    )
+  }
   if (candidate.storage_temp) specParts.push(`· ${candidate.storage_temp}`)
   if (candidate.category) {
     specParts.push(`· ${candidate.category}${candidate.subcategory ? ` / ${candidate.subcategory}` : ''}`)

@@ -35,7 +35,7 @@ export async function GET(
     const { data: itemsRaw, error: itemsErr } = await supabase
       .from('audit_items')
       .select(
-        '*, matched_product:products!matched_product_id(id, supplier, product_name, product_code, spec_quantity, spec_unit, unit_normalized, category, origin, tax_type)',
+        '*, matched_product:products!matched_product_id(id, supplier, product_name, product_code, spec_quantity, spec_unit, unit_normalized, category, origin, origin_detail, tax_type)',
       )
       .eq('session_id', id)
       .order('page_number', { ascending: true })
@@ -64,6 +64,8 @@ export async function GET(
             unit_normalized?: string
             tax_type?: '과세' | '면세'
             category?: string
+            origin?: string
+            origin_detail?: string
           }
         | null
       const isValidSsg = !!mp && mp.supplier === 'SHINSEGAE'
@@ -91,6 +93,9 @@ export async function GET(
             unit_normalized: mp!.unit_normalized ?? undefined,
             tax_type: mp!.tax_type,
             category: mp!.category,
+            origin: mp!.origin,
+            origin_detail: mp!.origin_detail,
+            product_code: mp!.product_code,
           }
         : undefined
 

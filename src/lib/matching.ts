@@ -1180,13 +1180,14 @@ export async function findComparisonMatches(
     if (allCandIds.length > 0) {
       const { data: extras } = await supabase
         .from('products')
-        .select('id, origin, spec_raw, unit_raw, storage_temp, product_code, subcategory')
+        .select('id, origin, origin_detail, spec_raw, unit_raw, storage_temp, product_code, subcategory')
         .in('id', allCandIds)
       if (extras && extras.length > 0) {
-        const map = new Map<string, { origin?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string }>()
+        const map = new Map<string, { origin?: string; origin_detail?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string }>()
         for (const e of extras) {
           map.set(e.id as string, {
             origin: e.origin as string | undefined,
+            origin_detail: e.origin_detail as string | undefined,
             spec_raw: e.spec_raw as string | undefined,
             unit_raw: e.unit_raw as string | undefined,
             storage_temp: e.storage_temp as string | undefined,
