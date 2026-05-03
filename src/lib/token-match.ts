@@ -1,3 +1,5 @@
+import { expandWithSynonyms } from '@/lib/synonyms'
+
 /**
  * 토큰 기반 매칭 신뢰도 계산 (2026-05-04)
  *
@@ -36,17 +38,30 @@ export function getTokenMatchRatio(
   // Full substring match → 확실
   if (q.length >= 2 && (n.includes(q) || q.includes(n))) return 1.5
 
-  // 토큰 매칭 + 한국어 합성어 prefix 부분 매칭
+  // 토큰 매칭: query 토큰 또는 그 동의어가 product 텍스트에 substring으로 포함되는지
+  // 예: "소앞다리" 토큰의 동의어 "부채살" → "부채살 호주 냉동" 매칭 ✅
   const queryTokens = tokenize(query)
-  const productSet = new Set(tokenize(productName))
   let matched = 0
   for (const t of queryTokens) {
-    if (productSet.has(t)) {
+    if (n.includes(t)) {
       matched += 1
       continue
     }
-    // 4자 이상 토큰: prefix 2~4자가 product에 substring 포함되면 부분 매칭 (0.5점)
-    // 예: "얼갈이배추" → prefix "얼갈이"가 "얼갈이 국내산"에 포함 → 0.5
+    // 동의어 확장 매칭 (예: 소앞다리 → 부채살, 소부채살, 우부채살)
+    let synMatched = false
+    const syns = expandWithSynonyms(t)
+    for (const s of syns) {
+      const sLower = s.toLowerCase()
+      if (sLower.length >= 2 && sLower !== t && n.includes(sLower)) {
+        synMatched = true
+        break
+      }
+    }
+    if (synMatched) {
+      matched += 1
+      continue
+    }
+    // 4자 이상 토큰: prefix 2~4자가 product에 substring으로 포함되면 부분 매칭 (0.5점)
     if (t.length >= 4) {
       for (let len = Math.min(t.length, 4); len >= 2; len--) {
         const sub = t.slice(0, len)

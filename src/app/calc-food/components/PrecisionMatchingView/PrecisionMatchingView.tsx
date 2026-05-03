@@ -1275,37 +1275,59 @@ function CandidatesAndSearchPanel({
                 <Loader2 size={12} className="animate-spin" /> 검색 중…
               </div>
             )}
-            <div className="space-y-1">
-              {searchResults.slice(0, 8).map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => {
-                    onSelectCandidate(r)
-                    setSearchResults([])
-                    setSearchQuery('')
-                  }}
-                  className="flex w-full items-stretch gap-2 rounded-lg bg-white/5 p-1.5 text-left ring-1 ring-white/10 transition hover:bg-white/10"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium text-white" title={r.product_name}>
-                      {r.product_name}
+            <div className="space-y-1.5">
+              {searchResults.slice(0, 8).map((r) => {
+                const pk = computeShinsegaePerKg(
+                  r.standard_price,
+                  { quantity: r.spec_quantity, unit: r.spec_unit },
+                  r.ppu,
+                )
+                // 자세한 규격 텍스트 (검색 결과)
+                const parts: string[] = []
+                if (r.spec_raw) parts.push(r.spec_raw)
+                else if (r.spec_quantity != null && r.spec_unit) parts.push(`${r.spec_quantity}${r.spec_unit}`)
+                if (r.unit_raw && !parts.some((s) => s.toLowerCase().includes(r.unit_raw!.toLowerCase()))) parts.push(`/${r.unit_raw}`)
+                if (r.origin) parts.push(`· ${r.origin}`)
+                if (r.storage_temp) parts.push(`· ${r.storage_temp}`)
+                if (r.category) parts.push(`· ${r.category}${r.subcategory ? ` / ${r.subcategory}` : ''}`)
+                if (r.product_code) parts.push(`· #${r.product_code}`)
+                const specText = parts.join(' ')
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      onSelectCandidate(r)
+                      setSearchResults([])
+                      setSearchQuery('')
+                    }}
+                    className="flex w-full items-stretch gap-2 rounded-lg bg-white/5 p-2 text-left ring-1 ring-white/10 transition hover:bg-white/10"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="break-words text-sm font-bold text-white" title={r.product_name}>
+                        {r.product_name}
+                      </div>
+                      {specText && (
+                        <div className="mt-0.5 break-words text-[10px] text-gray-400">{specText}</div>
+                      )}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-gray-300">
+                        <span className="font-bold text-emerald-400">{formatCurrency(r.standard_price)}</span>
+                        {pk ? <span>· ₩{formatNumber(pk)}/kg</span> : null}
+                        {r.tax_type && (
+                          <span
+                            className={cn(
+                              'rounded px-1 py-0 text-[10px]',
+                              r.tax_type === '면세' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-amber-500/30 text-amber-200',
+                            )}
+                          >
+                            {r.tax_type}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-gray-300">
-                      <span className="font-semibold text-emerald-400">{formatCurrency(r.standard_price)}</span>
-                      {r.spec_quantity && r.spec_unit && <span>· {r.spec_quantity}{r.spec_unit}</span>}
-                      {(() => {
-                        const pk = computeShinsegaePerKg(
-                          r.standard_price,
-                          { quantity: r.spec_quantity, unit: r.spec_unit },
-                          r.ppu,
-                        )
-                        return pk ? <span>· ₩{formatNumber(pk)}/kg</span> : null
-                      })()}
-                    </div>
-                  </div>
-                  <span className="self-center text-[11px] font-medium text-blue-300 underline">선택</span>
-                </button>
-              ))}
+                    <span className="self-center text-[11px] font-medium text-blue-300 underline">선택</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}
@@ -1345,50 +1367,51 @@ function CandidateCard({
   const sav = candidateSavings(candidate, item, existingTotal)
   const isSaving = sav > 0
 
+  // 자세한 규격 텍스트 조립 (사용자 요청 #2/#3): 시각적으로 분리된 회색 라인
+  const specParts: string[] = []
+  if (candidate.spec_raw) specParts.push(candidate.spec_raw)
+  else if (candidate.spec_quantity != null && candidate.spec_unit) {
+    specParts.push(`${candidate.spec_quantity}${candidate.spec_unit}`)
+  }
+  if (candidate.unit_raw && !specParts.some((s) => s.toLowerCase().includes(candidate.unit_raw!.toLowerCase()))) {
+    specParts.push(`/${candidate.unit_raw}`)
+  }
+  if (candidate.origin) specParts.push(`· ${candidate.origin}`)
+  if (candidate.storage_temp) specParts.push(`· ${candidate.storage_temp}`)
+  if (candidate.category) {
+    specParts.push(`· ${candidate.category}${candidate.subcategory ? ` / ${candidate.subcategory}` : ''}`)
+  }
+  if (candidate.product_code) specParts.push(`· #${candidate.product_code}`)
+  const specText = specParts.join(' ')
+
   return (
     <button
       onClick={onSelect}
       className={cn(
-        'flex w-full items-stretch gap-2 rounded-lg border p-2.5 text-left transition',
+        'flex w-full items-stretch gap-3 rounded-lg border p-3 text-left transition',
         isSelected
           ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
           : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40',
       )}
     >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
-        <Package size={20} />
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+        <Package size={22} />
       </div>
       <div className="min-w-0 flex-1">
+        {/* 상단: #N + 제품명 (큰 볼드) + 우측 신뢰도 라벨 */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-gray-400">#{index}</span>
-              {isSelected && (
-                <span className="rounded bg-blue-600 px-1 py-0 text-[9px] font-semibold text-white">현재 매칭</span>
-              )}
+            <div className="flex items-baseline gap-2">
+              <span className="shrink-0 text-sm font-bold text-gray-400">#{index}</span>
+              <h4 className="break-words text-base font-bold leading-tight text-gray-900" title={candidate.product_name}>
+                {candidate.product_name}
+              </h4>
             </div>
-            <div className="mt-0.5 break-words text-xs font-semibold text-gray-900" title={candidate.product_name}>
-              {candidate.product_name}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-gray-600">
-              <span className="font-semibold text-gray-900">{formatCurrency(candidate.standard_price)}</span>
-              {candidate.spec_quantity && candidate.spec_unit && (
-                <span>· {candidate.spec_quantity}{candidate.spec_unit}</span>
-              )}
-              {perKg && <span>· ₩{formatNumber(perKg)}/kg</span>}
-              {candidate.tax_type && (
-                <span
-                  className={cn(
-                    'rounded px-1 py-0',
-                    candidate.tax_type === '면세'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-amber-100 text-amber-700',
-                  )}
-                >
-                  {candidate.tax_type}
-                </span>
-              )}
-            </div>
+            {isSelected && (
+              <span className="mt-1 inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
+                현재 매칭
+              </span>
+            )}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
@@ -1397,22 +1420,43 @@ function CandidateCard({
             >
               {conf.label} {conf.matchRatio > 0 && conf.matchRatio < 1.5 ? `${Math.round(conf.matchRatio * 100)}%` : ''}
             </span>
-            <span className="text-[9px] text-gray-400">
-              점수 {(score * 1000).toFixed(1)}
-            </span>
+            <span className="text-[9px] text-gray-400">점수 {(score * 1000).toFixed(1)}</span>
           </div>
         </div>
-        {sav !== 0 && (
-          <div className="mt-1 flex items-center justify-between border-t pt-1">
+
+        {/* 자세한 규격 라인 (시각적 분리 — 회색 작은 텍스트) */}
+        {specText && (
+          <div className="mt-1 break-words text-[11px] text-gray-500">{specText}</div>
+        )}
+
+        {/* 가격 / 환산단가 / 면세 */}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+          <span className="font-bold text-gray-900">{formatCurrency(candidate.standard_price)}</span>
+          {perKg && <span className="text-gray-600">· ₩{formatNumber(perKg)}/kg</span>}
+          {candidate.tax_type && (
             <span
               className={cn(
-                'inline-flex items-center gap-1 rounded-full px-1.5 py-0 text-[10px] font-bold',
+                'rounded px-1 py-0 text-[10px]',
+                candidate.tax_type === '면세' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+              )}
+            >
+              {candidate.tax_type}
+            </span>
+          )}
+        </div>
+
+        {/* 절감액 + 선택 */}
+        {sav !== 0 && (
+          <div className="mt-2 flex items-center justify-between border-t pt-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold',
                 isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
               )}
             >
               {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))} {isSaving ? '절감' : '추가'}
             </span>
-            <span className="text-[10px] font-medium text-blue-600 underline">
+            <span className="text-[11px] font-medium text-blue-600 underline">
               {isSelected ? '선택됨' : '선택'}
             </span>
           </div>

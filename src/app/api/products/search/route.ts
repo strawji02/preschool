@@ -123,20 +123,69 @@ export async function GET(request: NextRequest) {
       results = results.filter((p) => p.supplier === supplier)
     }
 
-    const products: MatchCandidate[] = results.map((p) => ({
-      id: p.id,
-      product_name: p.product_name,
-      standard_price: p.standard_price,
-      unit_normalized: p.unit_normalized,
-      spec_quantity: p.spec_quantity ?? undefined,
-      spec_unit: p.spec_unit ?? undefined,
-      supplier: p.supplier as Supplier,
-      match_score: p.match_score,
-    }))
+    // ── 자세한 규격 정보 enrichment (2026-05-04 추가) ──
+    // RPC가 반환하지 않는 컬럼들 (product_code/spec_raw/origin/subcategory/storage_temp/tax_type)을 별도 SELECT로 fetch.
+    const ids = results.map((p) => p.id).filter(Boolean)
+    let extraMap: Record<string, {
+      product_code?: string
+      spec_raw?: string
+      unit_raw?: string
+      origin?: string
+      category?: string
+      subcategory?: string
+      tax_type?: '과세' | '면세'
+      storage_temp?: string
+    }> = {}
+    if (ids.length > 0) {
+      const { data: extras } = await supabase
+        .from('products')
+        .select('id, product_code, spec_raw, unit_raw, origin, category, subcategory, tax_type, storage_temp')
+        .in('id', ids)
+      if (extras) {
+        extraMap = Object.fromEntries(
+          extras.map((e) => [
+            e.id as string,
+            {
+              product_code: e.product_code as string | undefined,
+              spec_raw: e.spec_raw as string | undefined,
+              unit_raw: e.unit_raw as string | undefined,
+              origin: e.origin as string | undefined,
+              category: e.category as string | undefined,
+              subcategory: e.subcategory as string | undefined,
+              tax_type: e.tax_type as '과세' | '면세' | undefined,
+              storage_temp: e.storage_temp as string | undefined,
+            },
+          ]),
+        )
+      }
+    }
+
+    const products = results.map((p) => {
+      const extra = extraMap[p.id] ?? {}
+      return {
+        id: p.id,
+        product_name: p.product_name,
+        standard_price: p.standard_price,
+        unit_normalized: p.unit_normalized,
+        spec_quantity: p.spec_quantity ?? undefined,
+        spec_unit: p.spec_unit ?? undefined,
+        supplier: p.supplier as Supplier,
+        match_score: p.match_score,
+        // 자세한 규격 정보
+        product_code: extra.product_code,
+        spec_raw: extra.spec_raw,
+        unit_raw: extra.unit_raw,
+        origin: extra.origin,
+        category: extra.category,
+        subcategory: extra.subcategory,
+        tax_type: extra.tax_type,
+        storage_temp: extra.storage_temp,
+      }
+    })
 
     return NextResponse.json<SearchProductsResponse>({
       success: true,
-      products,
+      products: products as unknown as MatchCandidate[],
     })
   } catch (error) {
     console.error('Search error:', error)

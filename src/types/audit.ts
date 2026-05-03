@@ -21,6 +21,13 @@ export interface SupplierMatch {
   category?: string
   spec_quantity?: number
   spec_unit?: string
+  // 신세계 DB 자세한 규격 정보 (2026-05-04 추가)
+  product_code?: string     // 제품 코드
+  spec_raw?: string         // 원본 규격 텍스트 (예: "1KG", "200G x 10")
+  unit_raw?: string         // 원본 단위 (예: "kg", "EA", "팩")
+  origin?: string           // 원산지 (예: "국내산", "중국")
+  subcategory?: string      // 세부 카테고리
+  storage_temp?: string     // 보관 온도 (실온/냉장/냉동)
   _funnelReasons?: string[] // 깔때기 알고리즘 감점 사유 (선택적)
 }
 
