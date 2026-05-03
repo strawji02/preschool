@@ -670,23 +670,24 @@ function ExistingItemDetail({
         <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
           <HighlightedText text={item.extracted_name} commonTokens={commonTokens} />
         </h3>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px]">
+        {/* 메타 chips 행 — 품목명(text-2xl=24px)의 80% = text-lg(약 19px), 출처는 작게 유지 */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-lg">
           {item.extracted_spec && (
-            <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
-              <Boxes size={11} />
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
+              <Boxes size={16} />
               <HighlightedText text={item.extracted_spec} commonTokens={commonTokens} />
             </span>
           )}
           {item.extracted_unit && (
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+            <span className="rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
               단위 <HighlightedText text={item.extracted_unit} commonTokens={commonTokens} />
             </span>
           )}
           {(item.source_file_name || item.page_number) && (
-            <span className="ml-auto text-[10px] text-gray-400">
+            <span className="ml-auto text-[11px] text-gray-400">
               {item.source_file_name && (
                 <span className="inline-flex items-center gap-0.5">
-                  <FileImage size={10} /> {item.source_file_name}
+                  <FileImage size={11} /> {item.source_file_name}
                 </span>
               )}
               {item.page_number != null && <span className="ml-1.5">p.{item.page_number}</span>}
@@ -935,30 +936,31 @@ function ShinsegaeMatching({
                 commonTokens={commonTokens}
               />
             </h3>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px]">
+            {/* 메타 chips 행 — 품목명(text-2xl=24px)의 80% ≈ text-lg(19px) */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-lg">
               {matchDetail?.product_code && (
-                <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
-                  <Tag size={11} /> {matchDetail.product_code}
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
+                  <Tag size={16} /> {matchDetail.product_code}
                 </span>
               )}
               {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
-                <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
-                  <Boxes size={11} /> {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
+                  <Boxes size={16} /> {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
                 </span>
               )}
               {matchDetail?.origin && (
-                <span className="inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 text-green-700">
-                  <MapPin size={11} />
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-green-100 px-2.5 py-1 text-green-700">
+                  <MapPin size={16} />
                   <HighlightedText text={matchDetail.origin} commonTokens={commonTokens} highlightClassName="font-bold" />
                   {matchDetail.origin_detail && (
-                    <span className="ml-0.5 text-[10px] text-green-600">({matchDetail.origin_detail})</span>
+                    <span className="ml-1 text-sm text-green-600">({matchDetail.origin_detail})</span>
                   )}
                 </span>
               )}
               {matchDetail?.tax_type && (
                 <span
                   className={cn(
-                    'rounded px-1.5 py-0.5',
+                    'rounded-md px-2.5 py-1',
                     matchDetail.tax_type === '면세' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
                   )}
                 >
@@ -966,12 +968,12 @@ function ShinsegaeMatching({
                 </span>
               )}
               {matchDetail?.storage_temp && (
-                <span className="inline-flex items-center gap-1 rounded bg-cyan-100 px-1.5 py-0.5 text-cyan-700">
-                  <Snowflake size={11} /> {matchDetail.storage_temp}
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-cyan-100 px-2.5 py-1 text-cyan-700">
+                  <Snowflake size={16} /> {matchDetail.storage_temp}
                 </span>
               )}
               {matchDetail?.category && (
-                <span className="rounded bg-purple-100 px-1.5 py-0.5 text-purple-700">
+                <span className="rounded-md bg-purple-100 px-2.5 py-1 text-purple-700">
                   {matchDetail.category}
                   {matchDetail.subcategory && `·${matchDetail.subcategory}`}
                 </span>
