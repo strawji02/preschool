@@ -156,12 +156,14 @@ export async function GET(request: NextRequest) {
       if (coreKw && coreKw !== query && coreKw.length >= 2 && !candidateKws.includes(coreKw)) {
         candidateKws.push(coreKw)
       }
+      // fallback에서는 충분히 많이 가져오기 (정확한 매칭이 limit 밖에 있으면 누락 — 최종 sort 후 slice)
+      const fbLimit = Math.max(limit * 3, 30)
       for (const fbKw of candidateKws) {
         try {
           const { data: fbData } = await supabase.rpc('search_products_hybrid', {
             search_term_raw: fbKw,
             search_term_clean: fbKw,
-            limit_count: Math.min(limit, 50),
+            limit_count: Math.min(fbLimit, 50),
             supplier_filter: supplier || undefined,
             bm25_weight: 0.5,
             semantic_weight: 0.5,
@@ -170,12 +172,12 @@ export async function GET(request: NextRequest) {
           const filteredFb = supplier ? fb.filter((p) => p.supplier === supplier) : fb
           const fbTopScore = filteredFb[0]?.match_score ?? 0
           if (fbTopScore > topScore) {
-            // fallback 결과가 더 좋음 → 앞에 배치
+            // fallback 결과가 더 좋음 → 앞에 배치 (sort 전이라 fbLimit으로 자르기)
             const seen = new Set(filteredFb.map((p) => p.id))
             results = [
               ...filteredFb,
               ...results.filter((p) => !seen.has(p.id)),
-            ].slice(0, limit)
+            ].slice(0, fbLimit)
             console.log(`  [Search] Fallback applied: "${query}" → "${fbKw}" (score ${topScore.toFixed(4)} → ${fbTopScore.toFixed(4)})`)
             // ⚠️ break 제거 — 모든 fallback 후보 시도해서 결과 누적 (예: 칼집비엔나 → 비엔나 + 칼집 둘 다)
           }
