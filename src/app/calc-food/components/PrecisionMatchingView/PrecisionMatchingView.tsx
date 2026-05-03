@@ -12,7 +12,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2, AlertTriangle,
-  FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X,
+  FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -27,11 +27,13 @@ interface PrecisionMatchingViewProps {
   items: ComparisonItem[]
   pages?: PageImage[]
   supplierName?: string
+  sessionId?: string
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
   onConfirmItem: (itemId: string, supplier?: Supplier) => void
   onConfirmAllAutoMatched: () => void
   onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
+  onReload?: () => void
 }
 
 interface ProductDetail {
@@ -105,17 +107,47 @@ export function PrecisionMatchingView({
   items,
   pages = [],
   supplierName = '업체',
+  sessionId,
   onSelectCandidate,
   onConfirmItem,
   onConfirmAllAutoMatched,
   onAutoExcludeUnmatched,
   onProceedToReport,
+  onReload,
 }: PrecisionMatchingViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
   const [sortMode, setSortMode] = useState<SortMode>('match')
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+  const [rematching, setRematching] = useState(false)
+  const [rematchResult, setRematchResult] = useState<{ rematched: number; stillUnmatched: number; total: number } | null>(null)
+
+  const runRematch = useCallback(async () => {
+    if (!sessionId || rematching) return
+    if (!confirm('CJ로 잘못 매칭된 항목 + 미매칭 항목을 SHINSEGAE 카탈로그에서 자동 재매칭합니다. 진행하시겠습니까?')) return
+    setRematching(true)
+    setRematchResult(null)
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/rematch-cj`, { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setRematchResult({
+          rematched: data.rematched,
+          stillUnmatched: data.stillUnmatched,
+          total: data.total,
+        })
+        // 데이터 다시 로드
+        if (onReload) onReload()
+      } else {
+        alert(`재매칭 실패: ${data.error ?? 'unknown'}`)
+      }
+    } catch (e) {
+      alert(`재매칭 오류: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally {
+      setRematching(false)
+    }
+  }, [sessionId, rematching, onReload])
 
   const currentItem = items[selectedIndex] ?? null
 
@@ -265,6 +297,23 @@ export function PrecisionMatchingView({
           <kbd className="ml-2 rounded bg-gray-100 px-1.5 py-0.5">1-9</kbd>후보 선택
         </div>
         <div className="flex items-center gap-2">
+          {sessionId && (
+            <button
+              onClick={runRematch}
+              disabled={rematching}
+              className="flex items-center gap-2 rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm text-purple-700 hover:bg-purple-100 disabled:opacity-50"
+              title="CJ로 잘못 매칭된 항목 + 미매칭 항목을 신세계 카탈로그에서 자동 재매칭"
+            >
+              {rematching ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <RefreshCw size={14} />
+              )}
+              {rematchResult
+                ? `재매칭 완료 (${rematchResult.rematched}건)`
+                : '신세계 자동 재매칭'}
+            </button>
+          )}
           {items.some((i) => !i.is_confirmed && (i.cj_match || i.ssg_match)) && (
             <button
               onClick={onConfirmAllAutoMatched}
@@ -1104,16 +1153,36 @@ interface CandidateCardProps {
   onSelect: () => void
 }
 
+/**
+ * 절대 점수 기반 신뢰도 4단계 (정규화 % 표시는 거짓 정보 — 0.008과 0.0082가 99% vs 100%로 보이는 문제)
+ *  - >= 0.05: 강함 (녹색) — 키워드 다수 일치
+ *  - >= 0.02: 보통 (파란) — 부분 일치
+ *  - >= 0.01: 약함 (노랑) — trigram 중첩 정도
+ *  - <  0.01: 매우 약함 (회색) — 사실상 무관, "참고" 표시
+ */
+function getMatchConfidence(score: number): {
+  label: string
+  bgColor: string
+  textColor: string
+  showAsReference: boolean
+} {
+  if (score >= 0.05) return { label: '강함', bgColor: 'bg-green-100', textColor: 'text-green-700', showAsReference: false }
+  if (score >= 0.02) return { label: '보통', bgColor: 'bg-blue-100', textColor: 'text-blue-700', showAsReference: false }
+  if (score >= 0.01) return { label: '약함', bgColor: 'bg-amber-100', textColor: 'text-amber-700', showAsReference: false }
+  return { label: '참고', bgColor: 'bg-gray-100', textColor: 'text-gray-500', showAsReference: true }
+}
+
 function CandidateCard({
   index,
   candidate,
   isSelected,
   item,
   existingTotal,
-  maxScore,
+  maxScore: _maxScore,
   onSelect,
 }: CandidateCardProps) {
-  const matchPct = Math.min(100, Math.round(((candidate.match_score ?? 0) / maxScore) * 100))
+  const score = candidate.match_score ?? 0
+  const conf = getMatchConfidence(score)
   const perKg = computeShinsegaePerKg(
     candidate.standard_price,
     { quantity: candidate.spec_quantity, unit: candidate.spec_unit },
@@ -1169,18 +1238,14 @@ function CandidateCard({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span
-              className={cn(
-                'rounded-md px-1.5 py-0.5 text-[10px] font-bold',
-                matchPct >= 80
-                  ? 'bg-green-100 text-green-700'
-                  : matchPct >= 50
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'bg-amber-100 text-amber-800',
-              )}
+              className={cn('rounded-md px-1.5 py-0.5 text-[10px] font-bold', conf.bgColor, conf.textColor)}
+              title={`매칭 점수: ${score.toFixed(4)}`}
             >
-              {matchPct}%
+              {conf.label}
             </span>
-            <span className="text-[9px] text-gray-400">일치율</span>
+            <span className="text-[9px] text-gray-400" title={`hybrid score = ${score.toFixed(4)}`}>
+              점수 {(score * 1000).toFixed(1)}
+            </span>
           </div>
         </div>
         {sav !== 0 && (

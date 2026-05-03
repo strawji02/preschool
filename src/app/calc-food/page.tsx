@@ -206,11 +206,13 @@ export default function CalcFoodPage() {
               items={state.items}
               pages={state.pages}
               supplierName={state.supplierName || '업체'}
+              sessionId={state.sessionId ?? undefined}
               onSelectCandidate={selectCandidate}
               onConfirmItem={confirmItem}
               onConfirmAllAutoMatched={confirmAllAutoMatched}
               onAutoExcludeUnmatched={autoExcludeUnmatched}
               onProceedToReport={proceedToReport}
+              onReload={() => state.sessionId && loadSession(state.sessionId)}
             />
           </div>
         )}

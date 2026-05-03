@@ -29,9 +29,13 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Session not found' }, { status: 404 })
     }
 
+    // products JOIN으로 매칭 제품의 supplier 검증 (2026-05-04)
+    // SHINSEGAE-only 시스템 — CJ 매칭은 unmatched로 강등
     const { data: itemsRaw, error: itemsErr } = await supabase
       .from('audit_items')
-      .select('*')
+      .select(
+        '*, matched_product:products!matched_product_id(id, supplier, product_name, product_code, spec_quantity, spec_unit, unit_normalized, category, origin, tax_type)',
+      )
       .eq('session_id', id)
       .order('page_number', { ascending: true })
       .order('row_index', { ascending: true })
@@ -39,24 +43,48 @@ export async function GET(
       return NextResponse.json({ success: false, error: itemsErr.message }, { status: 500 })
     }
 
-    // ComparisonItem 형태로 매핑 (matched_product 정보는 product 테이블 join이 필요하나,
-    // 실용 측면에서 standard_price/match_score로 충분 — 매칭 후보 재조회는 SplitView에서 처리)
+    // ComparisonItem 형태로 매핑 — supplier 검증 통과한 매칭만 ssg_match로 복원
+    let invalidCjMatchCount = 0
     const items: ComparisonItem[] = (itemsRaw ?? []).map((it) => {
       const supplyAmount = it.extracted_supply_amount ?? undefined
       const taxAmount = it.extracted_tax_amount ?? undefined
       const totalPrice = it.extracted_total_price ?? undefined
-      const matchStatus = (it.match_status ?? 'unmatched') as MatchStatus
 
-      // 단일 매칭 정보 → cj/ssg 어느 쪽인지 식별 불가하므로 ssg_match로만 복원
-      // (현재 supplier 컬럼이 audit_sessions에 있고 SHINSEGAE 단일 시나리오 가정)
-      const ssgMatch: SupplierMatch | undefined = it.matched_product_id
+      // 매칭 supplier 검증: SHINSEGAE만 인정
+      const mp = it.matched_product as
+        | {
+            id: string
+            supplier: string
+            product_name: string
+            product_code?: string
+            spec_quantity?: number
+            spec_unit?: string
+            unit_normalized?: string
+            tax_type?: '과세' | '면세'
+            category?: string
+          }
+        | null
+      const isValidSsg = !!mp && mp.supplier === 'SHINSEGAE'
+      if (mp && mp.supplier !== 'SHINSEGAE') invalidCjMatchCount++
+
+      const ssgMatch: SupplierMatch | undefined = isValidSsg && it.matched_product_id
         ? {
             id: it.matched_product_id,
-            product_name: '',           // 실제 product 정보는 SplitView에서 lazy fetch
+            product_name: mp!.product_name ?? '',
             standard_price: Number(it.standard_price ?? 0),
             match_score: Number(it.match_score ?? 0),
+            spec_quantity: mp!.spec_quantity ?? undefined,
+            spec_unit: mp!.spec_unit ?? undefined,
+            unit_normalized: mp!.unit_normalized ?? undefined,
+            tax_type: mp!.tax_type,
+            category: mp!.category,
           }
         : undefined
+
+      // 매칭 상태: 잘못된 CJ 매칭은 unmatched로 강등
+      const matchStatus: MatchStatus = ssgMatch
+        ? ((it.match_status ?? 'unmatched') as MatchStatus)
+        : 'unmatched'
 
       const savings = calculateComparisonSavings(
         it.extracted_unit_price ?? 0,
@@ -81,16 +109,20 @@ export async function GET(
         ssg_match: ssgMatch,
         cj_candidates: [],
         ssg_candidates: [],
-        is_confirmed: !!it.matched_product_id,
+        is_confirmed: !!ssgMatch, // 잘못된 CJ 매칭은 미확정 처리
         cj_confirmed: false,
-        ssg_confirmed: !!it.matched_product_id,
+        ssg_confirmed: !!ssgMatch,
         savings,
         match_status: matchStatus,
         is_excluded: it.is_excluded ?? false,
+        adjusted_quantity: it.adjusted_quantity ?? undefined,
+        adjusted_unit_weight_g: it.adjusted_unit_weight_g ?? undefined,
+        adjusted_pack_unit: it.adjusted_pack_unit ?? undefined,
+        precision_reviewed_at: it.precision_reviewed_at ?? undefined,
       }
     })
 
-    return NextResponse.json({ success: true, session, items })
+    return NextResponse.json({ success: true, session, items, invalidCjMatchCount })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })

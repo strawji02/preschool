@@ -916,6 +916,10 @@ export async function findComparisonMatches(
     let cjData = cjResult.data as RpcResult[] | null
     let ssgData = ssgResult.data as RpcResult[] | null
 
+    // SHINSEGAE 단가 비교 시스템 (2026-05-04) — CJ 매칭 비활성화.
+    // 검색 비용은 발생하지만 결과를 사용하지 않음 (다음 최적화에서 검색 자체 제거 예정).
+    cjData = []
+
     // Fallback search: 결과 없거나 낮은 점수일 때 코어 키워드로 재검색
     const cjTopScore = cjData?.[0]?.match_score ?? 0
     const ssgTopScore = ssgData?.[0]?.match_score ?? 0
@@ -1004,6 +1008,9 @@ export async function findComparisonMatches(
       }
 
       console.log(`  [Comparison] After fallback: CJ=${cjData?.length ?? 0}, SSG=${ssgData?.length ?? 0}`)
+
+      // SHINSEGAE-only 모드: fallback 후에도 CJ는 비움 (2026-05-04)
+      cjData = []
     }
 
     let cj_candidates: SupplierMatch[]
