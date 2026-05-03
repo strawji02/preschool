@@ -128,12 +128,23 @@ export async function GET(request: NextRequest) {
     // 한국어 식자재명 관행: 브랜드명이 앞에 오고 식자재명이 뒤에 옴
     const topScore = results[0]?.match_score ?? 0
     if (topScore < 0.015 && searchMode !== 'semantic') {
-      // 후보 키워드 (우선순위): 마지막 어절 → extractCoreKeyword
+      // 후보 키워드 (우선순위):
+      // 1) 마지막 어절 (예: "이츠웰 신선한계란" → "신선한계란")
+      // 2) 마지막 어절의 suffix 2~3자 (한국어 합성어 분해, 예: "신선한계란" → "계란")
+      // 3) extractCoreKeyword
       const tokens = query.trim().split(/\s+/).filter((t) => t.length >= 2)
       const candidateKws: string[] = []
-      if (tokens.length > 1) {
+      if (tokens.length > 0) {
         const lastTok = tokens[tokens.length - 1]
-        if (lastTok.length >= 2) candidateKws.push(lastTok)
+        if (lastTok.length >= 2 && lastTok !== query) candidateKws.push(lastTok)
+        // 한국어 합성어 분해: 마지막 어절의 suffix 추출 (메인 명사가 뒤에 옴)
+        // "신선한계란" → "계란"(2자) / "한계란"(3자)
+        if (lastTok.length >= 4) {
+          for (let len = 2; len <= 3; len++) {
+            const suffix = lastTok.slice(lastTok.length - len)
+            if (!candidateKws.includes(suffix)) candidateKws.push(suffix)
+          }
+        }
       }
       const coreKw = extractCoreKeyword(query)
       if (coreKw && coreKw !== query && coreKw.length >= 2 && !candidateKws.includes(coreKw)) {
