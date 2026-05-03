@@ -22,6 +22,13 @@ const ALLOWED_FIELDS = [
   'adjusted_unit_weight_g',
   'adjusted_pack_unit',
   'precision_reviewed_at',
+  // 매칭 변경/확정 (2026-05-04) — 새로고침 시 보존
+  'matched_product_id',
+  'match_score',
+  'match_status',
+  'standard_price',
+  'match_candidates',
+  'is_excluded',
 ] as const
 
 export async function PATCH(

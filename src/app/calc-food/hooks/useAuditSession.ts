@@ -1565,16 +1565,36 @@ export function useAuditSession() {
     dispatch({ type: 'RESET' })
   }, [])
 
-  // 2-Step Workflow 함수들
+  // 2-Step Workflow 함수들 (2026-05-04: DB 저장 추가 — 새로고침 후 보존)
   const selectCandidate = useCallback(
     (itemId: string, supplier: Supplier, candidate: SupplierMatch) => {
       dispatch({ type: 'SELECT_CANDIDATE', itemId, supplier, candidate })
+      // DB 저장: 빈 매칭(id 없음)은 매칭 제거, 그 외는 매칭 변경
+      const isClearMatch = !candidate.id
+      void fetch(`/api/audit-items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          matched_product_id: isClearMatch ? null : candidate.id,
+          standard_price: isClearMatch ? null : candidate.standard_price,
+          match_score: isClearMatch ? null : candidate.match_score,
+          match_status: isClearMatch ? 'unmatched' : 'manual_matched',
+        }),
+      }).catch((e) => console.warn('selectCandidate DB 저장 실패:', e))
     },
     []
   )
 
   const confirmItem = useCallback((itemId: string, supplier?: Supplier) => {
     dispatch({ type: 'CONFIRM_ITEM', itemId, supplier })
+    // DB 저장: 매칭 상태를 manual_matched로 갱신 (확정 표시)
+    void fetch(`/api/audit-items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        match_status: 'manual_matched',
+      }),
+    }).catch((e) => console.warn('confirmItem DB 저장 실패:', e))
   }, [])
 
   const confirmAllAutoMatched = useCallback(() => {

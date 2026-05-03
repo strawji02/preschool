@@ -112,6 +112,12 @@ export async function GET(
         ssgMatch?.standard_price,
       )
 
+      // 옵션 3 (2026-05-04): match_candidates JSONB → ssg_candidates 복원
+      // 매칭 시점의 후보를 그대로 사용 → DB 매칭과 후보 표시 일관성
+      const storedCandidates = Array.isArray(it.match_candidates)
+        ? (it.match_candidates as SupplierMatch[]).filter((c) => c && c.id)
+        : []
+
       return {
         id: it.id,
         extracted_name: it.extracted_name ?? '',
@@ -127,7 +133,7 @@ export async function GET(
         cj_match: undefined,
         ssg_match: ssgMatch,
         cj_candidates: [],
-        ssg_candidates: [],
+        ssg_candidates: storedCandidates,
         is_confirmed: isExplicitlyConfirmed,
         cj_confirmed: false,
         ssg_confirmed: isExplicitlyConfirmed,

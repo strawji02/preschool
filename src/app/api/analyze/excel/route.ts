@@ -135,7 +135,10 @@ export async function POST(request: NextRequest) {
           extracted_total_price: item.total_price,
           matched_product_id: bestMatch?.id,
           match_score: safeMatchScore,
-          match_candidates: null,
+          // 옵션 3 (2026-05-04): ssg_candidates를 DB에 저장
+          match_candidates: match.ssg_candidates && match.ssg_candidates.length > 0
+            ? match.ssg_candidates
+            : null,
           match_status: match.status,
           standard_price: bestMatch?.standard_price,
           price_difference: bestMatch ? item.unit_price - bestMatch.standard_price : undefined,
