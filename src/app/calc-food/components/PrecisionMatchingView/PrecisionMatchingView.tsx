@@ -633,7 +633,8 @@ function ExistingItemDetail({
   onOpenImage?: () => void
   commonTokens: Set<string>
 }) {
-  const existingWeightG = parseSpecToGrams(item.extracted_spec)
+  // spec에 단위중량 없으면 품목명에서도 추출 시도 (예: "종가집 맛김치(생 5KG/BOX)" → 5000g)
+  const existingWeightG = parseSpecToGrams(item.extracted_spec) ?? parseSpecToGrams(item.extracted_name)
   const total = getExistingTotal(item)
   const perKg =
     existingWeightG && item.extracted_quantity > 0
@@ -815,7 +816,8 @@ function ShinsegaeMatching({
   }, [item.ssg_match?.id, item.ssg_match])
   const ssgMatch = enrichedMatch
 
-  const existingWeightG = parseSpecToGrams(item.extracted_spec)
+  // spec에 단위중량 없으면 품목명에서도 추출 시도 (예: "종가집 맛김치(생 5KG/BOX)" → 5000g)
+  const existingWeightG = parseSpecToGrams(item.extracted_spec) ?? parseSpecToGrams(item.extracted_name)
   const existingTotal = getExistingTotal(item)
 
   // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
