@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
-import { dualNormalize } from '@/lib/preprocessing'
+import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -121,6 +121,51 @@ export async function GET(request: NextRequest) {
     // supplier 필터가 있으면 결과에서 필터링 (semantic 모드는 이미 RPC에서 필터링됨)
     if (supplier && searchMode !== 'semantic') {
       results = results.filter((p) => p.supplier === supplier)
+    }
+
+    // ── Fallback search (2026-05-04): 결과 점수 너무 낮으면 핵심 키워드로 재검색 ──
+    // 예: "이츠웰아이누리 느타리버섯" → 무관한 결과 → 마지막 어절 "느타리버섯"으로 재검색
+    // 한국어 식자재명 관행: 브랜드명이 앞에 오고 식자재명이 뒤에 옴
+    const topScore = results[0]?.match_score ?? 0
+    if (topScore < 0.015 && searchMode !== 'semantic') {
+      // 후보 키워드 (우선순위): 마지막 어절 → extractCoreKeyword
+      const tokens = query.trim().split(/\s+/).filter((t) => t.length >= 2)
+      const candidateKws: string[] = []
+      if (tokens.length > 1) {
+        const lastTok = tokens[tokens.length - 1]
+        if (lastTok.length >= 2) candidateKws.push(lastTok)
+      }
+      const coreKw = extractCoreKeyword(query)
+      if (coreKw && coreKw !== query && coreKw.length >= 2 && !candidateKws.includes(coreKw)) {
+        candidateKws.push(coreKw)
+      }
+      for (const fbKw of candidateKws) {
+        try {
+          const { data: fbData } = await supabase.rpc('search_products_hybrid', {
+            search_term_raw: fbKw,
+            search_term_clean: fbKw,
+            limit_count: Math.min(limit, 50),
+            supplier_filter: supplier || undefined,
+            bm25_weight: 0.5,
+            semantic_weight: 0.5,
+          })
+          const fb = (fbData as RpcResult[] | null) ?? []
+          const filteredFb = supplier ? fb.filter((p) => p.supplier === supplier) : fb
+          const fbTopScore = filteredFb[0]?.match_score ?? 0
+          if (fbTopScore > topScore) {
+            // fallback 결과가 더 좋음 → 앞에 배치
+            const seen = new Set(filteredFb.map((p) => p.id))
+            results = [
+              ...filteredFb,
+              ...results.filter((p) => !seen.has(p.id)),
+            ].slice(0, limit)
+            console.log(`  [Search] Fallback applied: "${query}" → "${fbKw}" (score ${topScore.toFixed(4)} → ${fbTopScore.toFixed(4)})`)
+            break  // 첫 번째 성공한 fallback 사용
+          }
+        } catch (e) {
+          console.warn(`Fallback search "${fbKw}" 실패:`, e)
+        }
+      }
     }
 
     // ── 자세한 규격 정보 enrichment (2026-05-04 추가) ──
