@@ -1103,23 +1103,24 @@ function CandidatesAndSearchPanel({
   const ssgMatch = item.ssg_match
   const existingTotal = getExistingTotal(item)
 
-  // 후보 자동 채움 — 항상 lazy fetch 후 DB 후보와 merge (2026-05-04)
+  // 후보 자동 채움 — 항목 변경 시 1회 lazy fetch + DB 후보와 merge (2026-05-04)
   // 매칭 시점의 후보가 잘못된 경우 (예: 느타리버섯 → 유리창닦이) 실시간 검색으로 보충
   useEffect(() => {
     const q = item.extracted_name?.trim()
     if (!q) return
     let cancelled = false
     setLoadingCandidates(true)
+    // closure로 item 캡처 (의존성 안정화 — 부모 리렌더로 인한 무한 fetch 방지)
+    const dbCandsAtMount = item.ssg_candidates ?? []
     fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return
         if (data.success && Array.isArray(data.products)) {
-          const dbCands = item.ssg_candidates ?? []
-          const dbIds = new Set(dbCands.map((c) => c.id))
+          const dbIds = new Set(dbCandsAtMount.map((c) => c.id))
           const fresh = data.products as SupplierMatch[]
           // DB 후보 + 신선한 검색 결과 (중복 제거) → 토큰 정렬 시 정확한 매칭이 위로
-          const merged = [...dbCands, ...fresh.filter((p) => !dbIds.has(p.id))]
+          const merged = [...dbCandsAtMount, ...fresh.filter((p) => !dbIds.has(p.id))]
           setLiveCandidates(merged)
         }
       })
@@ -1130,7 +1131,8 @@ function CandidatesAndSearchPanel({
     return () => {
       cancelled = true
     }
-  }, [item.extracted_name, item.id, item.ssg_candidates])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id, item.extracted_name])
 
   // 토큰 매칭 비율 캐시 (정렬용 + UI 표시용)
   const candidateConfidences = useMemo(() => {
