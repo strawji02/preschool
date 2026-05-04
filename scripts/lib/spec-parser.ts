@@ -94,6 +94,9 @@ export function parseShinsegaeSpec(spec: string): ParsedSpec {
   }
 
   spec = spec.trim()
+  // 한국 표기 천단위 콤마 제거 (예: "1,000G" → "1000G")
+  // 콤마 뒤에 정확히 3자리 숫자가 오는 경우만 천단위로 간주
+  spec = spec.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
 
   // 패턴 1: 단순 숫자+단위 - "500G", "1.5KG"
   const pattern1 = /^(\d+(?:[.,]\d+)?)\s*([A-Za-z]+)$/

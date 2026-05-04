@@ -141,6 +141,10 @@ export function parseSpec(spec: string): ParsedSpec {
     isValid: false,
   }
 
+  // 한국 표기 천단위 콤마 제거 (예: "1,000G" → "1000G")
+  // 콤마 뒤에 정확히 3자리 숫자가 오는 경우만 천단위로 간주
+  spec = spec.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
+
   try {
     // 1. 괄호 안 내용 추출 (내부 포장)
     const parenthesesMatches = Array.from(spec.matchAll(PARENTHESES_REGEX))
