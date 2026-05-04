@@ -1167,7 +1167,7 @@ function CandidatesAndSearchPanel({
     setLoadingCandidates(true)
     // closure로 item 캡처 (의존성 안정화 — 부모 리렌더로 인한 무한 fetch 방지)
     const dbCandsAtMount = item.ssg_candidates ?? []
-    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
+    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return
