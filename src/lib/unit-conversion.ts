@@ -138,3 +138,52 @@ export function computeSavings(originalTotal: number, newTotal: number): {
     isSaving: amount > 0,
   }
 }
+
+/**
+ * 매칭된 신세계 항목의 정밀 환산 견적 (₩).
+ *
+ * 우선순위:
+ *  1) ppk × adjusted_unit_weight_g × adjusted_qty (사용자 조정값 우선)
+ *  2) ppk × spec_quantity*spec_unit→g × adjusted_qty (DB 단위중량)
+ *  3) standard_price × adjusted_qty (정밀 환산 불가)
+ *
+ * 정밀 환산이 필요한 이유:
+ *  - 사용자 발주: 1KG → 신세계 5KG짜리 매칭의 경우
+ *  - 단순 (standard_price × qty)는 5KG 한 봉 가격이지만
+ *  - 정밀: ppk 환산해서 1KG어치 가격 (5배 차이)
+ *
+ * 매칭 화면 KPI / 리포트 / 엑셀 다운로드 통일 (2026-05-04).
+ */
+export function estimateSsgTotal(item: {
+  ssg_match?: {
+    standard_price?: number
+    spec_quantity?: number | null
+    spec_unit?: string | null
+    ppu?: number | null
+  } | null
+  extracted_quantity: number
+  adjusted_quantity?: number
+  adjusted_unit_weight_g?: number
+}): number {
+  const m = item.ssg_match
+  if (!m) return 0
+  const ppk = computeShinsegaePerKg(
+    m.standard_price ?? 0,
+    { quantity: m.spec_quantity ?? null, unit: m.spec_unit ?? null },
+    m.ppu ?? null,
+  )
+  const qty = item.adjusted_quantity ?? item.extracted_quantity
+  if (ppk && item.adjusted_unit_weight_g) {
+    return Math.round((ppk / 1000) * item.adjusted_unit_weight_g) * qty
+  }
+  if (ppk && m.spec_quantity && m.spec_unit) {
+    const u = m.spec_unit.toUpperCase()
+    let g = 0
+    if (u === 'KG') g = m.spec_quantity * 1000
+    else if (u === 'G') g = m.spec_quantity
+    else if (u === 'L') g = m.spec_quantity * 1000
+    else if (u === 'ML') g = m.spec_quantity
+    if (g > 0) return Math.round((ppk / 1000) * g) * qty
+  }
+  return (m.standard_price ?? 0) * qty
+}

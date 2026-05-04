@@ -5,6 +5,7 @@ import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsRe
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
+import { estimateSsgTotal } from '@/lib/unit-conversion'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
@@ -1719,11 +1720,12 @@ export function useAuditSession() {
         cjComparableSupplier += billedCost
       }
 
-      // SSG 시나리오 (비교 가능 품목만)
+      // SSG 시나리오 (비교 가능 품목만) — 정밀 환산 사용 (매칭 화면 KPI와 통일)
+      // ppk × 단위중량 × adjusted_qty (단위중량/포장이 다른 매칭에서 정확)
       ssgComparableOur += billedCost
       ssgComparableItems++
       if (item.ssg_match) {
-        ssgComparableSupplier += item.ssg_match.standard_price * item.extracted_quantity
+        ssgComparableSupplier += estimateSsgTotal(item)
         ssgMatchedCount++
       } else {
         ssgComparableSupplier += billedCost

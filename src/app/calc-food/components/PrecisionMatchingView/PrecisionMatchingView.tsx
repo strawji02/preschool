@@ -21,7 +21,7 @@ import type { PageImage } from '@/lib/pdf-processor'
 import { PdfModal } from '../SplitView/PdfModal'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import {
-  parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings,
+  parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
@@ -158,26 +158,8 @@ function getExistingTotal(item: ComparisonItem): number {
   return item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
 }
 
-/* 항목별 예상 신세계 견적 (정밀 환산이 가능하면 ppk × 단위중량 × 수량, 아니면 표준가 × 수량) */
-function estimateSsgTotal(item: ComparisonItem): number {
-  const m = item.ssg_match
-  if (!m) return 0
-  const ppk = computeShinsegaePerKg(m.standard_price, { quantity: m.spec_quantity, unit: m.spec_unit }, m.ppu)
-  const qty = item.adjusted_quantity ?? item.extracted_quantity
-  if (ppk && item.adjusted_unit_weight_g) {
-    return Math.round((ppk / 1000) * item.adjusted_unit_weight_g) * qty
-  }
-  if (ppk && m.spec_quantity && m.spec_unit) {
-    const u = m.spec_unit.toUpperCase()
-    let g = 0
-    if (u === 'KG') g = m.spec_quantity * 1000
-    else if (u === 'G') g = m.spec_quantity
-    else if (u === 'L') g = m.spec_quantity * 1000
-    else if (u === 'ML') g = m.spec_quantity
-    if (g > 0) return Math.round((ppk / 1000) * g) * qty
-  }
-  return m.standard_price * qty
-}
+/* 항목별 예상 신세계 견적은 src/lib/unit-conversion.ts의 estimateSsgTotal 사용
+   (리포트·엑셀 다운로드와 통일 — 2026-05-04) */
 
 /* ────────────────────────────────────────────────────────── */
 /* 메인 — KPI 대시보드 + 3분할 레이아웃                          */

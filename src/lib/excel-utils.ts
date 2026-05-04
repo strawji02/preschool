@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { ComparisonItem } from '@/types/audit'
+import { estimateSsgTotal } from './unit-conversion'
 
 /**
  * 엑셀 행 데이터 타입
@@ -66,9 +67,13 @@ function itemToExcelRow(item: ComparisonItem, index: number): ExcelRow | null {
     ? `${((cjDiff / ourAmount) * 100).toFixed(1)}%`
     : '-'
 
-  // 신세계 데이터
-  const ssgPrice = item.ssg_match?.standard_price ?? 0
-  const ssgAmount = item.ssg_match ? ssgPrice * quantity : 0
+  // 신세계 데이터 — 정밀 환산 (매칭 화면 KPI / 리포트와 통일, 2026-05-04)
+  // standard_price × qty가 아닌 ppk × 단위중량 환산을 사용해야 단위중량/포장 차이 정확
+  const ssgAmount = item.ssg_match ? estimateSsgTotal(item) : 0
+  const ssgQty = item.adjusted_quantity ?? quantity
+  const ssgPrice = item.ssg_match
+    ? (ssgQty > 0 ? Math.round(ssgAmount / ssgQty) : (item.ssg_match.standard_price ?? 0))
+    : 0
   const ssgDiff = item.ssg_match ? ssgAmount - ourAmount : 0
   const ssgRate = item.ssg_match && ourAmount !== 0
     ? `${((ssgDiff / ourAmount) * 100).toFixed(1)}%`
