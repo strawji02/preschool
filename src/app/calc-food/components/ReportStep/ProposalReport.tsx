@@ -125,6 +125,30 @@ export function ProposalReport({
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
 
+  // initialExtras prop이 비동기로 늦게 도착한 경우 state 동기화 + 자동 저장 ready 플래그
+  // (마운트 시점에 fetch가 안 끝났으면 useState initial은 DEFAULT_EXTRAS만 잡음 → 사용자가 본 저장값과 다름)
+  // ready=false 동안 자동 저장도 막아 DB 덮어쓰기 방지
+  const [extrasReady, setExtrasReady] = useState(false)
+  useEffect(() => {
+    if (!initialExtras) {
+      // 한 번도 저장된 적 없는 세션 → ready=true (자동 저장 허용)
+      setExtrasReady(true)
+      return
+    }
+    if (initialExtras.items && initialExtras.items.length > 0) {
+      const merged = DEFAULT_EXTRAS.map((d) => {
+        const saved = initialExtras.items?.find((i) => i.key === d.key)
+        return saved ? { ...d, ...saved } : d
+      })
+      const extra = initialExtras.items.filter((i) => !DEFAULT_EXTRAS.some((d) => d.key === i.key))
+      setExtras([...merged, ...extra])
+    }
+    if (initialExtras.proposed_to) setProposedTo(initialExtras.proposed_to)
+    if (initialExtras.based_on_period) setPeriod(initialExtras.based_on_period)
+    if (typeof initialExtras.children_count === 'number') setChildrenCount(initialExtras.children_count)
+    setExtrasReady(true)
+  }, [initialExtras])
+
   // 부가서비스 자동 계산 (2026-05-04 수식 확정)
   //   per_child=true:  단가(회당) = 인당단가 × 원아수 × multiplier
   //   per_child=false: 단가(회당) = 인당단가 × multiplier  (원아수 무관)
@@ -197,14 +221,15 @@ export function ProposalReport({
   }
 
   // debounce 자동 저장 (1.5s)
+  // ready=false 동안은 저장 X — initialExtras fetch 도착 전에 DEFAULT 데이터로 DB 덮어쓰기 방지
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || !extrasReady) return
     const t = setTimeout(() => {
       persist()
     }, 1500)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extras, proposedTo, period, childrenCount, sessionId])
+  }, [extras, proposedTo, period, childrenCount, sessionId, extrasReady])
 
   // 인쇄 트리거
   const handlePrint = () => {
