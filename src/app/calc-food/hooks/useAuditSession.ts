@@ -163,7 +163,7 @@ type AuditAction =
   // 2-Step Workflow 액션 (새로 추가)
   | { type: 'SET_STEP'; step: AnalysisStep }
   | { type: 'SELECT_CANDIDATE'; itemId: string; supplier: Supplier; candidate: SupplierMatch }
-  | { type: 'CONFIRM_ITEM'; itemId: string; supplier?: Supplier }  // supplier 추가
+  | { type: 'CONFIRM_ITEM'; itemId: string; supplier?: Supplier; adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string } }  // supplier + 정밀 검수 조정값
   | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
   | { type: 'AUTO_EXCLUDE_UNMATCHED' }
   | { type: 'PROCEED_TO_REPORT' }
@@ -636,9 +636,20 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
       const newItems = state.items.map((item) => {
         if (item.id !== action.itemId) return item
 
+        // 정밀 검수 조정값 머지 (precision view에서 발주수량/단위중량/포장단위 수정 후 Confirm)
+        const adj = action.adjustments
+        const mergedAdjusted = adj
+          ? {
+              adjusted_quantity: adj.adjusted_quantity ?? item.adjusted_quantity,
+              adjusted_unit_weight_g: adj.adjusted_unit_weight_g ?? item.adjusted_unit_weight_g,
+              adjusted_pack_unit: adj.adjusted_pack_unit ?? item.adjusted_pack_unit,
+              precision_reviewed_at: new Date().toISOString(),
+            }
+          : {}
+
         // 공급사별 확정 처리
         if (action.supplier) {
-          const updatedItem = { ...item }
+          const updatedItem = { ...item, ...mergedAdjusted }
           if (action.supplier === 'CJ') {
             updatedItem.cj_confirmed = !item.cj_confirmed
           } else {
@@ -653,6 +664,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         // supplier가 없으면 기존 방식 (전체 토글)
         return {
           ...item,
+          ...mergedAdjusted,
           is_confirmed: !item.is_confirmed,
           cj_confirmed: !item.is_confirmed,
           ssg_confirmed: !item.is_confirmed,
@@ -1585,17 +1597,29 @@ export function useAuditSession() {
     []
   )
 
-  const confirmItem = useCallback((itemId: string, supplier?: Supplier) => {
-    dispatch({ type: 'CONFIRM_ITEM', itemId, supplier })
-    // DB 저장: 매칭 상태를 manual_matched로 갱신 (확정 표시)
-    void fetch(`/api/audit-items/${itemId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        match_status: 'manual_matched',
-      }),
-    }).catch((e) => console.warn('confirmItem DB 저장 실패:', e))
-  }, [])
+  const confirmItem = useCallback(
+    (
+      itemId: string,
+      supplier?: Supplier,
+      adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string },
+    ) => {
+      dispatch({ type: 'CONFIRM_ITEM', itemId, supplier, adjustments })
+      // DB 저장: 매칭 상태 + 정밀 검수 조정값 (있으면)
+      const body: Record<string, unknown> = { match_status: 'manual_matched' }
+      if (adjustments) {
+        if (adjustments.adjusted_quantity !== undefined) body.adjusted_quantity = adjustments.adjusted_quantity
+        if (adjustments.adjusted_unit_weight_g !== undefined) body.adjusted_unit_weight_g = adjustments.adjusted_unit_weight_g
+        if (adjustments.adjusted_pack_unit !== undefined) body.adjusted_pack_unit = adjustments.adjusted_pack_unit
+        body.precision_reviewed_at = new Date().toISOString()
+      }
+      void fetch(`/api/audit-items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch((e) => console.warn('confirmItem DB 저장 실패:', e))
+    },
+    [],
+  )
 
   const confirmAllAutoMatched = useCallback(() => {
     dispatch({ type: 'CONFIRM_ALL_AUTO_MATCHED' })

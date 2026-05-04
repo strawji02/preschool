@@ -34,7 +34,11 @@ interface PrecisionMatchingViewProps {
   supplierName?: string
   sessionId?: string
   onSelectCandidate: (itemId: string, supplier: Supplier, candidate: SupplierMatch) => void
-  onConfirmItem: (itemId: string, supplier?: Supplier) => void
+  onConfirmItem: (
+    itemId: string,
+    supplier?: Supplier,
+    adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string },
+  ) => void
   onConfirmAllAutoMatched: () => void
   onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
@@ -334,8 +338,8 @@ export function PrecisionMatchingView({
                 key={currentItem.id}
                 item={currentItem}
                 onSelectCandidate={(c) => onSelectCandidate(currentItem.id, 'SHINSEGAE', c)}
-                onConfirm={() => {
-                  onConfirmItem(currentItem.id, 'SHINSEGAE')
+                onConfirm={(adjustments) => {
+                  onConfirmItem(currentItem.id, 'SHINSEGAE', adjustments)
                   moveToNext()
                 }}
                 commonTokens={commonTokens}
@@ -825,7 +829,7 @@ function ShinsegaeMatching({
 }: {
   item: ComparisonItem
   onSelectCandidate: (c: SupplierMatch) => void
-  onConfirm: () => void
+  onConfirm: (adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string }) => void
   commonTokens: Set<string>
   matchDetail: ProductDetail | null
   setMatchDetail: (d: ProductDetail | null) => void
@@ -1123,7 +1127,13 @@ function ShinsegaeMatching({
                 />
               </label>
               <button
-                onClick={onConfirm}
+                onClick={() =>
+                  onConfirm({
+                    adjusted_quantity: quantity,
+                    adjusted_unit_weight_g: unitWeightG || undefined,
+                    adjusted_pack_unit: packUnit,
+                  })
+                }
                 className="flex shrink-0 items-center gap-1 self-stretch rounded-md bg-blue-600 px-3 text-sm font-semibold text-white shadow hover:bg-blue-700"
               >
                 <CheckCircle2 size={14} /> Confirm
