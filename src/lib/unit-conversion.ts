@@ -31,27 +31,47 @@ export function parseSpecToGrams(spec: string | undefined | null): number | null
   if (!spec) return null
   const text = spec.toLowerCase()
 
-  // 모든 무게/부피 매치를 모아 최대값 선택.
-  // 이유: spec에 여러 무게가 있을 때 단위당 무게(EA/팩/봉당)가 통상 가장 큼.
-  //       예: "15~20g/개 500g/EA" → 조각=20g, EA=500g → 단위중량 500g 채택
-  const candidates: number[] = []
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*kg/gi)) {
-    candidates.push(Math.round(parseFloat(m[1]) * 1000))
+  // 2-tier 전략 (2026-05-04 개정):
+  //  Tier 1: 단위 suffix("/EA", "/개", "/팩", "/봉", "/박스" 등)가 명시된 무게 패턴 우선
+  //          예: "1Kg/EA, ... (4KG)" → "1Kg/EA"만 채택 → 1000g
+  //              "(4KG)"는 이력번호/박스 메타이지 단위중량 아님
+  //  Tier 2: Tier 1이 없으면 모든 무게 매치 중 최대값 선택
+  //          예: "5KG" → 5000g, "22G*16/352G" → max(22,352)=352g
+  //  근거: 명시적 "/EA" "/팩" suffix가 있으면 그게 단위당 무게라는 확증.
+  //        없으면 전체 spec에서 가장 큰 무게 = 단위 무게로 가정 (대부분 정답).
+  const SUFFIX = '(?:ea|개|입|매|팩|pac|pack|봉|봉지|봉투|박스|box|상자)'
+  const tier1: number[] = []
+  const perUnitRe = new RegExp(
+    `(\\d+(?:\\.\\d+)?)\\s*(kg|g|l|ml)(?![a-z])\\s*\\/\\s*${SUFFIX}`,
+    'gi',
+  )
+  for (const m of text.matchAll(perUnitRe)) {
+    const qty = parseFloat(m[1])
+    const u = m[2].toLowerCase()
+    if (u === 'kg') tier1.push(Math.round(qty * 1000))
+    else if (u === 'g') tier1.push(Math.round(qty))
+    else if (u === 'l') tier1.push(Math.round(qty * 1000))
+    else if (u === 'ml') tier1.push(Math.round(qty))
   }
-  // l 단독 (kg/ml 제외) — \d 직후 l, l 뒤에 영문 없음
+  if (tier1.length > 0) return Math.max(...tier1)
+
+  // Tier 2: 모든 무게/부피 매치 → 최대값
+  const tier2: number[] = []
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*kg/gi)) {
+    tier2.push(Math.round(parseFloat(m[1]) * 1000))
+  }
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*l(?![a-z])/gi)) {
-    candidates.push(Math.round(parseFloat(m[1]) * 1000))
+    tier2.push(Math.round(parseFloat(m[1]) * 1000))
   }
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*ml/gi)) {
-    candidates.push(parseFloat(m[1]))
+    tier2.push(parseFloat(m[1]))
   }
-  // g 단독 (kg/mg 등 제외) — \d 앞에 알파벳 없음, g 뒤에 영문 없음
   for (const m of text.matchAll(/(?<![a-z])(\d+(?:\.\d+)?)\s*g(?![a-z])/gi)) {
-    candidates.push(parseFloat(m[1]))
+    tier2.push(parseFloat(m[1]))
   }
 
-  if (candidates.length === 0) return null
-  return Math.max(...candidates)
+  if (tier2.length === 0) return null
+  return Math.max(...tier2)
 }
 
 /**
