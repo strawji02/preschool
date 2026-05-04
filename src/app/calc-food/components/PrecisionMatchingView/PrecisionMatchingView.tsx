@@ -721,6 +721,20 @@ function ExistingItemDetail({
             highlight="indigo"
           />
         </div>
+
+        {/* 총 발주량 (단위중량 × 발주수량 = 총 g) — 신세계 카드와 비교 기준 */}
+        {existingWeightG && item.extracted_quantity > 0 && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200">
+            <span className="text-xs font-semibold text-amber-700">총 발주량</span>
+            <span className="font-mono text-sm text-gray-700">
+              {formatNumber(existingWeightG)}g × {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
+            </span>
+            <span className="text-sm text-gray-400">=</span>
+            <span className="text-base font-bold text-amber-900">
+              {formatNumber(existingWeightG * item.extracted_quantity)}g
+            </span>
+          </div>
+        )}
       </div>
     </section>
   )
@@ -1011,6 +1025,37 @@ function ShinsegaeMatching({
                 highlight="indigo"
               />
             </div>
+
+            {/* 총 발주량 (단위중량 × 발주수량 = 총 g) — 기존 카드와 일치하도록 발주수량 조정 */}
+            {unitWeightG > 0 && quantity > 0 && (() => {
+              const ssgTotalG = unitWeightG * quantity
+              const existingTotalG = existingWeightG ? existingWeightG * item.extracted_quantity : 0
+              const matched = existingTotalG > 0 && Math.abs(ssgTotalG - existingTotalG) < existingTotalG * 0.05
+              return (
+                <div
+                  className={cn(
+                    'mt-2 flex items-center gap-2 rounded-lg px-3 py-2 ring-1',
+                    matched ? 'bg-emerald-50 ring-emerald-200' : 'bg-amber-50 ring-amber-200',
+                  )}
+                >
+                  <span className={cn('text-xs font-semibold', matched ? 'text-emerald-700' : 'text-amber-700')}>
+                    총 발주량
+                  </span>
+                  <span className="font-mono text-sm text-gray-700">
+                    {formatNumber(unitWeightG)}g × {formatNumber(quantity)} {packUnit}
+                  </span>
+                  <span className="text-sm text-gray-400">=</span>
+                  <span className={cn('text-base font-bold', matched ? 'text-emerald-900' : 'text-amber-900')}>
+                    {formatNumber(ssgTotalG)}g
+                  </span>
+                  {existingTotalG > 0 && (
+                    <span className={cn('ml-auto text-xs', matched ? 'text-emerald-700' : 'text-amber-700')}>
+                      {matched ? '✓ 기존과 일치' : `기존 ${formatNumber(existingTotalG)}g 대비 ${ssgTotalG > existingTotalG ? '+' : ''}${formatNumber(ssgTotalG - existingTotalG)}g`}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* 절감 + Confirm 한 줄 */}
             <div className="mt-2 flex items-center gap-2">
