@@ -124,6 +124,23 @@ function unitToGrams(unit: string | undefined): number | null {
   return null
 }
 
+/**
+ * spec/품목명에 무게/부피 단위 키워드가 단독으로 있을 때 1 단위 환산.
+ * parseSpecToGrams는 "1KG" 같이 숫자가 붙은 패턴을 잡지만, "상품 KG" 같이
+ * 단독 키워드만 있는 경우는 못 잡음 → 이 함수로 fallback.
+ *
+ * 예: spec="상품 KG, 한국Wn※국내산" + unit=EA  → 1000g (1KG짜리 봉지로 간주)
+ */
+function specToUnitFallback(text: string | undefined | null): number | null {
+  if (!text) return null
+  const t = text.toUpperCase()
+  if (/\bKG\b/.test(t)) return 1000
+  if (/\bML\b/.test(t)) return 1
+  if (/\bL\b/.test(t)) return 1000
+  if (/\bG\b/.test(t)) return 1
+  return null
+}
+
 /* ────────────────────────────────────────────────────────── */
 /* 단순 환산 절감액 (후보별) — 표준가 × 수량                     */
 /* ────────────────────────────────────────────────────────── */
@@ -658,10 +675,13 @@ function ExistingItemDetail({
   //    이유: 단위가 KG이면 "1KG단위로 N번 발주" 의미. spec에 "8KG" 같은 메타가
   //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
   // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
+  // 3) spec/품목명에 무게 단위 키워드만 있는 경우 1 단위 가정 (청피망 EA + spec="상품 KG" 케이스)
   const existingWeightG =
     unitToGrams(item.extracted_unit) ??
     parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name)
+    parseSpecToGrams(item.extracted_name) ??
+    specToUnitFallback(item.extracted_spec) ??
+    specToUnitFallback(item.extracted_name)
   const total = getExistingTotal(item)
   const perKg =
     existingWeightG && item.extracted_quantity > 0
@@ -868,10 +888,13 @@ function ShinsegaeMatching({
   //    이유: 단위가 KG이면 "1KG단위로 N번 발주" 의미. spec에 "8KG" 같은 메타가
   //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
   // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
+  // 3) spec/품목명에 무게 단위 키워드만 있는 경우 1 단위 가정 (청피망 EA + spec="상품 KG" 케이스)
   const existingWeightG =
     unitToGrams(item.extracted_unit) ??
     parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name)
+    parseSpecToGrams(item.extracted_name) ??
+    specToUnitFallback(item.extracted_spec) ??
+    specToUnitFallback(item.extracted_name)
   const existingTotal = getExistingTotal(item)
 
   // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
