@@ -13,28 +13,45 @@
 
 /**
  * spec 문자열에서 단위 중량(g)을 추출.
- * 예: "400g/봉" → 400, "1kg/EA" → 1000, "5KG" → 5000, "100G" → 100
- * 추출 불가 시 null 반환.
+ *
+ * 전략 (2026-05-04 개정):
+ *  1) "X g/<단위suffix>" 패턴(예: "500g/EA", "1kg/팩")이 있으면 우선 — 단위당 무게 명시
+ *  2) 그 외에는 모든 무게/부피 매치 중 최대값 선택
+ *     이유: spec에 여러 무게가 있을 때 단위당 무게(EA/팩/봉당)가 통상 가장 큼.
+ *     예: "15~20g/개 500g/EA" → 조각=20g, EA=500g → 단위중량은 500g
+ *
+ * 예시:
+ *  "400g/봉"             → 400
+ *  "1kg/EA"              → 1000
+ *  "5KG"                 → 5000
+ *  "15~20g/개 500g/EA"   → 500   (이전: 20)
+ *  "1KG, 1.5CM 슬라이스" → 1000
  */
 export function parseSpecToGrams(spec: string | undefined | null): number | null {
   if (!spec) return null
   const text = spec.toLowerCase()
 
-  // KG 매칭 (kg, Kg, KG)
-  const kgMatch = text.match(/(\d+(?:\.\d+)?)\s*kg/i)
-  if (kgMatch) return Math.round(parseFloat(kgMatch[1]) * 1000)
+  // 모든 무게/부피 매치를 모아 최대값 선택.
+  // 이유: spec에 여러 무게가 있을 때 단위당 무게(EA/팩/봉당)가 통상 가장 큼.
+  //       예: "15~20g/개 500g/EA" → 조각=20g, EA=500g → 단위중량 500g 채택
+  const candidates: number[] = []
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*kg/gi)) {
+    candidates.push(Math.round(parseFloat(m[1]) * 1000))
+  }
+  // l 단독 (kg/ml 제외) — \d 직후 l, l 뒤에 영문 없음
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*l(?![a-z])/gi)) {
+    candidates.push(Math.round(parseFloat(m[1]) * 1000))
+  }
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*ml/gi)) {
+    candidates.push(parseFloat(m[1]))
+  }
+  // g 단독 (kg/mg 등 제외) — \d 앞에 알파벳 없음, g 뒤에 영문 없음
+  for (const m of text.matchAll(/(?<![a-z])(\d+(?:\.\d+)?)\s*g(?![a-z])/gi)) {
+    candidates.push(parseFloat(m[1]))
+  }
 
-  // G 매칭 (g, G — 단 'kg' 매칭은 위에서 처리됨)
-  const gMatch = text.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
-  if (gMatch) return parseFloat(gMatch[1])
-
-  // ML/L (액체) — 1ml = 1g 가정 (식자재 대부분 정확)
-  const lMatch = text.match(/(\d+(?:\.\d+)?)\s*l(?![a-z])/i)
-  if (lMatch) return Math.round(parseFloat(lMatch[1]) * 1000)
-  const mlMatch = text.match(/(\d+(?:\.\d+)?)\s*ml/i)
-  if (mlMatch) return parseFloat(mlMatch[1])
-
-  return null
+  if (candidates.length === 0) return null
+  return Math.max(...candidates)
 }
 
 /**
