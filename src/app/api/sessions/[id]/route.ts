@@ -72,10 +72,12 @@ export async function GET(
       if (mp && mp.supplier !== 'SHINSEGAE') invalidCjMatchCount++
 
       // 토큰 매칭 비율 검증 — 콩나물 vs 파인애플 같은 무관한 매칭 차단
-      // 검증 기준: extracted_name과 product_name의 토큰 일치율 >= MIN_VALID_MATCH_RATIO (0.3)
+      // 단, 사용자가 직접 확정한 매칭 (manual_matched)은 의도적 선택 존중 → 검증 예외
+      const dbStatusRaw = (it.match_status ?? 'unmatched') as MatchStatus
+      const isUserConfirmed = dbStatusRaw === 'manual_matched'
       let tokenRatio = 0
       let isTokenValid = true
-      if (isValidSsg && mp) {
+      if (isValidSsg && mp && !isUserConfirmed) {
         tokenRatio = getTokenMatchRatio(it.extracted_name ?? '', mp.product_name)
         isTokenValid = tokenRatio >= MIN_VALID_MATCH_RATIO
         if (!isTokenValid) lowConfidenceMatchCount++
