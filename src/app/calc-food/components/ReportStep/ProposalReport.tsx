@@ -31,6 +31,10 @@ interface ExtraItem {
   count?: number
   /** 인당 단가 (부가세 포함) */
   unit_price?: number
+  /** 원아수에 비례 여부 (true: 인당단가 × 원아수 × multiplier, false: 인당단가 × multiplier) */
+  per_child?: boolean
+  /** 단가 배수 (예: 1.1 = 교사포함, 1.5 = 학부모포함, 1.0 = 기본) */
+  multiplier?: number
 }
 
 interface ProposalExtras {
@@ -42,11 +46,13 @@ interface ProposalExtras {
 }
 
 const DEFAULT_EXTRAS: ExtraItem[] = [
-  { key: 'snack',   label: '원아 간식',     checked: false, note: '교사포함 1.1배', count: 4,  unit_price: 5500 },
-  { key: 'coffee',  label: '커피차',        checked: false, note: '학부모 1.5배',  count: 5,  unit_price: 5500 },
-  { key: 'mat',     label: '대형매트',      checked: false, note: '2EA 세척·교환', count: 12, unit_price: 55000 },
-  { key: 'cooking', label: '요리실습 재료', checked: false, note: '',              count: 4,  unit_price: 5500 },
-  { key: 'staff',   label: '조리사 대체인력', checked: false, note: '',            count: 5,  unit_price: 165000 },
+  // 원아수 비례 항목 (per_child: true)
+  { key: 'snack',   label: '원아 간식',     checked: false, note: '교사포함 1.1배', count: 4,  unit_price: 5500,   per_child: true,  multiplier: 1.1 },
+  { key: 'coffee',  label: '커피차',        checked: false, note: '학부모 1.5배',  count: 5,  unit_price: 5500,   per_child: true,  multiplier: 1.5 },
+  { key: 'cooking', label: '요리실습 재료', checked: false, note: '',              count: 4,  unit_price: 5500,   per_child: true,  multiplier: 1.0 },
+  // 회당 직접 항목 (per_child: false — 원아수 무관)
+  { key: 'mat',     label: '대형매트',      checked: false, note: '2EA 세척·교환', count: 12, unit_price: 55000,  per_child: false, multiplier: 1.0 },
+  { key: 'staff',   label: '조리사 대체인력', checked: false, note: '',            count: 5,  unit_price: 165000, per_child: false, multiplier: 1.0 },
 ]
 
 interface ProposalReportProps {
@@ -119,10 +125,17 @@ export function ProposalReport({
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
 
-  // 부가서비스 자동 계산 — 단가(회당) = 인당단가 × 원아수, 금액(년) = 단가(회당) × 횟수
+  // 부가서비스 자동 계산 (2026-05-04 수식 확정)
+  //   per_child=true:  단가(회당) = 인당단가 × 원아수 × multiplier
+  //   per_child=false: 단가(회당) = 인당단가 × multiplier  (원아수 무관)
+  //   금액(년) = 단가(회당) × 횟수
+  // 예: 원아간식 5,500 × 100 × 1.1 = 605,000   (per_child=true, mult=1.1)
+  //     커피차   5,500 × 100 × 1.5 = 825,000   (per_child=true, mult=1.5)
+  //     대형매트 55,000 × 1.0      = 55,000    (per_child=false, mult=1.0)
   const extrasComputed = useMemo(() => {
     return extras.map((e) => {
-      const perRound = (e.unit_price ?? 0) * childrenCount
+      const base = (e.unit_price ?? 0) * (e.per_child !== false ? childrenCount : 1)
+      const perRound = base * (e.multiplier ?? 1)
       const annualAmount = perRound * (e.count ?? 0)
       return { ...e, perRound, annualAmount }
     })
