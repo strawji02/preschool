@@ -653,11 +653,15 @@ function ExistingItemDetail({
   onOpenImage?: () => void
   commonTokens: Set<string>
 }) {
-  // spec/품목명에 단위중량 없으면 단위 자체로 fallback (예: 단위 KG → 1000g)
+  // 단위중량 결정 우선순위:
+  // 1) 단위가 무게/부피 단위 (KG/G/L/ML) → 1 단위 = N g (가장 신뢰)
+  //    이유: 단위가 KG이면 "1KG단위로 N번 발주" 의미. spec에 "8KG" 같은 메타가
+  //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
+  // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
   const existingWeightG =
+    unitToGrams(item.extracted_unit) ??
     parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    unitToGrams(item.extracted_unit)
+    parseSpecToGrams(item.extracted_name)
   const total = getExistingTotal(item)
   const perKg =
     existingWeightG && item.extracted_quantity > 0
@@ -859,11 +863,15 @@ function ShinsegaeMatching({
   }, [item.ssg_match?.id, item.ssg_match])
   const ssgMatch = enrichedMatch
 
-  // spec/품목명에 단위중량 없으면 단위 자체로 fallback (예: 단위 KG → 1000g)
+  // 단위중량 결정 우선순위:
+  // 1) 단위가 무게/부피 단위 (KG/G/L/ML) → 1 단위 = N g (가장 신뢰)
+  //    이유: 단위가 KG이면 "1KG단위로 N번 발주" 의미. spec에 "8KG" 같은 메타가
+  //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
+  // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
   const existingWeightG =
+    unitToGrams(item.extracted_unit) ??
     parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    unitToGrams(item.extracted_unit)
+    parseSpecToGrams(item.extracted_name)
   const existingTotal = getExistingTotal(item)
 
   // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
