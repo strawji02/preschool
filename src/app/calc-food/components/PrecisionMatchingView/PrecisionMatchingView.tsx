@@ -109,6 +109,21 @@ function HighlightedText({
   )
 }
 
+/**
+ * 단위가 무게/부피 단위 자체일 때 1 단위 = N 그램으로 환산.
+ * spec/품목명에 단위중량이 없어도 단위가 KG/G/L/ML이면 발주수량 자체가 총량.
+ * (예: "청피망 단위 KG 발주 1" → 1KG = 1,000g)
+ */
+function unitToGrams(unit: string | undefined): number | null {
+  if (!unit) return null
+  const u = unit.toUpperCase().trim()
+  if (u === 'KG') return 1000
+  if (u === 'G') return 1
+  if (u === 'L') return 1000
+  if (u === 'ML') return 1
+  return null
+}
+
 /* ────────────────────────────────────────────────────────── */
 /* 단순 환산 절감액 (후보별) — 표준가 × 수량                     */
 /* ────────────────────────────────────────────────────────── */
@@ -638,8 +653,11 @@ function ExistingItemDetail({
   onOpenImage?: () => void
   commonTokens: Set<string>
 }) {
-  // spec에 단위중량 없으면 품목명에서도 추출 시도 (예: "종가집 맛김치(생 5KG/BOX)" → 5000g)
-  const existingWeightG = parseSpecToGrams(item.extracted_spec) ?? parseSpecToGrams(item.extracted_name)
+  // spec/품목명에 단위중량 없으면 단위 자체로 fallback (예: 단위 KG → 1000g)
+  const existingWeightG =
+    parseSpecToGrams(item.extracted_spec) ??
+    parseSpecToGrams(item.extracted_name) ??
+    unitToGrams(item.extracted_unit)
   const total = getExistingTotal(item)
   const perKg =
     existingWeightG && item.extracted_quantity > 0
@@ -841,8 +859,11 @@ function ShinsegaeMatching({
   }, [item.ssg_match?.id, item.ssg_match])
   const ssgMatch = enrichedMatch
 
-  // spec에 단위중량 없으면 품목명에서도 추출 시도 (예: "종가집 맛김치(생 5KG/BOX)" → 5000g)
-  const existingWeightG = parseSpecToGrams(item.extracted_spec) ?? parseSpecToGrams(item.extracted_name)
+  // spec/품목명에 단위중량 없으면 단위 자체로 fallback (예: 단위 KG → 1000g)
+  const existingWeightG =
+    parseSpecToGrams(item.extracted_spec) ??
+    parseSpecToGrams(item.extracted_name) ??
+    unitToGrams(item.extracted_unit)
   const existingTotal = getExistingTotal(item)
 
   // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
