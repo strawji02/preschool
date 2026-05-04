@@ -479,23 +479,61 @@ export function ProposalReport({
             </table>
           </div>
 
-          {/* 임팩트 — 절감액 + 부가서비스 합산 */}
-          <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-5 text-white shadow-lg print:break-inside-avoid">
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">연간 식자재 절감</div>
-                <div className="mt-1 text-2xl font-bold">{formatCurrency(annualSavings)}</div>
+          {/* 임팩트 — 절감액 = 부가서비스 환원 예산
+              영업자가 신세계 전환 절감액 한도 내에서 부가서비스를 제공한다는 의미 */}
+          {(() => {
+            const usedPct = annualSavings > 0
+              ? Math.min(100, (totalExtrasAnnual / annualSavings) * 100)
+              : 0
+            const overBudget = totalExtrasAnnual > annualSavings
+            const remaining = annualSavings - totalExtrasAnnual
+
+            return (
+              <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-5 text-white shadow-lg print:break-inside-avoid">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-amber-100">
+                    신세계 도입 시 연간 절감액
+                  </span>
+                  <span className="text-xs text-amber-100">— 이 금액으로 부가서비스를 환원해드립니다</span>
+                </div>
+                <div className="mt-1 flex items-baseline gap-3">
+                  <div className="text-4xl font-extrabold leading-none">{formatCurrency(annualSavings)}</div>
+                  {savingsPercent > 0 && (
+                    <div className="text-sm font-semibold text-amber-100">▼ {savingsPercent.toFixed(1)}%</div>
+                  )}
+                </div>
+
+                {/* 막대 그래프 — 절감액 안에서 부가서비스 환원 비율 */}
+                <div className="mt-3 h-7 overflow-hidden rounded-full bg-amber-900/30 ring-1 ring-amber-300/40">
+                  <div
+                    className={cn(
+                      'flex h-full items-center justify-end px-3 text-[11px] font-bold transition-all',
+                      overBudget ? 'bg-rose-200 text-rose-900' : 'bg-white/90 text-amber-900',
+                    )}
+                    style={{ width: `${overBudget ? 100 : usedPct}%` }}
+                  >
+                    부가서비스 환원 {usedPct.toFixed(0)}%
+                  </div>
+                </div>
+
+                {/* 부가서비스 환원 + 잔여 (또는 초과) */}
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-widest text-amber-100">└ 부가서비스로 제공</div>
+                    <div className="mt-0.5 text-xl font-bold">{formatCurrency(totalExtrasAnnual)}</div>
+                  </div>
+                  <div className="border-l border-amber-300/60 pl-3">
+                    <div className="text-xs uppercase tracking-widest text-amber-100">
+                      └ {overBudget ? '예산 초과' : '잔여 현금 절감'}
+                    </div>
+                    <div className={cn('mt-0.5 text-xl font-bold', overBudget && 'text-rose-100')}>
+                      {overBudget ? '+' : ''}{formatCurrency(Math.abs(remaining))}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="border-l-2 border-amber-300 pl-4">
-                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">+ 부가서비스 가치 (년)</div>
-                <div className="mt-1 text-2xl font-bold">{formatCurrency(totalExtrasAnnual)}</div>
-              </div>
-              <div className="border-l-2 border-amber-300 pl-4">
-                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">총 연간 가치</div>
-                <div className="mt-1 text-3xl font-extrabold">{formatCurrency(annualSavings + totalExtrasAnnual)}</div>
-              </div>
-            </div>
-          </div>
+            )
+          })()}
         </section>
 
         {/* ─── 푸터 ─── */}
