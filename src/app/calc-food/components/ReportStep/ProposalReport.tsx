@@ -458,7 +458,6 @@ export function ProposalReport({
                         type="text"
                         value={ex.note ?? ''}
                         onChange={(e) => updateExtraNote(ex.key, e.target.value)}
-                        placeholder="예: 1.1배, 2EA 등"
                         className="w-full rounded border border-amber-200 bg-white px-1 py-0.5 text-xs focus:border-amber-500 focus:outline-none print:border-none"
                       />
                     </td>
