@@ -228,7 +228,7 @@ export async function GET(request: NextRequest) {
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
               .eq('supplier', supplier ?? 'SHINSEGAE')
               .ilike('product_name', `%${coreSearch}%`)
-              .limit(20)
+              .limit(100)
             if (likeData && likeData.length > 0) {
               const seen = new Set(results.map((p) => p.id))
               const likeResults: RpcResult[] = likeData
