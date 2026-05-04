@@ -479,58 +479,53 @@ export function ProposalReport({
             </table>
           </div>
 
-          {/* 임팩트 — 절감액 = 부가서비스 환원 예산
-              영업자가 신세계 전환 절감액 한도 내에서 부가서비스를 제공한다는 의미 */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조
+              (절감액은 영업자가 목표로 삼을 참고값, 비교/증감 표시 X) */}
           {(() => {
-            const usedPct = annualSavings > 0
-              ? Math.min(100, (totalExtrasAnnual / annualSavings) * 100)
-              : 0
-            const overBudget = totalExtrasAnnual > annualSavings
-            const remaining = annualSavings - totalExtrasAnnual
-
+            const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
-              <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-5 text-white shadow-lg print:break-inside-avoid">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-widest text-amber-100">
-                    신세계 도입 시 연간 절감액
-                  </span>
-                  <span className="text-xs text-amber-100">— 이 금액으로 부가서비스를 환원해드립니다</span>
-                </div>
-                <div className="mt-1 flex items-baseline gap-3">
-                  <div className="text-4xl font-extrabold leading-none">{formatCurrency(annualSavings)}</div>
-                  {savingsPercent > 0 && (
-                    <div className="text-sm font-semibold text-amber-100">▼ {savingsPercent.toFixed(1)}%</div>
-                  )}
-                </div>
-
-                {/* 막대 그래프 — 절감액 안에서 부가서비스 환원 비율 */}
-                <div className="mt-3 h-7 overflow-hidden rounded-full bg-amber-900/30 ring-1 ring-amber-300/40">
-                  <div
-                    className={cn(
-                      'flex h-full items-center justify-end px-3 text-[11px] font-bold transition-all',
-                      overBudget ? 'bg-rose-200 text-rose-900' : 'bg-white/90 text-amber-900',
-                    )}
-                    style={{ width: `${overBudget ? 100 : usedPct}%` }}
-                  >
-                    부가서비스 환원 {usedPct.toFixed(0)}%
-                  </div>
-                </div>
-
-                {/* 부가서비스 환원 + 잔여 (또는 초과) */}
-                <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-6 text-white shadow-lg print:break-inside-avoid">
+                <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <div className="text-xs uppercase tracking-widest text-amber-100">└ 부가서비스로 제공</div>
-                    <div className="mt-0.5 text-xl font-bold">{formatCurrency(totalExtrasAnnual)}</div>
+                    <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">
+                      영업자 부가서비스 환원 (연간)
+                    </div>
+                    <div className="mt-1 text-4xl font-extrabold leading-none">
+                      {formatCurrency(totalExtrasAnnual)}
+                    </div>
                   </div>
-                  <div className="border-l border-amber-300/60 pl-3">
-                    <div className="text-xs uppercase tracking-widest text-amber-100">
-                      └ {overBudget ? '예산 초과' : '잔여 현금 절감'}
-                    </div>
-                    <div className={cn('mt-0.5 text-xl font-bold', overBudget && 'text-rose-100')}>
-                      {overBudget ? '+' : ''}{formatCurrency(Math.abs(remaining))}
-                    </div>
+                  <div className="text-right">
+                    <div className="text-[11px] uppercase tracking-widest text-amber-100">참고 · 연간 절감액</div>
+                    <div className="text-base font-semibold text-amber-100">{formatCurrency(annualSavings)}</div>
                   </div>
                 </div>
+
+                {/* 체크된 항목 내용 강조 */}
+                {checkedItems.length > 0 ? (
+                  <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {checkedItems.map((e) => (
+                      <div
+                        key={e.key}
+                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/15 px-3 py-2 backdrop-blur-sm"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-bold">{e.label}</div>
+                          <div className="text-[11px] text-amber-100">
+                            {e.count ?? 0}회 × {formatNumber(e.perRound)}원
+                            {e.note && <span className="ml-1 opacity-80">· {e.note}</span>}
+                          </div>
+                        </div>
+                        <div className="shrink-0 font-mono text-base font-bold">
+                          {formatCurrency(e.annualAmount)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-amber-100">
+                    체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
+                  </div>
+                )}
               </div>
             )
           })()}
