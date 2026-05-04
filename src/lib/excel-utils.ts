@@ -3,292 +3,202 @@ import type { ComparisonItem } from '@/types/audit'
 import { estimateSsgTotal } from './unit-conversion'
 
 /**
- * 엑셀 행 데이터 타입
+ * 보고서 엑셀 다운로드 (2026-05-04 재구현)
+ *
+ * 형식 (사용자 첨부 템플릿 기준):
+ *   | No |  기존 업체 품목 (merged B~F)         | 신세계 제안 품목 (merged G~K)        | 절감액 |
+ *   |    | 품명 | 규격 | 수량 | 단가 | 금액      | 품명 | 규격 | 수량 | 단가 | 금액      |       |
+ *   | 1  | ...                                | ...                                |       |
+ *
+ * 정확성 원칙:
+ *  - 거래명세표 합계 = 매칭 화면 KPI 합계와 일치
+ *    · 동행 금액 = extracted_total_price ?? unit_price × quantity
+ *    · 미매칭 품목도 모두 포함 (신세계 컬럼만 빈 칸)
+ *  - 신세계 금액 = estimateSsgTotal (ppk × 단위중량 환산, KPI/리포트와 통일)
  */
-interface ExcelRow {
-  No: number
-  품명: string
-  규격: string
-  수량: number
-  '단가(동행)': number
-  '단가(CJ)': number | string
-  '단가(신세계)': number | string
-  '금액(동행)': number
-  '금액(CJ)': number | string
-  '금액(신세계)': number | string
-  'CJ-동행(차액)': number | string
-  'CJ-동행(율)': string
-  '신세계-동행(차액)': number | string
-  '신세계-동행(율)': string
-  '신세계-CJ(차액)': number | string
-  '신세계-CJ(율)': string
+
+interface SheetRow {
+  No: string | number
+  '기존_품명': string
+  '기존_규격': string
+  '기존_수량': number | string
+  '기존_단가': number | string
+  '기존_금액': number | string
+  '신세계_품명': string
+  '신세계_규격': string
+  '신세계_수량': number | string
+  '신세계_단가': number | string
+  '신세계_금액': number | string
+  '절감액': number | string
 }
 
-/**
- * 합계 행 데이터 타입
- */
-interface SummaryRow {
-  No: string
-  품명: string
-  규격: string
-  수량: string
-  '단가(동행)': string
-  '단가(CJ)': string
-  '단가(신세계)': string
-  '금액(동행)': number
-  '금액(CJ)': number
-  '금액(신세계)': number
-  'CJ-동행(차액)': number
-  'CJ-동행(율)': string
-  '신세계-동행(차액)': number
-  '신세계-동행(율)': string
-  '신세계-CJ(차액)': number
-  '신세계-CJ(율)': string
+function existingTotal(item: ComparisonItem): number {
+  return item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
 }
 
-/**
- * ComparisonItem을 엑셀 행으로 변환
- */
-function itemToExcelRow(item: ComparisonItem, index: number): ExcelRow | null {
-  // 미매칭 품목 제외 (CJ와 신세계 둘 다 없는 경우)
-  if (!item.cj_match && !item.ssg_match) {
-    return null
+function shinsegaeSpec(item: ComparisonItem): string {
+  const m = item.ssg_match
+  if (!m) return ''
+  if (m.spec_quantity != null && m.spec_unit) {
+    return `${m.spec_quantity}${m.spec_unit}`
   }
+  return ''
+}
 
-  const ourPrice = item.extracted_unit_price
-  const quantity = item.extracted_quantity
-  const ourAmount = ourPrice * quantity
+function itemRow(item: ComparisonItem, index: number): SheetRow {
+  const ourAmount = existingTotal(item)
+  const m = item.ssg_match
 
-  // CJ 데이터
-  const cjPrice = item.cj_match?.standard_price ?? 0
-  const cjAmount = item.cj_match ? cjPrice * quantity : 0
-  const cjDiff = item.cj_match ? cjAmount - ourAmount : 0
-  const cjRate = item.cj_match && ourAmount !== 0
-    ? `${((cjDiff / ourAmount) * 100).toFixed(1)}%`
-    : '-'
-
-  // 신세계 데이터 — 정밀 환산 (매칭 화면 KPI / 리포트와 통일, 2026-05-04)
-  // standard_price × qty가 아닌 ppk × 단위중량 환산을 사용해야 단위중량/포장 차이 정확
-  const ssgAmount = item.ssg_match ? estimateSsgTotal(item) : 0
-  const ssgQty = item.adjusted_quantity ?? quantity
-  const ssgPrice = item.ssg_match
-    ? (ssgQty > 0 ? Math.round(ssgAmount / ssgQty) : (item.ssg_match.standard_price ?? 0))
-    : 0
-  const ssgDiff = item.ssg_match ? ssgAmount - ourAmount : 0
-  const ssgRate = item.ssg_match && ourAmount !== 0
-    ? `${((ssgDiff / ourAmount) * 100).toFixed(1)}%`
-    : '-'
-
-  // 신세계-CJ 비교
-  const ssgCjDiff = item.cj_match && item.ssg_match ? ssgAmount - cjAmount : 0
-  const ssgCjRate = item.cj_match && item.ssg_match && cjAmount !== 0
-    ? `${((ssgCjDiff / cjAmount) * 100).toFixed(1)}%`
-    : '-'
+  const ssgAmount = m ? estimateSsgTotal(item) : 0
+  const ssgQty = item.adjusted_quantity ?? item.extracted_quantity
+  const ssgPrice = m && ssgQty > 0 ? Math.round(ssgAmount / ssgQty) : 0
+  const savings = m ? ourAmount - ssgAmount : 0
 
   return {
     No: index + 1,
-    품명: item.extracted_name,
-    규격: item.extracted_spec || '-',
-    수량: quantity,
-    '단가(동행)': ourPrice,
-    '단가(CJ)': item.cj_match ? cjPrice : '-',
-    '단가(신세계)': item.ssg_match ? ssgPrice : '-',
-    '금액(동행)': ourAmount,
-    '금액(CJ)': item.cj_match ? cjAmount : '-',
-    '금액(신세계)': item.ssg_match ? ssgAmount : '-',
-    'CJ-동행(차액)': item.cj_match ? cjDiff : '-',
-    'CJ-동행(율)': cjRate,
-    '신세계-동행(차액)': item.ssg_match ? ssgDiff : '-',
-    '신세계-동행(율)': ssgRate,
-    '신세계-CJ(차액)': item.cj_match && item.ssg_match ? ssgCjDiff : '-',
-    '신세계-CJ(율)': ssgCjRate,
+    '기존_품명': item.extracted_name,
+    '기존_규격': item.extracted_spec ?? '',
+    '기존_수량': item.extracted_quantity,
+    '기존_단가': item.extracted_unit_price,
+    '기존_금액': ourAmount,
+    '신세계_품명': m ? (m.product_name ?? '') : '',
+    '신세계_규격': shinsegaeSpec(item),
+    '신세계_수량': m ? ssgQty : '',
+    '신세계_단가': m ? ssgPrice : '',
+    '신세계_금액': m ? ssgAmount : '',
+    '절감액': m ? savings : '',
   }
 }
 
-/**
- * 합계 행 생성
- */
-function createSummaryRow(rows: ExcelRow[]): SummaryRow {
-  const totalOurAmount = rows.reduce((sum, row) => sum + row['금액(동행)'], 0)
+function buildAOA(rows: SheetRow[]): (string | number)[][] {
+  // Row 1: merged group header
+  const groupHeader = ['No', '기존 업체 품목', '', '', '', '', '신세계 제안 품목', '', '', '', '', '절감액']
+  // Row 2: column header
+  const colHeader = ['', '품명', '규격', '수량', '단가(동행)', '금액(동행)', '품명', '규격', '수량', '단가(신세계)', '금액(신세계)', '']
 
-  const totalCjAmount = rows.reduce((sum, row) => {
-    const amount = row['금액(CJ)']
-    return sum + (typeof amount === 'number' ? amount : 0)
-  }, 0)
+  const dataRows = rows.map((r) => [
+    r.No,
+    r['기존_품명'], r['기존_규격'], r['기존_수량'], r['기존_단가'], r['기존_금액'],
+    r['신세계_품명'], r['신세계_규격'], r['신세계_수량'], r['신세계_단가'], r['신세계_금액'],
+    r['절감액'],
+  ])
 
-  const totalSsgAmount = rows.reduce((sum, row) => {
-    const amount = row['금액(신세계)']
-    return sum + (typeof amount === 'number' ? amount : 0)
-  }, 0)
+  // Summary row
+  const sumExisting = rows.reduce<number>((s, r) => s + (typeof r['기존_금액'] === 'number' ? r['기존_금액'] : 0), 0)
+  const sumSsg = rows.reduce<number>((s, r) => s + (typeof r['신세계_금액'] === 'number' ? r['신세계_금액'] : 0), 0)
+  const sumSavings = rows.reduce<number>((s, r) => s + (typeof r['절감액'] === 'number' ? r['절감액'] : 0), 0)
+  const summaryRow = [
+    '합계', '', '', '', '', sumExisting,
+    '', '', '', '', sumSsg,
+    sumSavings,
+  ]
 
-  const totalCjDiff = rows.reduce((sum, row) => {
-    const diff = row['CJ-동행(차액)']
-    return sum + (typeof diff === 'number' ? diff : 0)
-  }, 0)
-
-  const totalSsgDiff = rows.reduce((sum, row) => {
-    const diff = row['신세계-동행(차액)']
-    return sum + (typeof diff === 'number' ? diff : 0)
-  }, 0)
-
-  const totalSsgCjDiff = rows.reduce((sum, row) => {
-    const diff = row['신세계-CJ(차액)']
-    return sum + (typeof diff === 'number' ? diff : 0)
-  }, 0)
-
-  const totalCjRate = totalOurAmount !== 0
-    ? `${((totalCjDiff / totalOurAmount) * 100).toFixed(1)}%`
-    : '-'
-
-  const totalSsgRate = totalOurAmount !== 0
-    ? `${((totalSsgDiff / totalOurAmount) * 100).toFixed(1)}%`
-    : '-'
-
-  const totalSsgCjRate = totalCjAmount !== 0
-    ? `${((totalSsgCjDiff / totalCjAmount) * 100).toFixed(1)}%`
-    : '-'
-
-  return {
-    No: '합계',
-    품명: '',
-    규격: '',
-    수량: '',
-    '단가(동행)': '',
-    '단가(CJ)': '',
-    '단가(신세계)': '',
-    '금액(동행)': totalOurAmount,
-    '금액(CJ)': totalCjAmount,
-    '금액(신세계)': totalSsgAmount,
-    'CJ-동행(차액)': totalCjDiff,
-    'CJ-동행(율)': totalCjRate,
-    '신세계-동행(차액)': totalSsgDiff,
-    '신세계-동행(율)': totalSsgRate,
-    '신세계-CJ(차액)': totalSsgCjDiff,
-    '신세계-CJ(율)': totalSsgCjRate,
-  }
+  return [groupHeader, colHeader, ...dataRows, summaryRow]
 }
 
-/**
- * 셀 색상 적용 (차액 컬럼에만)
- */
-function applyCellColors(
-  worksheet: XLSX.WorkSheet,
-  dataRows: ExcelRow[],
-  startRow: number
+export function downloadReportAsExcel(
+  items: ComparisonItem[],
+  fileName: string = '가격비교_보고서',
 ) {
-  const diffColumns = [
-    { col: 'K', key: 'CJ-동행(차액)' },
-    { col: 'M', key: '신세계-동행(차액)' },
-    { col: 'O', key: '신세계-CJ(차액)' },
-  ] as const
-
-  dataRows.forEach((row, rowIndex) => {
-    const excelRow = startRow + rowIndex
-
-    diffColumns.forEach(({ col, key }) => {
-      const cellRef = `${col}${excelRow}`
-      const value = row[key]
-
-      if (typeof value === 'number' && value !== 0) {
-        if (!worksheet[cellRef]) worksheet[cellRef] = { t: 'n', v: value }
-
-        // 음수(절감) = 녹색, 양수(증가) = 빨간색
-        const fillColor = value < 0 ? 'C6EFCE' : 'FFC7CE' // 녹색 : 빨간색
-        const fontColor = value < 0 ? '006100' : '9C0006' // 진한 녹색 : 진한 빨강
-
-        worksheet[cellRef].s = {
-          fill: { fgColor: { rgb: fillColor } },
-          font: { color: { rgb: fontColor }, bold: true },
-          alignment: { horizontal: 'right' },
-        }
-      }
-    })
-  })
-
-  // 합계 행 색상 적용
-  const summaryRow = startRow + dataRows.length
-  diffColumns.forEach(({ col }) => {
-    const cellRef = `${col}${summaryRow}`
-    if (worksheet[cellRef]) {
-      const value = worksheet[cellRef].v as number
-      if (typeof value === 'number' && value !== 0) {
-        const fillColor = value < 0 ? 'C6EFCE' : 'FFC7CE'
-        const fontColor = value < 0 ? '006100' : '9C0006'
-
-        worksheet[cellRef].s = {
-          fill: { fgColor: { rgb: fillColor } },
-          font: { color: { rgb: fontColor }, bold: true },
-          alignment: { horizontal: 'right' },
-        }
-      }
-    }
-  })
-}
-
-/**
- * 보고서 엑셀 생성 및 다운로드
- */
-export function downloadReportAsExcel(items: ComparisonItem[], fileName: string = '가격비교_보고서') {
-  // 1. 데이터 변환 (미매칭 제외)
-  const excelRows: ExcelRow[] = items
-    .map((item, index) => itemToExcelRow(item, index))
-    .filter((row): row is ExcelRow => row !== null)
-
-  if (excelRows.length === 0) {
-    alert('다운로드할 데이터가 없습니다. (모든 품목이 미매칭 상태입니다)')
+  if (items.length === 0) {
+    alert('다운로드할 데이터가 없습니다.')
     return
   }
 
-  // 2. 합계 행 생성
-  const summaryRow = createSummaryRow(excelRows)
+  const rows = items.map((it, i) => itemRow(it, i))
+  const aoa = buildAOA(rows)
 
-  // 3. 워크시트 생성
-  const allData = [...excelRows, summaryRow]
-  const worksheet = XLSX.utils.json_to_sheet(allData)
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
 
-  // 4. 색상 적용 (헤더는 row 1, 데이터는 row 2부터)
-  applyCellColors(worksheet, excelRows, 2)
-
-  // 5. 합계 행 스타일 (굵게)
-  const summaryRowNum = excelRows.length + 2
-  const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
-  cols.forEach(col => {
-    const cellRef = `${col}${summaryRowNum}`
-    if (worksheet[cellRef]) {
-      worksheet[cellRef].s = {
-        ...worksheet[cellRef].s,
-        font: { ...worksheet[cellRef].s?.font, bold: true },
-        fill: { fgColor: { rgb: 'F2F2F2' } }, // 회색 배경
-      }
-    }
-  })
-
-  // 6. 컬럼 너비 설정
-  worksheet['!cols'] = [
-    { wch: 5 },  // No
-    { wch: 30 }, // 품명
-    { wch: 15 }, // 규격
-    { wch: 8 },  // 수량
-    { wch: 12 }, // 단가(동행)
-    { wch: 12 }, // 단가(CJ)
-    { wch: 12 }, // 단가(신세계)
-    { wch: 12 }, // 금액(동행)
-    { wch: 12 }, // 금액(CJ)
-    { wch: 12 }, // 금액(신세계)
-    { wch: 12 }, // CJ-동행(차액)
-    { wch: 10 }, // CJ-동행(율)
-    { wch: 12 }, // 신세계-동행(차액)
-    { wch: 12 }, // 신세계-동행(율)
-    { wch: 12 }, // 신세계-CJ(차액)
-    { wch: 10 }, // 신세계-CJ(율)
+  // Merge: A1 (No 세로 2칸), B1:F1 (기존), G1:K1 (신세계), L1 (절감액 세로 2칸)
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },   // A1:A2 No
+    { s: { r: 0, c: 1 }, e: { r: 0, c: 5 } },   // B1:F1 기존 업체 품목
+    { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },  // G1:K1 신세계 제안 품목
+    { s: { r: 0, c: 11 }, e: { r: 1, c: 11 } }, // L1:L2 절감액
   ]
 
-  // 7. 워크북 생성
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, '가격비교')
+  // Column widths
+  ws['!cols'] = [
+    { wch: 5 },   // No
+    { wch: 26 },  // 기존 품명
+    { wch: 36 },  // 기존 규격
+    { wch: 7 },   // 기존 수량
+    { wch: 11 },  // 기존 단가
+    { wch: 13 },  // 기존 금액
+    { wch: 26 },  // 신세계 품명
+    { wch: 16 },  // 신세계 규격
+    { wch: 7 },   // 신세계 수량
+    { wch: 11 },  // 신세계 단가
+    { wch: 13 },  // 신세계 금액
+    { wch: 13 },  // 절감액
+  ]
 
-  // 8. 파일 다운로드
+  // Header style + summary highlight + savings color
+  const lastRowIdx = aoa.length - 1
+  for (let c = 0; c < 12; c++) {
+    for (let r = 0; r < 2; r++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref]) {
+        ws[ref].s = {
+          font: { bold: true, color: { rgb: '1F2937' } },
+          fill: { fgColor: { rgb: 'E5E7EB' } },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+          border: {
+            top: { style: 'thin', color: { rgb: '9CA3AF' } },
+            bottom: { style: 'thin', color: { rgb: '9CA3AF' } },
+            left: { style: 'thin', color: { rgb: '9CA3AF' } },
+            right: { style: 'thin', color: { rgb: '9CA3AF' } },
+          },
+        }
+      }
+    }
+    // Summary row
+    const sumRef = XLSX.utils.encode_cell({ r: lastRowIdx, c })
+    if (ws[sumRef]) {
+      ws[sumRef].s = {
+        font: { bold: true },
+        fill: { fgColor: { rgb: 'F3F4F6' } },
+        alignment: { horizontal: c === 0 ? 'center' : 'right' },
+      }
+    }
+  }
+
+  // 절감액 색상 (양수=녹색, 음수=빨강)
+  for (let r = 2; r <= lastRowIdx; r++) {
+    const ref = XLSX.utils.encode_cell({ r, c: 11 })
+    if (ws[ref] && typeof ws[ref].v === 'number') {
+      const v = ws[ref].v as number
+      if (v > 0) {
+        ws[ref].s = {
+          ...(ws[ref].s ?? {}),
+          font: { color: { rgb: '047857' }, bold: r === lastRowIdx },
+          fill: { fgColor: { rgb: r === lastRowIdx ? 'D1FAE5' : 'ECFDF5' } },
+          alignment: { horizontal: 'right' },
+        }
+      } else if (v < 0) {
+        ws[ref].s = {
+          ...(ws[ref].s ?? {}),
+          font: { color: { rgb: 'B91C1C' }, bold: r === lastRowIdx },
+          fill: { fgColor: { rgb: r === lastRowIdx ? 'FEE2E2' : 'FEF2F2' } },
+          alignment: { horizontal: 'right' },
+        }
+      }
+    }
+  }
+
+  // Number format (천단위 콤마)
+  for (let r = 2; r <= lastRowIdx; r++) {
+    for (const c of [3, 4, 5, 8, 9, 10, 11]) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref] && typeof ws[ref].v === 'number') {
+        ws[ref].z = '#,##0'
+      }
+    }
+  }
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '가격비교')
   const timestamp = new Date().toISOString().split('T')[0]
-  const fullFileName = `${fileName}_${timestamp}.xlsx`
-  XLSX.writeFile(workbook, fullFileName)
+  XLSX.writeFile(wb, `${fileName}_${timestamp}.xlsx`)
 }
