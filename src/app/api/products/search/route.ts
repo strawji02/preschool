@@ -181,8 +181,10 @@ export async function GET(request: NextRequest) {
           const fb = (fbData as RpcResult[] | null) ?? []
           const filteredFb = supplier ? fb.filter((p) => p.supplier === supplier) : fb
           const fbTopScore = filteredFb[0]?.match_score ?? 0
-          if (fbTopScore > topScore) {
-            // fallback 결과가 더 좋음 → 앞에 배치 (sort 전이라 fbLimit으로 자르기)
+          // fallback 결과를 항상 누적 (>= 비교) — 토큰 매칭 sort에서 정확한 매칭이 위로 가도록
+          // 예: "수수(상품)" → 1차에 "차수수 국내산" 없어도 "수수" fallback에서 가져와 누적
+          if (fbTopScore >= topScore && filteredFb.length > 0) {
+            // fallback 결과 누적 (sort 전이라 fbLimit으로 자르기)
             const seen = new Set(filteredFb.map((p) => p.id))
             results = [
               ...filteredFb,
