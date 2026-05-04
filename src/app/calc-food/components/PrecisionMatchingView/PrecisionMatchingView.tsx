@@ -1014,11 +1014,24 @@ function ShinsegaeMatching({
                   <Tag size={14} /> {matchDetail.product_code}
                 </span>
               )}
-              {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
+              {/* 규격 — spec_raw 전체 우선 (예: "1KG, 1.5CM 슬라이스"), 없으면 spec_quantity+spec_unit fallback */}
+              {(matchDetail?.spec_raw || (ssgMatch.spec_quantity != null && ssgMatch.spec_unit)) && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
-                  <Boxes size={14} /> {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
+                  <Boxes size={14} className="shrink-0" />
+                  <HighlightedText
+                    text={matchDetail?.spec_raw || `${ssgMatch.spec_quantity}${ssgMatch.spec_unit}`}
+                    commonTokens={commonTokens}
+                  />
                 </span>
               )}
+              {/* 포장 단위 — unit_raw가 spec_raw에 포함 안 된 추가 정보 (예: "/봉") */}
+              {matchDetail?.unit_raw &&
+                matchDetail.unit_raw.toLowerCase() !== (ssgMatch.spec_unit ?? '').toLowerCase() &&
+                !(matchDetail.spec_raw ?? '').toLowerCase().includes(matchDetail.unit_raw.toLowerCase()) && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
+                    <Package size={14} className="shrink-0" /> {matchDetail.unit_raw}
+                  </span>
+                )}
               {matchDetail?.origin && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-green-700">
                   <MapPin size={14} />
