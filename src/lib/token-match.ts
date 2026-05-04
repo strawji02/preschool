@@ -5,7 +5,7 @@ import { expandWithSynonyms } from '@/lib/synonyms'
  * "이츠웰 하이스데이" → 의미있는 토큰 = ["하이스데이"] (이츠웰 제거).
  * SHINSEGAE 자체 브랜드 + 주요 식자재 공급사 브랜드.
  */
-const SUPPLIER_BRANDS: Set<string> = new Set([
+export const SUPPLIER_BRANDS: Set<string> = new Set([
   // SHINSEGAE 자체 브랜드 (다수 제품에 등장 → 변별력 0)
   '이츠웰', '굿픽', '미아토', '산지기획', '아이누리', '키즈웰',
   '쉐프초이스', '굿초이스', '스위트웰', '데이웰',
@@ -14,7 +14,25 @@ const SUPPLIER_BRANDS: Set<string> = new Set([
   // 주요 식자재 공급사
   '대상', '청정원', '오뚜기', '풀무원', '동원', '사조', '종가집',
   '롯데', '해태', '농심', '삼립', '샘표', '한성', '한성기업',
-  '효성', '효성어묵',
+  '효성', '효성어묵', '삼승', '에쓰푸드', '면사랑', '하림', '체리부로',
+  '진주햄', '송학식품', '평화식품', '동성식품', '사조오양', '진주햄',
+  '예소담', '뚜레반', '담터', '맛뜨락', '칠갑농산', '마차촌', '굿초이스',
+])
+
+/**
+ * 일반 수식어/등급/형태 토큰 — 매칭 변별력 낮음 (모든 카테고리에 등장).
+ * "삼승 프리미엄 닭다리살(1등급) 덩어리" → 의미있는 토큰 = ["닭다리살"]
+ * 식자재 메인 명사만 매칭에 사용해 정확도 향상.
+ */
+export const GENERIC_MODIFIERS: Set<string> = new Set([
+  // 수식어
+  '프리미엄', '신선한', '친환경', '무항생제', '유기농', '무첨가', '저염',
+  '저당', '오리지널', '리얼', '담백한', '진한', '깊은', '특제',
+  // 등급
+  '1등급', '2등급', '특등급', '상등급', 'a등급',
+  // 형태/가공
+  '덩어리', '절단', '슬라이스', '다짐', '커팅', '필렛', '깍둑', '채썬',
+  '갈은', '간', '으깬', '크러쉬',
 ])
 
 /**
@@ -55,9 +73,17 @@ export function getTokenMatchRatio(
   // Full substring match → 확실
   if (q.length >= 2 && (n.includes(q) || q.includes(n))) return 1.5
 
-  // 토큰 분리 + 공급사 브랜드 제거 (식자재명만 매칭에 사용)
+  // 토큰 분리 + 공급사 브랜드/일반 수식어 제거 (식자재 메인 명사만 매칭에 사용)
+  // "삼승 프리미엄 닭다리살(1등급) 덩어리" → ["닭다리살"]
   const allQueryTokens = tokenize(query)
-  const queryTokens = allQueryTokens.filter((t) => !SUPPLIER_BRANDS.has(t))
+  const meaningfulTokens = allQueryTokens.filter(
+    (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
+  )
+  // 모든 토큰이 brand/modifier면 fallback으로 brand만 제외 (modifier만 있는 케이스 고려)
+  const queryTokens =
+    meaningfulTokens.length > 0
+      ? meaningfulTokens
+      : allQueryTokens.filter((t) => !SUPPLIER_BRANDS.has(t))
   // 모든 토큰이 brand면 fallback으로 원본 사용 (검색어 자체가 brand-only인 케이스)
   const effectiveTokens = queryTokens.length > 0 ? queryTokens : allQueryTokens
 

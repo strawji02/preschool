@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
-import { getTokenMatchRatio } from '@/lib/token-match'
+import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -135,21 +135,31 @@ export async function GET(request: NextRequest) {
       // 3) extractCoreKeyword
       const tokens = query.trim().split(/\s+/).filter((t) => t.length >= 2)
       const candidateKws: string[] = []
-      if (tokens.length > 0) {
+      // brand/modifier 제외한 의미있는 토큰만 fallback 후보로 (식자재명만)
+      // "삼승 프리미엄 닭다리살(1등급) 덩어리" → ["닭다리살"]
+      const meaningfulTokens = tokens.filter(
+        (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
+      )
+      if (meaningfulTokens.length > 0) {
+        for (const t of meaningfulTokens) {
+          if (t.length >= 2 && t !== query) candidateKws.push(t)
+        }
+      }
+      // 마지막 어절 fallback (의미있는 토큰이 없을 때만)
+      if (candidateKws.length === 0 && tokens.length > 0) {
         const lastTok = tokens[tokens.length - 1]
         if (lastTok.length >= 2 && lastTok !== query) candidateKws.push(lastTok)
-        // 한국어 합성어 분해: 마지막 어절의 suffix + prefix 추출
-        // "신선한계란" → suffix "계란"(2자) / "한계란"(3자) [메인 명사]
-        // "칼집비엔나" → suffix "비엔나"(3자) + prefix "칼집"(2자) [둘 다 명사]
-        if (lastTok.length >= 4) {
-          for (let len = 3; len >= 2; len--) {
-            const suffix = lastTok.slice(lastTok.length - len)
-            if (!candidateKws.includes(suffix)) candidateKws.push(suffix)
-          }
-          for (let len = 3; len >= 2; len--) {
-            const prefix = lastTok.slice(0, len)
-            if (!candidateKws.includes(prefix)) candidateKws.push(prefix)
-          }
+      }
+      // 한국어 합성어 suffix/prefix 분해 (각 의미있는 토큰의)
+      const subjectTok = meaningfulTokens.length > 0 ? meaningfulTokens[meaningfulTokens.length - 1] : tokens[tokens.length - 1]
+      if (subjectTok && subjectTok.length >= 4) {
+        for (let len = 3; len >= 2; len--) {
+          const suffix = subjectTok.slice(subjectTok.length - len)
+          if (!candidateKws.includes(suffix)) candidateKws.push(suffix)
+        }
+        for (let len = 3; len >= 2; len--) {
+          const prefix = subjectTok.slice(0, len)
+          if (!candidateKws.includes(prefix)) candidateKws.push(prefix)
         }
       }
       const coreKw = extractCoreKeyword(query)
