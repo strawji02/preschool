@@ -22,7 +22,7 @@ export async function GET(
     const { data: session, error: sessErr } = await supabase
       .from('audit_sessions')
       .select(
-        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, current_step, page_totals, created_at, updated_at',
+        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, current_step, page_totals, proposal_extras, created_at, updated_at',
       )
       .eq('id', id)
       .single()
@@ -180,7 +180,14 @@ export async function PATCH(
     const body = await request.json()
     const supabase = createAdminClient()
 
-    const allowedFields = ['name', 'kindergarten_name', 'current_step', 'total_pages', 'total_files']
+    const allowedFields = [
+      'name',
+      'kindergarten_name',
+      'current_step',
+      'total_pages',
+      'total_files',
+      'proposal_extras', // 제안서 부가서비스 (체크/횟수/단가/원아수 등 — JSONB)
+    ]
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const f of allowedFields) {
       if (body[f] !== undefined) update[f] = body[f]
