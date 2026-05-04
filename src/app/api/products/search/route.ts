@@ -153,6 +153,20 @@ export async function GET(request: NextRequest) {
       // 한국어 합성어 suffix/prefix 분해 (각 의미있는 토큰의)
       const subjectTok = meaningfulTokens.length > 0 ? meaningfulTokens[meaningfulTokens.length - 1] : tokens[tokens.length - 1]
       if (subjectTok && subjectTok.length >= 4) {
+        // GENERIC_MODIFIERS substring 제거 (예: "신선한계란" → "계란", "특제소스" → "소스")
+        // 토큰 자체는 GENERIC_MODIFIERS에 없지만 그 안에 modifier가 prefix/suffix로 붙은 경우
+        let stripped = subjectTok
+        for (const m of GENERIC_MODIFIERS) {
+          if (stripped.startsWith(m) && stripped.length > m.length + 1) {
+            stripped = stripped.slice(m.length)
+          }
+          if (stripped.endsWith(m) && stripped.length > m.length + 1) {
+            stripped = stripped.slice(0, stripped.length - m.length)
+          }
+        }
+        if (stripped !== subjectTok && stripped.length >= 2 && !candidateKws.includes(stripped)) {
+          candidateKws.unshift(stripped)  // 가장 우선
+        }
         for (let len = 3; len >= 2; len--) {
           const suffix = subjectTok.slice(subjectTok.length - len)
           if (!candidateKws.includes(suffix)) candidateKws.push(suffix)
