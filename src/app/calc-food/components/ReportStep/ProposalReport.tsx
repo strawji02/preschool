@@ -27,20 +27,26 @@ interface ExtraItem {
   label: string
   checked: boolean
   note?: string
+  /** 연간 횟수 (예: 4 = 연 4회) */
+  count?: number
+  /** 인당 단가 (부가세 포함) */
+  unit_price?: number
 }
 
 interface ProposalExtras {
   items?: ExtraItem[]
   proposed_to?: string
   based_on_period?: string
+  /** 원아 수 (부가서비스 자동 계산용) */
+  children_count?: number
 }
 
 const DEFAULT_EXTRAS: ExtraItem[] = [
-  { key: 'snack', label: '원아 간식', checked: false, note: '' },
-  { key: 'coffee', label: '커피차', checked: false, note: '' },
-  { key: 'mat', label: '대형매트', checked: false, note: '' },
-  { key: 'cooking', label: '요리실습 재료', checked: false, note: '' },
-  { key: 'staff', label: '조리사 대체인력', checked: false, note: '' },
+  { key: 'snack',   label: '원아 간식',     checked: false, note: '교사포함 1.1배', count: 4,  unit_price: 5500 },
+  { key: 'coffee',  label: '커피차',        checked: false, note: '학부모 1.5배',  count: 5,  unit_price: 5500 },
+  { key: 'mat',     label: '대형매트',      checked: false, note: '2EA 세척·교환', count: 12, unit_price: 55000 },
+  { key: 'cooking', label: '요리실습 재료', checked: false, note: '',              count: 4,  unit_price: 5500 },
+  { key: 'staff',   label: '조리사 대체인력', checked: false, note: '',            count: 5,  unit_price: 165000 },
 ]
 
 interface ProposalReportProps {
@@ -109,8 +115,23 @@ export function ProposalReport({
   const [period, setPeriod] = useState<string>(
     initialExtras?.based_on_period || new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' }),
   )
+  const [childrenCount, setChildrenCount] = useState<number>(initialExtras?.children_count ?? 100)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+
+  // 부가서비스 자동 계산 — 단가(회당) = 인당단가 × 원아수, 금액(년) = 단가(회당) × 횟수
+  const extrasComputed = useMemo(() => {
+    return extras.map((e) => {
+      const perRound = (e.unit_price ?? 0) * childrenCount
+      const annualAmount = perRound * (e.count ?? 0)
+      return { ...e, perRound, annualAmount }
+    })
+  }, [extras, childrenCount])
+
+  const totalExtrasAnnual = useMemo(
+    () => extrasComputed.filter((e) => e.checked).reduce((s, e) => s + e.annualAmount, 0),
+    [extrasComputed],
+  )
 
   // 카테고리별 통계 (메모이즈)
   const categoryStats = useMemo(() => computeCategoryStats(items), [items])
@@ -124,12 +145,18 @@ export function ProposalReport({
   const annualSavings = monthlySavings * 12
   const savingsPercent = monthlyOurCost > 0 ? (monthlySavings / monthlyOurCost) * 100 : 0
 
-  // 부가서비스 토글 / 노트 변경
+  // 부가서비스 토글 / 노트 / 횟수 / 인당단가 변경
   const toggleExtra = (key: string) => {
     setExtras((prev) => prev.map((e) => (e.key === key ? { ...e, checked: !e.checked } : e)))
   }
   const updateExtraNote = (key: string, note: string) => {
     setExtras((prev) => prev.map((e) => (e.key === key ? { ...e, note } : e)))
+  }
+  const updateExtraCount = (key: string, count: number) => {
+    setExtras((prev) => prev.map((e) => (e.key === key ? { ...e, count } : e)))
+  }
+  const updateExtraUnitPrice = (key: string, unit_price: number) => {
+    setExtras((prev) => prev.map((e) => (e.key === key ? { ...e, unit_price } : e)))
   }
 
   // DB 저장 (수동 또는 변경 시 debounce)
@@ -141,6 +168,7 @@ export function ProposalReport({
         items: extras,
         proposed_to: proposedTo,
         based_on_period: period,
+        children_count: childrenCount,
       }
       await fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
@@ -163,7 +191,7 @@ export function ProposalReport({
     }, 1500)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extras, proposedTo, period, sessionId])
+  }, [extras, proposedTo, period, childrenCount, sessionId])
 
   // 인쇄 트리거
   const handlePrint = () => {
@@ -309,46 +337,8 @@ export function ProposalReport({
           </div>
         </section>
 
-        {/* ─── 부가서비스 ─── */}
-        <section className="mb-10">
-          <h2 className="mb-4 text-xl font-bold text-gray-900">함께 제공되는 부가서비스</h2>
-          <div className="grid grid-cols-1 gap-2">
-            {extras.map((ex) => (
-              <label
-                key={ex.key}
-                className={cn(
-                  'flex cursor-pointer items-center gap-3 rounded-lg border-2 p-3 transition print:cursor-default',
-                  ex.checked
-                    ? 'border-blue-300 bg-blue-50'
-                    : 'border-gray-200 bg-white hover:border-blue-200',
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={ex.checked}
-                  onChange={() => toggleExtra(ex.key)}
-                  className="h-5 w-5 cursor-pointer accent-blue-600"
-                />
-                <span className={cn(
-                  'flex-1 text-sm font-medium',
-                  ex.checked ? 'text-blue-900' : 'text-gray-700',
-                )}>
-                  {ex.label}
-                </span>
-                <input
-                  type="text"
-                  value={ex.note ?? ''}
-                  onChange={(e) => updateExtraNote(ex.key, e.target.value)}
-                  placeholder="조건/주기 (예: 월 2회, 연간 무제한 등)"
-                  className="w-72 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none print:border-none print:bg-transparent"
-                />
-              </label>
-            ))}
-          </div>
-        </section>
-
-        {/* ─── 연간 환산 (마무리) ─── */}
-        <section className="rounded-2xl border-2 border-blue-300 bg-blue-50 p-6 print:break-inside-avoid">
+        {/* ─── 연간 환산 (부가서비스 위로 이동) ─── */}
+        <section className="mb-8 rounded-2xl border-2 border-blue-300 bg-blue-50 p-6 print:break-inside-avoid">
           <h2 className="mb-4 text-xl font-bold text-blue-900">연간 환산 (월 합계 × 12)</h2>
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -363,6 +353,134 @@ export function ProposalReport({
               <div className="text-xs text-blue-700">연간 절감</div>
               <div className="mt-1 text-2xl font-bold text-green-700">- {formatCurrency(annualSavings)}</div>
               <div className="mt-1 text-xs font-semibold text-green-700">▼ {savingsPercent.toFixed(1)}%</div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─── 제안 부가서비스 (예상 절감액) — 임팩트 디자인 ─── */}
+        <section className="mb-10 print:break-inside-avoid">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">제안 부가서비스 <span className="ml-1 text-sm font-medium text-gray-500">(예상 절감액)</span></h2>
+              <p className="mt-1 text-xs text-gray-500">체크된 항목만 합계에 포함됩니다. 원아수 · 횟수 · 인당 단가만 입력하면 자동 계산됩니다.</p>
+            </div>
+            <label className="flex items-center gap-2 rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 print:border-amber-300">
+              원아수
+              <input
+                type="number"
+                min={1}
+                value={childrenCount || ''}
+                onChange={(e) => setChildrenCount(Math.max(1, Number(e.target.value) || 0))}
+                className="w-20 rounded-md border border-amber-300 bg-white px-2 py-1 text-right font-bold text-amber-900 focus:border-amber-500 focus:outline-none print:border-amber-300"
+              />
+              <span className="text-xs text-amber-700">명</span>
+            </label>
+          </div>
+
+          {/* 표 */}
+          <div className="overflow-hidden rounded-xl border-2 border-amber-200 print:break-inside-avoid">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-amber-100 text-amber-900">
+                  <th className="px-2 py-2 text-center text-xs font-bold w-10">선택</th>
+                  <th className="px-3 py-2 text-left text-xs font-bold">항목</th>
+                  <th className="px-2 py-2 text-center text-xs font-bold w-20">횟수</th>
+                  <th className="px-2 py-2 text-right text-xs font-bold w-28">단가(회당)</th>
+                  <th className="px-2 py-2 text-right text-xs font-bold w-32">금액(년)</th>
+                  <th className="px-2 py-2 text-right text-xs font-bold w-28">인당 단가</th>
+                  <th className="px-2 py-2 text-left text-xs font-bold w-44">비고</th>
+                </tr>
+              </thead>
+              <tbody>
+                {extrasComputed.map((ex, idx) => (
+                  <tr
+                    key={ex.key}
+                    className={cn(
+                      'border-t border-amber-100 transition',
+                      ex.checked ? 'bg-amber-50' : 'bg-white opacity-70',
+                    )}
+                  >
+                    <td className="px-2 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={ex.checked}
+                        onChange={() => toggleExtra(ex.key)}
+                        className="h-4 w-4 cursor-pointer accent-amber-600"
+                      />
+                    </td>
+                    <td className={cn('px-3 py-2 font-medium', ex.checked ? 'text-amber-900' : 'text-gray-600')}>
+                      {idx + 1}. {ex.label}
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <div className="inline-flex items-center gap-0.5">
+                        <input
+                          type="number"
+                          min={0}
+                          value={ex.count ?? ''}
+                          onChange={(e) => updateExtraCount(ex.key, Number(e.target.value) || 0)}
+                          className="w-12 rounded border border-amber-200 bg-white px-1 py-0.5 text-right text-xs focus:border-amber-500 focus:outline-none print:border-none"
+                        />
+                        <span className="text-xs text-gray-500">회</span>
+                      </div>
+                    </td>
+                    <td className={cn('px-2 py-2 text-right font-mono', ex.checked ? 'text-gray-800' : 'text-gray-400')}>
+                      {ex.unit_price && childrenCount > 0 ? formatNumber(ex.perRound) : '-'}
+                    </td>
+                    <td className={cn('px-2 py-2 text-right font-mono font-bold', ex.checked ? 'text-amber-900' : 'text-gray-400')}>
+                      {ex.unit_price && childrenCount > 0 && (ex.count ?? 0) > 0
+                        ? formatNumber(ex.annualAmount)
+                        : '-'}
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        value={ex.unit_price ?? ''}
+                        onChange={(e) => updateExtraUnitPrice(ex.key, Number(e.target.value) || 0)}
+                        className="w-24 rounded border border-amber-200 bg-white px-1 py-0.5 text-right font-mono text-xs focus:border-amber-500 focus:outline-none print:border-none"
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        type="text"
+                        value={ex.note ?? ''}
+                        onChange={(e) => updateExtraNote(ex.key, e.target.value)}
+                        placeholder="예: 1.1배, 2EA 등"
+                        className="w-full rounded border border-amber-200 bg-white px-1 py-0.5 text-xs focus:border-amber-500 focus:outline-none print:border-none"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-amber-300 bg-amber-200">
+                  <td colSpan={4} className="px-3 py-2.5 text-right text-sm font-bold text-amber-900">
+                    계 (년간) — 체크된 항목 합계
+                  </td>
+                  <td className="px-2 py-2.5 text-right font-mono text-base font-bold text-amber-900">
+                    {formatNumber(totalExtrasAnnual)}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* 임팩트 — 절감액 + 부가서비스 합산 */}
+          <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-5 text-white shadow-lg print:break-inside-avoid">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">연간 식자재 절감</div>
+                <div className="mt-1 text-2xl font-bold">{formatCurrency(annualSavings)}</div>
+              </div>
+              <div className="border-l-2 border-amber-300 pl-4">
+                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">+ 부가서비스 가치 (년)</div>
+                <div className="mt-1 text-2xl font-bold">{formatCurrency(totalExtrasAnnual)}</div>
+              </div>
+              <div className="border-l-2 border-amber-300 pl-4">
+                <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">총 연간 가치</div>
+                <div className="mt-1 text-3xl font-extrabold">{formatCurrency(annualSavings + totalExtrasAnnual)}</div>
+              </div>
             </div>
           </div>
         </section>
