@@ -13,6 +13,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2, AlertTriangle,
   FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X, RefreshCw,
+  ExternalLink, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -655,49 +656,55 @@ function ExistingItemDetail({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b px-4 py-2 text-sm font-semibold text-gray-700">
-        <span>🗄️ 기존 업체 품목 <span className="ml-1 text-xs text-gray-400">Read-only</span></span>
-        {onOpenImage && (
+      {/* 헤더 — 타이틀 + 출처 클릭 버튼 (모달 트리거) */}
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-sm font-semibold text-gray-700">
+        <span className="shrink-0">
+          🗄️ 기존 업체 품목 <span className="ml-1 text-[11px] font-normal text-gray-400">Read-only</span>
+        </span>
+        {(item.source_file_name || item.page_number != null) && onOpenImage ? (
           <button
             onClick={onOpenImage}
-            className="flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+            className="flex min-w-0 items-center gap-1 truncate rounded border border-gray-300 bg-gray-50 px-2 py-0.5 text-[11px] font-normal text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+            title={`${item.source_file_name ?? ''}${item.page_number != null ? ` p.${item.page_number}` : ''} 클릭하여 원본 보기`}
           >
-            <FileImage size={12} /> 명세서
+            <FileImage size={12} className="shrink-0" />
+            <span className="truncate">
+              {item.source_file_name}
+              {item.page_number != null && <span className="ml-1 text-gray-400">p.{item.page_number}</span>}
+            </span>
+            <ExternalLink size={11} className="shrink-0 text-gray-400" />
           </button>
+        ) : (
+          (item.source_file_name || item.page_number != null) && (
+            <span className="truncate text-[11px] font-normal text-gray-400">
+              <FileImage size={11} className="mr-1 inline" />
+              {item.source_file_name}
+              {item.page_number != null && <span className="ml-1">p.{item.page_number}</span>}
+            </span>
+          )
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3">
-        {/* 제품명 (큰 볼드) + 메타 chips 한 줄 */}
+      <div className="flex-1 overflow-y-auto px-3 py-2">
+        {/* 제품명 + 규격/단위 chips (출처 제거 — 헤더로 이동) */}
         <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
           <HighlightedText text={item.extracted_name} commonTokens={commonTokens} />
         </h3>
-        {/* 메타 chips 행 — 품목명(text-2xl=24px)의 80% = text-lg(약 19px), 출처는 작게 유지 */}
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-lg">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-base">
           {item.extracted_spec && (
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
-              <Boxes size={16} />
+            <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
+              <Boxes size={14} />
               <HighlightedText text={item.extracted_spec} commonTokens={commonTokens} />
             </span>
           )}
           {item.extracted_unit && (
-            <span className="rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
+            <span className="rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
               단위 <HighlightedText text={item.extracted_unit} commonTokens={commonTokens} />
-            </span>
-          )}
-          {(item.source_file_name || item.page_number) && (
-            <span className="ml-auto text-[11px] text-gray-400">
-              {item.source_file_name && (
-                <span className="inline-flex items-center gap-0.5">
-                  <FileImage size={11} /> {item.source_file_name}
-                </span>
-              )}
-              {item.page_number != null && <span className="ml-1.5">p.{item.page_number}</span>}
             </span>
           )}
         </div>
 
-        {/* 금액 5분할 한 줄 (라벨 텍스트 제거) */}
-        <div className="mt-2 grid grid-cols-5 gap-1">
+        {/* 금액 5분할 한 줄 */}
+        <div className="mt-1.5 grid grid-cols-5 gap-1">
           <FinanceCardCompact label="단위중량" value={existingWeightG ? `${formatNumber(existingWeightG)}g` : '-'} />
           <FinanceCardCompact
             label="발주"
@@ -722,15 +729,15 @@ function ExistingItemDetail({
           />
         </div>
 
-        {/* 총 발주량 (단위중량 × 발주수량 = 총 g) — 신세계 카드와 비교 기준 */}
+        {/* 총 발주량 — 신세계 카드와 비교 기준 (한 줄 압축) */}
         {existingWeightG && item.extracted_quantity > 0 && (
-          <div className="mt-2 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200">
-            <span className="text-xs font-semibold text-amber-700">총 발주량</span>
-            <span className="font-mono text-sm text-gray-700">
+          <div className="mt-1.5 flex items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1 ring-1 ring-amber-200">
+            <span className="text-[11px] font-semibold text-amber-700">총 발주량</span>
+            <span className="font-mono text-xs text-gray-700">
               {formatNumber(existingWeightG)}g × {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
             </span>
-            <span className="text-sm text-gray-400">=</span>
-            <span className="text-base font-bold text-amber-900">
+            <span className="text-xs text-gray-400">=</span>
+            <span className="text-sm font-bold text-amber-900">
               {formatNumber(existingWeightG * item.extracted_quantity)}g
             </span>
           </div>
@@ -925,11 +932,27 @@ function ShinsegaeMatching({
     return list
   }, [existingWeightG, unitWeightG])
 
+  // 검수자 의견 (DB 컬럼 추가 전 — localStorage로 임시 보존, item.id 기준)
+  // TODO: audit_items.reviewer_note 컬럼 추가 후 PATCH /api/audit-items/[id] 로 전환
+  const noteKey = `reviewer_note_${item.id}`
+  const [reviewerNote, setReviewerNote] = useState<string>('')
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setReviewerNote(window.localStorage.getItem(noteKey) ?? '')
+  }, [noteKey])
+  const onNoteChange = (v: string) => {
+    setReviewerNote(v)
+    if (typeof window !== 'undefined') {
+      if (v) window.localStorage.setItem(noteKey, v)
+      else window.localStorage.removeItem(noteKey)
+    }
+  }
+
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border-2 border-gray-900 bg-white shadow-md">
-      <div className="flex items-center justify-between border-b bg-gray-900 px-4 py-2 text-sm font-semibold text-white">
+      <div className="flex items-center justify-between border-b bg-gray-900 px-3 py-1.5 text-sm font-semibold text-white">
         <span>🛒 신세계 매칭 자료</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {ssgMatch && (
             <>
               <span className="rounded bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">환산 적용</span>
@@ -938,45 +961,44 @@ function ShinsegaeMatching({
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="flex-1 overflow-y-auto px-3 py-2">
         {!ssgMatch ? (
           <div className="flex h-24 items-center justify-center text-sm text-gray-400">
             매칭된 신세계 상품이 없습니다. 우측 후보에서 선택하세요.
           </div>
         ) : (
           <>
-            {/* 제품명 (큰 볼드) + 메타 chips 한 줄 (라벨 텍스트 제거) */}
+            {/* 제품명 + 메타 chips */}
             <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
               <HighlightedText
                 text={ssgMatch.product_name || item.extracted_name}
                 commonTokens={commonTokens}
               />
             </h3>
-            {/* 메타 chips 행 — 품목명(text-2xl=24px)의 80% ≈ text-lg(19px) */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-lg">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-base">
               {matchDetail?.product_code && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
-                  <Tag size={16} /> {matchDetail.product_code}
+                <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
+                  <Tag size={14} /> {matchDetail.product_code}
                 </span>
               )}
               {ssgMatch.spec_quantity != null && ssgMatch.spec_unit && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-gray-700">
-                  <Boxes size={16} /> {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
+                <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
+                  <Boxes size={14} /> {ssgMatch.spec_quantity}{ssgMatch.spec_unit}
                 </span>
               )}
               {matchDetail?.origin && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-green-100 px-2.5 py-1 text-green-700">
-                  <MapPin size={16} />
+                <span className="inline-flex items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-green-700">
+                  <MapPin size={14} />
                   <HighlightedText text={matchDetail.origin} commonTokens={commonTokens} highlightClassName="font-bold" />
                   {matchDetail.origin_detail && (
-                    <span className="ml-1 text-sm text-green-600">({matchDetail.origin_detail})</span>
+                    <span className="ml-1 text-xs text-green-600">({matchDetail.origin_detail})</span>
                   )}
                 </span>
               )}
               {matchDetail?.tax_type && (
                 <span
                   className={cn(
-                    'rounded-md px-2.5 py-1',
+                    'rounded-md px-2 py-0.5',
                     matchDetail.tax_type === '면세' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
                   )}
                 >
@@ -984,20 +1006,20 @@ function ShinsegaeMatching({
                 </span>
               )}
               {matchDetail?.storage_temp && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-cyan-100 px-2.5 py-1 text-cyan-700">
-                  <Snowflake size={16} /> {matchDetail.storage_temp}
+                <span className="inline-flex items-center gap-1 rounded-md bg-cyan-100 px-2 py-0.5 text-cyan-700">
+                  <Snowflake size={14} /> {matchDetail.storage_temp}
                 </span>
               )}
               {matchDetail?.category && (
-                <span className="rounded-md bg-purple-100 px-2.5 py-1 text-purple-700">
+                <span className="rounded-md bg-purple-100 px-2 py-0.5 text-purple-700">
                   {matchDetail.category}
                   {matchDetail.subcategory && `·${matchDetail.subcategory}`}
                 </span>
               )}
             </div>
 
-            {/* 금액 5분할 한 줄 (단위중량/발주는 입력) */}
-            <div className="mt-2 grid grid-cols-5 gap-1">
+            {/* 금액 5분할 한 줄 */}
+            <div className="mt-1.5 grid grid-cols-5 gap-1">
               <FinanceInputCardCompact label="단위중량" value={unitWeightG} suffix="g" onChange={setUnitWeightG} />
               <FinanceInputCardCompact
                 label="발주"
@@ -1026,7 +1048,7 @@ function ShinsegaeMatching({
               />
             </div>
 
-            {/* 총 발주량 (단위중량 × 발주수량 = 총 g) — 기존 카드와 일치하도록 발주수량 조정 */}
+            {/* 총 발주량 (단위중량 × 발주수량 = 총 g) */}
             {unitWeightG > 0 && quantity > 0 && (() => {
               const ssgTotalG = unitWeightG * quantity
               const existingTotalG = existingWeightG ? existingWeightG * item.extracted_quantity : 0
@@ -1034,22 +1056,22 @@ function ShinsegaeMatching({
               return (
                 <div
                   className={cn(
-                    'mt-2 flex items-center gap-2 rounded-lg px-3 py-2 ring-1',
+                    'mt-1.5 flex items-center gap-2 rounded-md px-2.5 py-1 ring-1',
                     matched ? 'bg-emerald-50 ring-emerald-200' : 'bg-amber-50 ring-amber-200',
                   )}
                 >
-                  <span className={cn('text-xs font-semibold', matched ? 'text-emerald-700' : 'text-amber-700')}>
+                  <span className={cn('text-[11px] font-semibold', matched ? 'text-emerald-700' : 'text-amber-700')}>
                     총 발주량
                   </span>
-                  <span className="font-mono text-sm text-gray-700">
+                  <span className="font-mono text-xs text-gray-700">
                     {formatNumber(unitWeightG)}g × {formatNumber(quantity)} {packUnit}
                   </span>
-                  <span className="text-sm text-gray-400">=</span>
-                  <span className={cn('text-base font-bold', matched ? 'text-emerald-900' : 'text-amber-900')}>
+                  <span className="text-xs text-gray-400">=</span>
+                  <span className={cn('text-sm font-bold', matched ? 'text-emerald-900' : 'text-amber-900')}>
                     {formatNumber(ssgTotalG)}g
                   </span>
                   {existingTotalG > 0 && (
-                    <span className={cn('ml-auto text-xs', matched ? 'text-emerald-700' : 'text-amber-700')}>
+                    <span className={cn('ml-auto text-[11px]', matched ? 'text-emerald-700' : 'text-amber-700')}>
                       {matched ? '✓ 기존과 일치' : `기존 ${formatNumber(existingTotalG)}g 대비 ${ssgTotalG > existingTotalG ? '+' : ''}${formatNumber(ssgTotalG - existingTotalG)}g`}
                     </span>
                   )}
@@ -1057,39 +1079,27 @@ function ShinsegaeMatching({
               )
             })()}
 
-            {/* 절감 + Confirm 한 줄 */}
-            <div className="mt-2 flex items-center gap-2">
-              <div
+            {/* 절감 한 줄 (Confirm은 아래 검수자 의견 줄로 이동) */}
+            <div
+              className={cn(
+                'mt-1.5 flex items-baseline justify-between rounded-md px-2.5 py-1 ring-1',
+                savings.isSaving ? 'bg-green-50 ring-green-200' : 'bg-red-50 ring-red-200',
+              )}
+            >
+              <span className="text-[11px] text-gray-600">기존 {formatCurrency(existingTotal)}</span>
+              <span
                 className={cn(
-                  'flex-1 rounded-lg px-3 py-1.5',
-                  savings.isSaving ? 'bg-green-50 ring-1 ring-green-200' : 'bg-red-50 ring-1 ring-red-200',
+                  'rounded-full px-2 py-0.5 text-xs font-bold',
+                  savings.isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
                 )}
               >
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-gray-600">
-                    기존 {formatCurrency(existingTotal)}
-                  </span>
-                  <span
-                    className={cn(
-                      'rounded-full px-2 py-0.5 text-xs font-bold',
-                      savings.isSaving ? 'bg-green-600 text-white' : 'bg-red-600 text-white',
-                    )}
-                  >
-                    {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))} ({savings.percent.toFixed(1)}%)
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={onConfirm}
-                className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-700"
-              >
-                <CheckCircle2 size={14} /> Confirm
-              </button>
+                {savings.isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(savings.amount))} ({savings.percent.toFixed(1)}%)
+              </span>
             </div>
 
-            {/* 차이/규격 경고 — 컴팩트, 한 줄로 */}
+            {/* 차이/규격 경고 — 컴팩트, 한 줄 */}
             {(diffs.length > 0 || hasDiscrepancy) && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
+              <div className="mt-1 flex flex-wrap items-center gap-2 rounded bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 ring-1 ring-amber-200">
                 <AlertTriangle size={12} className="shrink-0" />
                 {diffs.map((d, i) => (
                   <span key={i}>
@@ -1099,6 +1109,26 @@ function ShinsegaeMatching({
                 {hasDiscrepancy && <span className="font-semibold text-red-700">⚠️ 규격 4배+ 차이</span>}
               </div>
             )}
+
+            {/* 검수자 의견 + Confirm — 한 줄 (textarea 좌, 버튼 우) */}
+            <div className="mt-1.5 flex items-stretch gap-2">
+              <label className="flex flex-1 items-start gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 focus-within:border-blue-400 focus-within:bg-white">
+                <MessageSquare size={14} className="mt-1 shrink-0 text-gray-400" />
+                <textarea
+                  value={reviewerNote}
+                  onChange={(e) => onNoteChange(e.target.value)}
+                  placeholder="검수자 의견 (AI 학습용) — 예: '실제로는 차수수 국내산이 맞음'"
+                  rows={2}
+                  className="w-full resize-none bg-transparent text-xs text-gray-800 placeholder-gray-400 focus:outline-none"
+                />
+              </label>
+              <button
+                onClick={onConfirm}
+                className="flex shrink-0 items-center gap-1 self-stretch rounded-md bg-blue-600 px-3 text-sm font-semibold text-white shadow hover:bg-blue-700"
+              >
+                <CheckCircle2 size={14} /> Confirm
+              </button>
+            </div>
           </>
         )}
       </div>
