@@ -212,6 +212,45 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // ILIKE 직접 쿼리 — RPC가 못 가져오는 substring 매칭 보강
+      // 예: "수수" 검색 → trigram에서 "차수수 국내산" 누락 → ILIKE %수수%로 보강
+      if (subjectTok && subjectTok.length >= 2) {
+        try {
+          // GENERIC_MODIFIERS 제거된 핵심어로 ILIKE
+          let coreSearch = subjectTok
+          for (const m of GENERIC_MODIFIERS) {
+            if (coreSearch.startsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(m.length)
+            if (coreSearch.endsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(0, coreSearch.length - m.length)
+          }
+          if (coreSearch.length >= 2) {
+            const { data: likeData } = await supabase
+              .from('products')
+              .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
+              .eq('supplier', supplier ?? 'SHINSEGAE')
+              .ilike('product_name', `%${coreSearch}%`)
+              .limit(20)
+            if (likeData && likeData.length > 0) {
+              const seen = new Set(results.map((p) => p.id))
+              const likeResults: RpcResult[] = likeData
+                .filter((p) => !seen.has(p.id as string))
+                .map((p) => ({
+                  id: p.id as string,
+                  product_name: p.product_name as string,
+                  standard_price: p.standard_price as number,
+                  unit_normalized: p.unit_normalized as string,
+                  spec_quantity: p.spec_quantity as number | null,
+                  spec_unit: p.spec_unit as string | null,
+                  supplier: p.supplier as string,
+                  match_score: 0.001, // 낮은 점수 — 토큰 sort로 평가
+                }))
+              results = [...results, ...likeResults]
+            }
+          }
+        } catch (e) {
+          console.warn('ILIKE fallback 실패:', e)
+        }
+      }
+
       // 누적 결과를 토큰 매칭 비율로 재정렬 (정확한 매칭이 위로)
       // 예: "칼집비엔나" → "칼집비엔나 진주햄"(ratio=1.0)이 일반 "비엔나"(ratio=0.7)보다 위로
       results.sort((a, b) => {
