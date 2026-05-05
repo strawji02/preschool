@@ -397,26 +397,28 @@ export function ProposalReport({
 
         {/* ─── 제안 부가서비스 (예상 절감액) — 임팩트 디자인 ─── */}
         <section className="mb-10 print:break-inside-avoid">
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">제안 부가서비스 <span className="ml-1 text-sm font-medium text-gray-500">(예상 절감액)</span></h2>
-              <p className="mt-1 text-xs text-gray-500">체크된 항목만 합계에 포함됩니다. 원아수 · 횟수 · 인당 단가만 입력하면 자동 계산됩니다.</p>
+          {/* 입력 표 영역 — 화면에서만 작업, PDF 출력 시 숨김 */}
+          <div className="print:hidden">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">제안 부가서비스 <span className="ml-1 text-sm font-medium text-gray-500">(예상 절감액)</span></h2>
+                <p className="mt-1 text-xs text-gray-500">체크된 항목만 합계에 포함됩니다. 원아수 · 횟수 · 인당 단가만 입력하면 자동 계산됩니다.</p>
+              </div>
+              <label className="flex items-center gap-2 rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900">
+                원아수
+                <input
+                  type="number"
+                  min={1}
+                  value={childrenCount || ''}
+                  onChange={(e) => setChildrenCount(Math.max(1, Number(e.target.value) || 0))}
+                  className="w-20 rounded-md border border-amber-300 bg-white px-2 py-1 text-right font-bold text-amber-900 focus:border-amber-500 focus:outline-none"
+                />
+                <span className="text-xs text-amber-700">명</span>
+              </label>
             </div>
-            <label className="flex items-center gap-2 rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 print:border-amber-300">
-              원아수
-              <input
-                type="number"
-                min={1}
-                value={childrenCount || ''}
-                onChange={(e) => setChildrenCount(Math.max(1, Number(e.target.value) || 0))}
-                className="w-20 rounded-md border border-amber-300 bg-white px-2 py-1 text-right font-bold text-amber-900 focus:border-amber-500 focus:outline-none print:border-amber-300"
-              />
-              <span className="text-xs text-amber-700">명</span>
-            </label>
-          </div>
 
           {/* 표 */}
-          <div className="overflow-hidden rounded-xl border-2 border-amber-200 print:break-inside-avoid">
+          <div className="overflow-hidden rounded-xl border-2 border-amber-200">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-amber-100 text-amber-900">
@@ -502,9 +504,10 @@ export function ProposalReport({
               </tfoot>
             </table>
           </div>
+          </div>
+          {/* /입력 표 영역 (print:hidden) */}
 
-          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조
-              (절감액은 영업자가 목표로 삼을 참고값, 비교/증감 표시 X) */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (PDF 출력 영역) */}
           {(() => {
             const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
@@ -512,7 +515,7 @@ export function ProposalReport({
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">
-                      영업자 부가서비스 환원 (연간)
+                      유치원 제안 부가서비스 (연간)
                     </div>
                     <div className="mt-1 text-4xl font-extrabold leading-none">
                       {formatCurrency(totalExtrasAnnual)}
