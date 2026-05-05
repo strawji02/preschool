@@ -261,19 +261,19 @@ export function ProposalReport({
       </div>
 
       {/* 보고서 본체 (인쇄 영역) */}
-      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-none print:p-0 print:shadow-none">
+      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-none print:p-6 print:shadow-none">
         {/* ─── 헤더 ─── */}
-        <header className="mb-8 border-b-2 border-blue-600 pb-6">
+        <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-4 print:pb-3">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
             급식 제안서 · Foodservice Proposal
           </div>
           <div className="flex items-baseline justify-between gap-4">
-            <h1 className="text-3xl font-bold text-gray-900">
+            <h1 className="text-3xl font-bold text-gray-900 print:text-2xl">
               <input
                 value={proposedTo}
                 onChange={(e) => setProposedTo(e.target.value)}
                 placeholder="유치원명 입력"
-                className="w-full border-none bg-transparent text-3xl font-bold text-gray-900 outline-none placeholder:text-gray-300 focus:bg-blue-50 print:bg-transparent"
+                className="w-full border-none bg-transparent text-3xl font-bold text-gray-900 outline-none placeholder:text-gray-300 focus:bg-blue-50 print:bg-transparent print:text-2xl"
               />
             </h1>
             <div className="text-right text-sm text-gray-500">
@@ -289,40 +289,40 @@ export function ProposalReport({
         </header>
 
         {/* ─── HERO: 연간 절감액 강조 ─── */}
-        <section className="mb-10 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white shadow-lg print:bg-blue-700">
+        <section className="mb-10 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white shadow-lg print:mb-4 print:p-5 print:bg-blue-700 print:break-inside-avoid">
           <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">연간 절감 효과</div>
           <div className="mt-2 flex items-baseline gap-3">
-            <div className="text-5xl font-bold">{formatCurrency(annualSavings)}</div>
-            <div className="text-2xl font-semibold text-blue-100">▼ {savingsPercent.toFixed(1)}%</div>
+            <div className="text-5xl font-bold print:text-4xl">{formatCurrency(annualSavings)}</div>
+            <div className="text-2xl font-semibold text-blue-100 print:text-xl">▼ {savingsPercent.toFixed(1)}%</div>
           </div>
-          <div className="mt-3 text-sm text-blue-100">
+          <div className="mt-3 text-sm text-blue-100 print:mt-1">
             월 평균 <strong className="text-white">{formatCurrency(monthlySavings)}</strong> 절감
           </div>
         </section>
 
         {/* ─── 월/연간 비교 카드 ─── */}
-        <section className="mb-10 grid grid-cols-3 gap-4">
-          <div className="rounded-xl border-2 border-gray-200 bg-white p-5">
+        <section className="mb-10 grid grid-cols-3 gap-4 print:mb-4 print:gap-2">
+          <div className="rounded-xl border-2 border-gray-200 bg-white p-5 print:p-3">
             <div className="mb-1 text-xs font-medium text-gray-500">현 거래처 (월)</div>
-            <div className="text-2xl font-bold text-gray-700">{formatCurrency(monthlyOurCost)}</div>
-            <div className="mt-2 text-xs text-gray-400">연간 {formatCurrency(annualOurCost)}</div>
+            <div className="text-2xl font-bold text-gray-700 print:text-xl">{formatCurrency(monthlyOurCost)}</div>
+            <div className="mt-2 text-xs text-gray-400 print:mt-0.5">연간 {formatCurrency(annualOurCost)}</div>
           </div>
-          <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-5">
+          <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-5 print:p-3">
             <div className="mb-1 text-xs font-medium text-blue-700">신세계푸드 (월)</div>
-            <div className="text-2xl font-bold text-blue-900">{formatCurrency(monthlySsgCost)}</div>
-            <div className="mt-2 text-xs text-blue-700">연간 {formatCurrency(annualSsgCost)}</div>
+            <div className="text-2xl font-bold text-blue-900 print:text-xl">{formatCurrency(monthlySsgCost)}</div>
+            <div className="mt-2 text-xs text-blue-700 print:mt-0.5">연간 {formatCurrency(annualSsgCost)}</div>
           </div>
-          <div className="rounded-xl border-2 border-green-300 bg-green-50 p-5">
+          <div className="rounded-xl border-2 border-green-300 bg-green-50 p-5 print:p-3">
             <div className="mb-1 text-xs font-medium text-green-700">절감 효과</div>
-            <div className="text-2xl font-bold text-green-700">- {formatCurrency(monthlySavings)}</div>
-            <div className="mt-2 text-xs text-green-700">▼ {savingsPercent.toFixed(1)}% (월)</div>
+            <div className="text-2xl font-bold text-green-700 print:text-xl">- {formatCurrency(monthlySavings)}</div>
+            <div className="mt-2 text-xs text-green-700 print:mt-0.5">▼ {savingsPercent.toFixed(1)}% (월)</div>
           </div>
         </section>
 
         {/* ─── 카테고리별 절감 (메인) ─── */}
-        <section className="mb-10">
-          <h2 className="mb-4 text-xl font-bold text-gray-900">카테고리별 절감 (월 기준)</h2>
-          <div className="space-y-3">
+        <section className="mb-10 print:mb-0">
+          <h2 className="mb-4 text-xl font-bold text-gray-900 print:mb-2 print:text-lg">카테고리별 절감 (월 기준)</h2>
+          <div className="space-y-3 print:space-y-1.5">
             {categoryStats.map((stat) => {
               const style = CATEGORY_STYLE[stat.category]
               const barPct = monthlyOurCost > 0 ? (stat.ourCost / monthlyOurCost) * 100 : 0
@@ -330,14 +330,14 @@ export function ProposalReport({
                 <div
                   key={stat.category}
                   className={cn(
-                    'rounded-xl border-2 p-4 transition',
+                    'rounded-xl border-2 p-4 transition print:p-2.5 print:break-inside-avoid',
                     style.bg,
                     style.ring,
                   )}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-3xl">{style.emoji}</span>
+                    <div className="flex items-center gap-3 print:gap-2">
+                      <span className="text-3xl print:text-2xl">{style.emoji}</span>
                       <div>
                         <div className={cn('text-base font-bold', style.text)}>{stat.category}</div>
                         <div className="text-[11px] text-gray-500">
@@ -346,10 +346,10 @@ export function ProposalReport({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500 line-through">
+                      <div className="text-sm text-gray-500 line-through print:text-xs">
                         {formatCurrency(stat.ourCost)}
                       </div>
-                      <div className={cn('text-lg font-bold', style.text)}>
+                      <div className={cn('text-lg font-bold print:text-base', style.text)}>
                         {formatCurrency(stat.ssgCost)}
                       </div>
                       <div className="mt-0.5 text-xs font-semibold text-green-700">
@@ -358,7 +358,7 @@ export function ProposalReport({
                     </div>
                   </div>
                   {/* 카테고리 비중 바 */}
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/60">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/60 print:mt-1.5 print:h-1">
                     <div
                       className={cn(
                         'h-full rounded-full',
@@ -375,25 +375,41 @@ export function ProposalReport({
           </div>
         </section>
 
-        {/* ─── 연간 환산 (부가서비스 위로 이동) ─── */}
-        <section className="mb-8 rounded-2xl border-2 border-blue-300 bg-blue-50 p-6 print:break-inside-avoid">
-          <h2 className="mb-4 text-xl font-bold text-blue-900">연간 환산 (월 합계 × 12)</h2>
-          <div className="grid grid-cols-3 gap-4">
+        {/* ─── 2페이지 시작: 연간 환산 (블루 강조 카드) ─── */}
+        <section className="mb-4 mt-8 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 p-7 text-white shadow-xl print:mt-0 print:break-before-page print:break-inside-avoid">
+          <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
+            연간 환산 (월 합계 × 12)
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-6">
             <div>
-              <div className="text-xs text-blue-700">현재</div>
-              <div className="mt-1 text-xl font-bold text-gray-700">{formatCurrency(annualOurCost)}</div>
+              <div className="text-[11px] uppercase tracking-wider text-blue-200">현재</div>
+              <div className="mt-1 text-2xl font-bold text-blue-100 line-through opacity-80">
+                {formatCurrency(annualOurCost)}
+              </div>
             </div>
-            <div className="border-l-2 border-blue-200 pl-4">
-              <div className="text-xs text-blue-700">신세계푸드 전환 시</div>
-              <div className="mt-1 text-xl font-bold text-blue-900">{formatCurrency(annualSsgCost)}</div>
+            <div className="border-l border-blue-400/40 pl-5">
+              <div className="text-[11px] uppercase tracking-wider text-blue-200">신세계푸드 전환 시</div>
+              <div className="mt-1 text-2xl font-bold text-white">{formatCurrency(annualSsgCost)}</div>
             </div>
-            <div className="border-l-2 border-blue-200 pl-4">
-              <div className="text-xs text-blue-700">연간 절감</div>
-              <div className="mt-1 text-2xl font-bold text-green-700">- {formatCurrency(annualSavings)}</div>
-              <div className="mt-1 text-xs font-semibold text-green-700">▼ {savingsPercent.toFixed(1)}%</div>
+            <div className="border-l border-blue-400/40 pl-5">
+              <div className="text-[11px] uppercase tracking-wider text-blue-200">연간 절감</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-yellow-300">-{formatCurrency(annualSavings)}</span>
+              </div>
+              <div className="mt-1 text-xs font-bold text-yellow-300">▼ {savingsPercent.toFixed(1)}%</div>
             </div>
           </div>
         </section>
+
+        {/* ─── 연결 메시지 — 절감액이 부가서비스로 환원됨을 시각화 ─── */}
+        <div className="my-3 flex items-center justify-center gap-3 print:my-2">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-300 to-amber-400" />
+          <div className="flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-semibold text-amber-800 ring-2 ring-amber-200">
+            <span className="text-base">↓</span>
+            이 절감액이 유치원 부가서비스로 환원됩니다
+          </div>
+          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-amber-300 to-amber-400" />
+        </div>
 
         {/* ─── 제안 부가서비스 (예상 절감액) — 임팩트 디자인 ─── */}
         <section className="mb-10 print:break-inside-avoid">
