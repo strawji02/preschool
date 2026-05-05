@@ -105,8 +105,8 @@ export default function CalcFoodPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* 헤더 */}
-      <header className="bg-white shadow-sm">
+      {/* 헤더 — PDF/인쇄 시 숨김 (제안서 본문만 출력되도록) */}
+      <header className="bg-white shadow-sm print:hidden">
         <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-4">
           <div className="flex items-center gap-4">
             <Link
@@ -140,8 +140,10 @@ export default function CalcFoodPage() {
         </div>
       </header>
 
-      {/* 검수 워크플로우 단계 표시 (2026-04-26) */}
-      <WorkflowStepper status={state.status} currentStep={state.currentStep} />
+      {/* 검수 워크플로우 단계 표시 (2026-04-26) — PDF/인쇄 시 숨김 */}
+      <div className="print:hidden">
+        <WorkflowStepper status={state.status} currentStep={state.currentStep} />
+      </div>
 
       {/* 메인 콘텐츠 */}
       <main>
