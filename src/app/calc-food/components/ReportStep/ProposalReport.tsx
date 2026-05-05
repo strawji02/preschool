@@ -376,37 +376,51 @@ export function ProposalReport({
         </section>
 
         {/* ─── 2페이지 시작: 연간 환산 (블루 강조 카드) ─── */}
-        <section className="mb-4 mt-8 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 p-7 text-white shadow-xl print:mt-0 print:break-before-page print:break-inside-avoid">
-          <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
-            연간 환산 (월 합계 × 12)
+        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-xl print:mt-0 print:break-before-page print:break-inside-avoid">
+          <div className="px-7 pt-6 pb-4 print:px-6 print:pt-5 print:pb-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
+              연간 환산 (월 합계 × 12)
+            </div>
+
+            {/* 현재 ↔ 전환 시 — 좌우 비교 (한 줄) */}
+            <div className="mt-3 grid grid-cols-2 gap-4">
+              <div className="rounded-xl bg-blue-900/30 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-wider text-blue-200">현재</div>
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-blue-100 print:text-xl">
+                  {formatCurrency(annualOurCost)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/15 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-wider text-blue-100">신세계푸드 전환 시</div>
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-white print:text-xl">
+                  {formatCurrency(annualSsgCost)}
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-6">
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-blue-200">현재</div>
-              <div className="mt-1 text-2xl font-bold text-blue-100 line-through opacity-80">
-                {formatCurrency(annualOurCost)}
+
+          {/* 연간 절감 — 별도 행으로 분리, 큰 임팩트 */}
+          <div className="border-t border-blue-400/40 bg-blue-900/40 px-7 py-5 print:px-6 print:py-3">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-yellow-200">연간 절감</div>
+                <div className="mt-1 whitespace-nowrap text-4xl font-extrabold text-yellow-300 print:text-3xl">
+                  {formatCurrency(annualSavings)}
+                </div>
               </div>
-            </div>
-            <div className="border-l border-blue-400/40 pl-5">
-              <div className="text-[11px] uppercase tracking-wider text-blue-200">신세계푸드 전환 시</div>
-              <div className="mt-1 text-2xl font-bold text-white">{formatCurrency(annualSsgCost)}</div>
-            </div>
-            <div className="border-l border-blue-400/40 pl-5">
-              <div className="text-[11px] uppercase tracking-wider text-blue-200">연간 절감</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold text-yellow-300">-{formatCurrency(annualSavings)}</span>
+              <div className="rounded-full bg-yellow-300 px-3 py-1 text-sm font-bold text-blue-900 print:text-xs">
+                ▼ {savingsPercent.toFixed(1)}%
               </div>
-              <div className="mt-1 text-xs font-bold text-yellow-300">▼ {savingsPercent.toFixed(1)}%</div>
             </div>
           </div>
         </section>
 
-        {/* ─── 연결 메시지 — 절감액이 부가서비스로 환원됨을 시각화 ─── */}
+        {/* ─── 연결 메시지 — 절감액이 부가서비스로 제공됨을 시각화 ─── */}
         <div className="my-3 flex items-center justify-center gap-3 print:my-2">
           <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-300 to-amber-400" />
           <div className="flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-semibold text-amber-800 ring-2 ring-amber-200">
             <span className="text-base">↓</span>
-            이 절감액이 유치원 부가서비스로 환원됩니다
+            이 절감액이 유치원 부가서비스로 제공됩니다
           </div>
           <div className="h-px flex-1 bg-gradient-to-l from-transparent via-amber-300 to-amber-400" />
         </div>
