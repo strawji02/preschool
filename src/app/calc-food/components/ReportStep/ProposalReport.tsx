@@ -20,7 +20,22 @@ import {
   FOOD_CATEGORIES,
   type FoodCategory,
 } from '@/lib/category-classifier'
+import { estimateSsgTotal } from '@/lib/unit-conversion'
 import type { ComparisonItem, SupplierScenario } from '@/types/audit'
+
+/** 절감액을 K/M 약식으로 — 정밀 단가 노출 방지 (예: 37,000 → 37K) */
+function formatShortKRW(amount: number): string {
+  const abs = Math.abs(amount)
+  if (abs >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `${Math.round(amount / 1_000)}K`
+  return formatNumber(amount)
+}
+
+/** 품목명 단축 — 괄호 안 부가정보 제거 + max 길이 truncate */
+function shortItemName(name: string, max = 14): string {
+  const stripped = name.replace(/\([^)]*\)/g, '').trim()
+  return stripped.length > max ? `${stripped.slice(0, max)}…` : stripped
+}
 
 interface ExtraItem {
   key: string
@@ -63,6 +78,11 @@ interface ProposalReportProps {
   initialExtras?: ProposalExtras
 }
 
+interface CategoryTopItem {
+  name: string
+  savings: number
+}
+
 interface CategoryStat {
   category: FoodCategory
   itemCount: number
@@ -70,12 +90,17 @@ interface CategoryStat {
   ssgCost: number      // 신세계 합계 (월)
   savings: number      // 절감액 (양수)
   savingsPercent: number
+  /** 절감액 상위 1~3 품목 — 신뢰성 보강용 (단가 노출 X, 절감액만) */
+  topItems: CategoryTopItem[]
 }
 
 function computeCategoryStats(items: ComparisonItem[]): CategoryStat[] {
   const map = new Map<FoodCategory, CategoryStat>()
+  // 카테고리별 항목별 절감액 트래킹 (top3 추출용)
+  const itemsByCategory = new Map<FoodCategory, CategoryTopItem[]>()
   for (const cat of FOOD_CATEGORIES) {
-    map.set(cat, { category: cat, itemCount: 0, ourCost: 0, ssgCost: 0, savings: 0, savingsPercent: 0 })
+    map.set(cat, { category: cat, itemCount: 0, ourCost: 0, ssgCost: 0, savings: 0, savingsPercent: 0, topItems: [] })
+    itemsByCategory.set(cat, [])
   }
   for (const item of items) {
     if (item.is_excluded) continue
@@ -83,15 +108,25 @@ function computeCategoryStats(items: ComparisonItem[]): CategoryStat[] {
     const stat = map.get(cat)!
     const qty = item.extracted_quantity || 0
     const ourTotal = item.extracted_total_price ?? item.extracted_unit_price * qty
-    const ssgPrice = item.ssg_match?.standard_price
-    const ssgTotal = ssgPrice != null ? ssgPrice * qty : ourTotal  // 매칭 없으면 동일 비용
+    // 정밀 환산 (KPI/엑셀과 통일) — 단순 standard_price × qty 가 아닌 ppk × 단위중량 환산
+    const ssgTotal = item.ssg_match ? estimateSsgTotal(item) : ourTotal
     stat.itemCount += 1
     stat.ourCost += ourTotal
     stat.ssgCost += ssgTotal
+
+    // 항목별 절감액 (양수만)
+    const itemSavings = ourTotal - ssgTotal
+    if (itemSavings > 0 && item.ssg_match) {
+      itemsByCategory.get(cat)!.push({ name: item.extracted_name, savings: itemSavings })
+    }
   }
   for (const stat of map.values()) {
     stat.savings = Math.max(0, stat.ourCost - stat.ssgCost)
     stat.savingsPercent = stat.ourCost > 0 ? (stat.savings / stat.ourCost) * 100 : 0
+    // 상위 3건만 (절감액 큰 순)
+    stat.topItems = itemsByCategory.get(stat.category)!
+      .sort((a, b) => b.savings - a.savings)
+      .slice(0, 3)
   }
   return FOOD_CATEGORIES.map((c) => map.get(c)!).filter((s) => s.itemCount > 0)
 }
@@ -369,6 +404,20 @@ export function ProposalReport({
                       style={{ width: `${Math.min(100, barPct)}%` }}
                     />
                   </div>
+
+                  {/* 주요 절감 품목 — 농산/축산/수산만 (가공·기타 제외)
+                      신뢰성 보강: 품목명 + 절감액 약식만 (단가/% 미노출) */}
+                  {stat.category !== '가공·기타' && stat.topItems.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t border-white/50 pt-1.5 text-[11px] print:mt-1 print:pt-1">
+                      <span className="font-semibold text-gray-500">주요 절감 품목</span>
+                      {stat.topItems.map((it, i) => (
+                        <span key={i} className="text-gray-600">
+                          <span className={cn('font-medium', style.text)}>{shortItemName(it.name)}</span>
+                          <span className="ml-1 font-mono font-semibold text-green-700">-₩{formatShortKRW(it.savings)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
