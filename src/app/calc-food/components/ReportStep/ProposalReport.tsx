@@ -266,6 +266,21 @@ export function ProposalReport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extras, proposedTo, period, childrenCount, sessionId, extrasReady])
 
+  // 인쇄/PDF 출력 시 가로 방향 (A4 landscape)
+  // ProposalReport가 마운트된 동안만 적용 — 다른 페이지 인쇄에는 영향 없음
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      @media print {
+        @page { size: A4 landscape; margin: 10mm; }
+      }
+    `
+    document.head.appendChild(style)
+    return () => {
+      style.remove()
+    }
+  }, [])
+
   // 인쇄 트리거
   const handlePrint = () => {
     window.print()
