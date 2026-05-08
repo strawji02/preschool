@@ -85,6 +85,9 @@ export interface ComparisonItem {
   adjusted_pack_unit?: string
   precision_reviewed_at?: string
   exclusion_reason?: string  // 선택: 사유 (예: "매칭 없음", "일회성 구매")
+
+  // 검수자 의견 (2026-05-08, migration 041) — AI 학습용
+  reviewer_note?: string
 }
 
 // 공급사별 시나리오 분석 결과 (새로 추가)

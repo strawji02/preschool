@@ -970,21 +970,40 @@ function ShinsegaeMatching({
     return list
   }, [existingWeightG, unitWeightG])
 
-  // 검수자 의견 (DB 컬럼 추가 전 — localStorage로 임시 보존, item.id 기준)
-  // TODO: audit_items.reviewer_note 컬럼 추가 후 PATCH /api/audit-items/[id] 로 전환
-  const noteKey = `reviewer_note_${item.id}`
+  // 검수자 의견 — DB 저장 (audit_items.reviewer_note, migration 041)
+  // 1) item 변경 시 DB 값으로 초기화 (localStorage fallback 호환: 이전에 저장된 로컬 값 1회 마이그레이션)
+  // 2) 입력 변경 시 600ms debounce 후 PATCH
   const [reviewerNote, setReviewerNote] = useState<string>('')
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    setReviewerNote(window.localStorage.getItem(noteKey) ?? '')
-  }, [noteKey])
-  const onNoteChange = (v: string) => {
-    setReviewerNote(v)
-    if (typeof window !== 'undefined') {
-      if (v) window.localStorage.setItem(noteKey, v)
-      else window.localStorage.removeItem(noteKey)
+    let initial = item.reviewer_note ?? ''
+    // localStorage 마이그레이션 — 이전 버전에서 로컬에만 저장됐던 값이 있으면 끌어옴
+    if (!initial && typeof window !== 'undefined') {
+      const local = window.localStorage.getItem(`reviewer_note_${item.id}`)
+      if (local) {
+        initial = local
+        // DB로 옮긴 후 localStorage 삭제 (PATCH는 다음 useEffect가 처리)
+        window.localStorage.removeItem(`reviewer_note_${item.id}`)
+      }
     }
-  }
+    setReviewerNote(initial)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id])
+
+  // 디바운스 PATCH — DB의 현재값과 다를 때만
+  useEffect(() => {
+    if (reviewerNote === (item.reviewer_note ?? '')) return
+    const t = setTimeout(() => {
+      void fetch(`/api/audit-items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewer_note: reviewerNote || null }),
+      }).catch((e) => console.warn('reviewer_note 저장 실패:', e))
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewerNote, item.id])
+
+  const onNoteChange = (v: string) => setReviewerNote(v)
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border-2 border-gray-900 bg-white shadow-md">

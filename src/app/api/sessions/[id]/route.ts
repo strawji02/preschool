@@ -151,6 +151,7 @@ export async function GET(
         adjusted_unit_weight_g: it.adjusted_unit_weight_g ?? undefined,
         adjusted_pack_unit: it.adjusted_pack_unit ?? undefined,
         precision_reviewed_at: it.precision_reviewed_at ?? undefined,
+        reviewer_note: it.reviewer_note ?? undefined,
       }
     })
 

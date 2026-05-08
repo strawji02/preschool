@@ -29,6 +29,8 @@ const ALLOWED_FIELDS = [
   'standard_price',
   'match_candidates',
   'is_excluded',
+  // 검수자 의견 (2026-05-08, migration 041) — AI 학습용
+  'reviewer_note',
 ] as const
 
 export async function PATCH(
