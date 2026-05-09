@@ -124,6 +124,24 @@ export async function GET(request: NextRequest) {
       results = results.filter((p) => p.supplier === supplier)
     }
 
+    // 단종 품목 제외 (2026-05-09, migration 042) — 신규 매칭 차단
+    // RPC가 is_active를 알지 못하므로 후처리로 차단. 레거시 NULL은 active로 간주.
+    if (results.length > 0) {
+      const ids = results.map((p) => p.id)
+      const { data: activeData } = await supabase
+        .from('products')
+        .select('id, is_active')
+        .in('id', ids)
+      if (activeData) {
+        const deactivated = new Set(
+          activeData.filter((r) => r.is_active === false).map((r) => r.id as string),
+        )
+        if (deactivated.size > 0) {
+          results = results.filter((p) => !deactivated.has(p.id))
+        }
+      }
+    }
+
     // ── Fallback search (2026-05-04): 결과 점수 너무 낮으면 핵심 키워드로 재검색 ──
     // 예: "이츠웰아이누리 느타리버섯" → 무관한 결과 → 마지막 어절 "느타리버섯"으로 재검색
     // 한국어 식자재명 관행: 브랜드명이 앞에 오고 식자재명이 뒤에 옴
