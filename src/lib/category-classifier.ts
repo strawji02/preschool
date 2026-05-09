@@ -165,6 +165,87 @@ export function classifyByRule(itemName: string, spec?: string): FoodCategory {
 }
 
 /**
+ * 신세계 51개 세분 카테고리 → 4대 분류 매핑 (2026-05-09)
+ *
+ * 신세계 단가표 카테고리 컬럼을 그대로 DB에 저장하면서, UI는 4대 분류로 표시.
+ * DB 매칭이 있는 품목은 키워드 룰보다 신세계 분류를 신뢰 (정확도 ↑).
+ */
+const SHINSEGAE_TO_4CAT: Record<string, FoodCategory> = {
+  // 농산
+  '양곡': '농산',
+  '채소': '농산',
+  '과일': '농산',
+  '농산가공품': '농산',
+  '농산물원물가공': '농산',
+  '건견과': '농산',
+  '김치': '농산',
+  '밀가루/전분': '농산',
+  '두채류': '농산',
+  // 축산
+  '돈육': '축산',
+  '우육': '축산',
+  '가금류': '축산',
+  '수입육': '축산',
+  '난류': '축산',
+  '축산가공품': '축산',
+  '베러푸즈': '축산',
+  // 수산
+  '어류': '수산',
+  '갑각류': '수산',
+  '연체류': '수산',
+  '패류': '수산',
+  '해조': '수산',
+  '건어': '수산',
+  '수산가공품': '수산',
+  // 가공·기타 (그 외 모두)
+  '유제품/빙과류': '가공·기타',
+  '음료류': '가공·기타',
+  '커피/차류': '가공·기타',
+  '조미료': '가공·기타',
+  '베이커리': '가공·기타',
+  '과자류': '가공·기타',
+  '즉석조리': '가공·기타',
+  '즉석섭취': '가공·기타',
+  '피자': '가공·기타',
+  '건강/특수용도식품': '가공·기타',
+  // 비식품 (소모품/잡화) — '가공·기타' 분류
+  '사무용품': '가공·기타', '사무장비': '가공·기타', '용기': '가공·기타',
+  '잡화': '가공·기타', '연포장': '가공·기타', '제지': '가공·기타',
+  '종이': '가공·기타', '일회용품': '가공·기타', '세제': '가공·기타',
+  '세척용품': '가공·기타', '안전용품': '가공·기타', '위생용품': '가공·기타',
+  '키친': '가공·기타', '유니폼': '가공·기타', '인쇄': '가공·기타',
+  '스티커': '가공·기타', '선물세트': '가공·기타', '선도유지': '가공·기타',
+  '소모품 기타': '가공·기타',
+}
+
+/**
+ * 신세계 카테고리 → 4대 매핑. 매핑 없는 카테고리는 null 반환.
+ */
+export function categoryFromShinsegae(shinsegaeCategory: string | undefined | null): FoodCategory | null {
+  if (!shinsegaeCategory) return null
+  return SHINSEGAE_TO_4CAT[shinsegaeCategory] ?? null
+}
+
+/**
+ * 통합 분류 함수 — DB 매칭이 있으면 신세계 카테고리 우선, 없으면 키워드 룰 fallback.
+ *
+ * @param itemName audit_item.extracted_name
+ * @param spec audit_item.extracted_spec
+ * @param ssgCategory products.category (매칭된 신세계 제품의 카테고리)
+ */
+export function classifyItem(
+  itemName: string,
+  spec?: string,
+  ssgCategory?: string | null,
+): FoodCategory {
+  // 1) DB 매칭 우선 (신세계 분류 = 신뢰 데이터)
+  const fromDB = categoryFromShinsegae(ssgCategory)
+  if (fromDB) return fromDB
+  // 2) 키워드 룰 fallback (매칭 없는 품목)
+  return classifyByRule(itemName, spec)
+}
+
+/**
  * 같은 텍스트에 대해 여러 카테고리 키워드가 매칭되는지 확인 (디버깅용)
  */
 export function classifyDebug(itemName: string, spec?: string): {

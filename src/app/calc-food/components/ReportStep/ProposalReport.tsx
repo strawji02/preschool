@@ -15,7 +15,7 @@ import { Printer, Loader2, Save } from 'lucide-react'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import {
-  classifyByRule,
+  classifyItem,
   CATEGORY_STYLE,
   FOOD_CATEGORIES,
   type FoodCategory,
@@ -104,7 +104,8 @@ function computeCategoryStats(items: ComparisonItem[]): CategoryStat[] {
   }
   for (const item of items) {
     if (item.is_excluded) continue
-    const cat = classifyByRule(item.extracted_name, item.extracted_spec)
+    // DB 매칭(신세계 카테고리) 우선, 없으면 키워드 룰 fallback (2026-05-09)
+    const cat = classifyItem(item.extracted_name, item.extracted_spec, item.ssg_match?.category)
     const stat = map.get(cat)!
     const qty = item.extracted_quantity || 0
     const ourTotal = item.extracted_total_price ?? item.extracted_unit_price * qty

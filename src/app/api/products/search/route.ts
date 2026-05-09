@@ -227,6 +227,7 @@ export async function GET(request: NextRequest) {
               .from('products')
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
               .eq('supplier', supplier ?? 'SHINSEGAE')
+              .or('is_active.eq.true,is_active.is.null') // 단종 제외, 레거시 NULL은 통과
               .ilike('product_name', `%${coreSearch}%`)
               .limit(100)
             if (likeData && likeData.length > 0) {
