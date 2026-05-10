@@ -37,6 +37,36 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
 ])
 
 /**
+ * 검수 품목 query 정제 (2026-05-10) — 매칭 query에서 메타 노이즈 제거
+ *
+ * OCR 결과 extracted_name이 spec/원산지를 포함하는 경우 BM25/임베딩 매칭이 깨짐.
+ * 예: "세척당근(특품 200~280g/개 한국Wn※국내산)"
+ *   - "한국Wn※국내산"의 "한국"이 한우(韓牛)와 매칭되어 한우류가 1순위로
+ *   - "200~280g/개" 같은 spec이 토큰 분산
+ *
+ * 정제 후: "세척당근" → 정확한 매칭
+ *
+ * 제거 패턴:
+ *  1. 괄호 안 내용 (보통 spec/원산지 메타)
+ *  2. "Wn※국내산", "※국내산" 같은 OCR 특수 패턴
+ *  3. 무게/부피 + 단위 패턴 (200g, 1kg, 280g/개)
+ *  4. 다중 공백 정리
+ */
+export function cleanProductQuery(q: string): string {
+  if (!q) return ''
+  let s = q
+  s = s.replace(/\([^)]*\)/g, ' ')                              // 괄호 안 메타
+  s = s.replace(/Wn\s*※[^\s,)]*/gi, ' ')                        // OCR Wn※국내산
+  s = s.replace(/[※]/g, ' ')                                    // ※ 단독
+  s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개
+  s = s.replace(/\d+\.?\d*\s*[Kk][Gg]\s*\/?\s*[A-Za-z가-힣]*/g, ' ')        // 1KG, 1.5KG/EA
+  s = s.replace(/\d+\.?\d*\s*[Mm][Ll]\s*\/?\s*[A-Za-z가-힣]*/g, ' ')        // 500ml
+  s = s.replace(/\d+\.?\d*\s*[Ll]\s*\/?\s*[A-Za-z가-힣]*/g, ' ')            // 2L/EA
+  s = s.replace(/\s+/g, ' ').trim()
+  return s || q  // 정제 후 빈 문자열이면 원본 (안전장치)
+}
+
+/**
  * 가공/즉석섭취/스낵 등 메인 식자재가 아닌 가공품 키워드.
  * 검수 품목이 단순 식자재("방울토마토")인데 후보가 가공품("한컵과일 사과+방울토마토")이면
  * 동일 토큰 매칭이라도 가공품을 후순위로 (영양 분석/가격 비교 의미 다름).

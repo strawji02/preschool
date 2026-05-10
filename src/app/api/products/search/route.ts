@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
-import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct } from '@/lib/token-match'
+import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -47,8 +47,13 @@ export async function GET(request: NextRequest) {
     const supabase = createAdminClient()
     const searchMode = process.env.NEXT_PUBLIC_SEARCH_MODE || 'hybrid'
 
+    // Query 정제 (2026-05-10) — 검수 품목 OCR이 spec/원산지 메타를 포함한 긴 텍스트인 경우
+    // BM25/임베딩이 노이즈 토큰("한국Wn※국내산"의 한국 → 한우 매칭)으로 깨지는 것 방지
+    // broad mode (manual search)는 사용자 직접 입력이라 정제 X
+    const cleanedQuery = broad ? query.trim() : cleanProductQuery(query.trim())
+
     // Synonym expansion for better search recall
-    const { forKeyword } = dualNormalize(query)
+    const { forKeyword } = dualNormalize(cleanedQuery)
     const synonymTerms = expandWithSynonyms(forKeyword)
     const expandedQuery = synonymTerms.length > 1
       ? synonymTerms.slice(0, 3).join(' ')
@@ -61,7 +66,7 @@ export async function GET(request: NextRequest) {
     if (searchMode === 'hybrid') {
       // Hybrid Search: BM25 + Trigram (matching.ts와 동일한 함수 사용)
       const { data, error: rpcError } = await supabase.rpc('search_products_hybrid', {
-        search_term_raw: query,
+        search_term_raw: cleanedQuery,
         search_term_clean: expandedQuery,
         limit_count: Math.min(limit, 50),
         supplier_filter: supplier || undefined,
@@ -73,7 +78,7 @@ export async function GET(request: NextRequest) {
     } else if (searchMode === 'semantic') {
       // Semantic-only Search: Vector similarity
       try {
-        const embedding = await generateEmbedding(query)
+        const embedding = await generateEmbedding(cleanedQuery)
         const { data, error: rpcError } = await supabase.rpc('search_products_vector', {
           query_embedding: embedding,
           limit_count: Math.min(limit, 50),
