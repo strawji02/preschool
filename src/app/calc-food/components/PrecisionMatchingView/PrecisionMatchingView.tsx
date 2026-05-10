@@ -557,9 +557,12 @@ function ItemListPanel({
   onSelect: (idx: number) => void
   filterMode: FilterMode
 }) {
-  // 좌측 패널 자체 필터 (2026-05-10): 품목명 검색 + 금액 정렬
+  // 좌측 패널 자체 필터/정렬 (2026-05-10): 품목명 검색 + 금액순/가나다순
   const [searchQuery, setSearchQuery] = useState('')
-  const [priceSort, setPriceSort] = useState(false)
+  type LeftSort = 'default' | 'price_desc' | 'name_asc'
+  const [leftSort, setLeftSort] = useState<LeftSort>('default')
+  const toggleLeftSort = (mode: LeftSort) =>
+    setLeftSort((prev) => (prev === mode ? 'default' : mode))
 
   const filtered = useMemo(() => {
     let list = items.map((it, idx) => ({ it, idx }))
@@ -577,12 +580,16 @@ function ItemListPanel({
         (it.extracted_spec?.toLowerCase().includes(q) ?? false),
       )
     }
-    // 3) 금액 높은 순 정렬 (priceSort=true)
-    if (priceSort) {
+    // 3) 정렬 (배타 — 한 모드만)
+    if (leftSort === 'price_desc') {
       list = [...list].sort((a, b) => getExistingTotal(b.it) - getExistingTotal(a.it))
+    } else if (leftSort === 'name_asc') {
+      list = [...list].sort((a, b) =>
+        (a.it.extracted_name ?? '').localeCompare(b.it.extracted_name ?? '', 'ko'),
+      )
     }
     return list
-  }, [items, filterMode, searchQuery, priceSort])
+  }, [items, filterMode, searchQuery, leftSort])
 
   return (
     <section className="col-span-3 flex min-h-0 flex-col rounded-xl border bg-white shadow-sm">
@@ -613,16 +620,28 @@ function ItemListPanel({
           )}
         </div>
         <button
-          onClick={() => setPriceSort(!priceSort)}
+          onClick={() => toggleLeftSort('price_desc')}
           className={cn(
             'shrink-0 rounded border px-2 py-1 text-xs font-medium transition',
-            priceSort
+            leftSort === 'price_desc'
               ? 'border-blue-400 bg-blue-100 text-blue-800'
               : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100',
           )}
-          title="금액 높은 순으로 정렬"
+          title="금액 높은 순"
         >
           💰 금액순
+        </button>
+        <button
+          onClick={() => toggleLeftSort('name_asc')}
+          className={cn(
+            'shrink-0 rounded border px-2 py-1 text-xs font-medium transition',
+            leftSort === 'name_asc'
+              ? 'border-blue-400 bg-blue-100 text-blue-800'
+              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100',
+          )}
+          title="품목명 가나다 순"
+        >
+          가 가나다
         </button>
       </div>
 
