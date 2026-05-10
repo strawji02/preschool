@@ -236,6 +236,7 @@ export async function GET(request: NextRequest) {
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
               .eq('supplier', supplier ?? 'SHINSEGAE')
               .or('is_active.eq.true,is_active.is.null') // 단종 제외, 레거시 NULL은 통과
+              .or('is_food.eq.true,is_food.is.null') // 비식자재(용기/조리도구 등) 제외, NULL은 안전망 (2026-05-11)
               .ilike('product_name', `%${coreSearch}%`)
               .limit(100)
             if (likeData && likeData.length > 0) {
@@ -272,6 +273,7 @@ export async function GET(request: NextRequest) {
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
               .eq('supplier', supplier ?? 'SHINSEGAE')
               .or('is_active.eq.true,is_active.is.null')
+              .or('is_food.eq.true,is_food.is.null') // 비식자재 제외 (2026-05-11)
               .or(
                 `product_name.ilike.%${q}%,spec_raw.ilike.%${q}%,origin.ilike.%${q}%,origin_detail.ilike.%${q}%,category.ilike.%${q}%,subcategory.ilike.%${q}%,supplier_partner.ilike.%${q}%`,
               )
@@ -320,22 +322,25 @@ export async function GET(request: NextRequest) {
       results = results.slice(0, limit)
     }
 
-    // ── 단종 품목 제외 (2026-05-09, migration 042) — 신규 매칭 차단 ──
+    // ── 단종 + 비식자재 품목 제외 (2026-05-09 단종, 2026-05-11 비식자재) ──
     // 모든 fallback search가 끝난 최종 결과 직후에 한 번 적용 (재추가 방지).
-    // RPC/ILIKE가 is_active를 알지 못하므로 후처리로 차단. 레거시 NULL은 active로 간주.
+    // RPC가 is_active/is_food를 알지 못하므로 후처리로 차단. NULL은 active/식자재로 간주 (안전망).
+    // 비식자재 = 용기/조리도구/유니폼/사무용품 등 (거래명세표는 식자재 only)
     if (results.length > 0) {
       const checkIds = results.map((p) => p.id).filter(Boolean)
       if (checkIds.length > 0) {
         const { data: activeData } = await supabase
           .from('products')
-          .select('id, is_active')
+          .select('id, is_active, is_food')
           .in('id', checkIds)
         if (activeData) {
-          const deactivated = new Set(
-            activeData.filter((r) => r.is_active === false).map((r) => r.id as string),
+          const blocked = new Set(
+            activeData
+              .filter((r) => r.is_active === false || r.is_food === false)
+              .map((r) => r.id as string),
           )
-          if (deactivated.size > 0) {
-            results = results.filter((p) => !deactivated.has(p.id))
+          if (blocked.size > 0) {
+            results = results.filter((p) => !blocked.has(p.id))
           }
         }
       }

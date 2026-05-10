@@ -44,8 +44,10 @@ export async function GET(
       return NextResponse.json({ success: false, error: itemsErr.message }, { status: 500 })
     }
 
-    // 단종 후보 제외용 — 모든 match_candidates의 product_id 수집 → is_active 일괄 조회 (2026-05-10)
-    // 매칭 시점에 저장된 후보 중 매월 sync로 단종된 품목을 ssg_candidates에서 제외
+    // 단종/비식자재 후보 제외용 — match_candidates의 product_id 수집 후 일괄 조회
+    // - is_active=false (2026-05-10): 매월 sync로 단종된 후보 제거
+    // - is_food=false (2026-05-11): 비식자재(용기/조리도구/유니폼 등) 후보 제거
+    //   (거래명세표는 식자재만 → 매칭 시점 저장본에 남은 비식자재 후보 차단)
     const allCandidateIds = new Set<string>()
     for (const it of itemsRaw ?? []) {
       if (Array.isArray(it.match_candidates)) {
@@ -54,15 +56,15 @@ export async function GET(
         }
       }
     }
-    const deactivatedIds = new Set<string>()
+    const blockedIds = new Set<string>()
     if (allCandidateIds.size > 0) {
       const { data: activeData } = await supabase
         .from('products')
-        .select('id, is_active')
+        .select('id, is_active, is_food')
         .in('id', [...allCandidateIds])
       if (activeData) {
         for (const r of activeData) {
-          if (r.is_active === false) deactivatedIds.add(r.id as string)
+          if (r.is_active === false || r.is_food === false) blockedIds.add(r.id as string)
         }
       }
     }
@@ -143,11 +145,11 @@ export async function GET(
       )
 
       // 옵션 3 (2026-05-04): match_candidates JSONB → ssg_candidates 복원
-      // 단종 품목(is_active=false) 제외 (2026-05-10) — 매월 신세계 sync 후 단종된 후보가
-      // 매칭 시점 저장본에 남아 사용자에게 표시되던 문제 fix
+      // 단종 품목(is_active=false) 제외 (2026-05-10) — 매월 신세계 sync 후 단종된 후보 차단
+      // 비식자재(is_food=false) 제외 (2026-05-11) — 용기/조리도구 등 매칭 무관 후보 차단
       const storedCandidates = Array.isArray(it.match_candidates)
         ? (it.match_candidates as SupplierMatch[]).filter(
-            (c) => c && c.id && !deactivatedIds.has(c.id),
+            (c) => c && c.id && !blockedIds.has(c.id),
           )
         : []
 

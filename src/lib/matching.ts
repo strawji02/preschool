@@ -1184,17 +1184,25 @@ export async function findComparisonMatches(
     cj_candidates = cj_candidates.slice(0, 5)
     ssg_candidates = ssg_candidates.slice(0, 5)
 
-    // ── 후보 origin / spec_raw enrichment (2026-05-04) ──
-    // RPC가 origin/spec_raw 반환 안 함 → 별도 SELECT로 enrich. matching/UI 양쪽에서 활용.
+    // ── 후보 origin / spec_raw enrichment + 단종/비식자재 차단 (2026-05-04, 2026-05-11) ──
+    // RPC가 origin/spec_raw/is_active/is_food 반환 안 함 → 별도 SELECT로 enrich + 차단.
+    //  - is_active=false (단종): 매월 sync 후 단종된 후보가 RPC 결과에 남는 문제 차단
+    //  - is_food=false (비식자재): 용기/조리도구/유니폼 등 거래명세표 무관 후보 차단
+    //    NULL은 안전망으로 통과 (미분류 카테고리)
     const allCandIds = [...cj_candidates.map((c) => c.id), ...ssg_candidates.map((c) => c.id)].filter(Boolean)
     if (allCandIds.length > 0) {
       const { data: extras } = await supabase
         .from('products')
-        .select('id, origin, origin_detail, spec_raw, unit_raw, storage_temp, product_code, subcategory')
+        .select('id, origin, origin_detail, spec_raw, unit_raw, storage_temp, product_code, subcategory, is_active, is_food')
         .in('id', allCandIds)
       if (extras && extras.length > 0) {
         const map = new Map<string, { origin?: string; origin_detail?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string }>()
+        const blockedIds = new Set<string>()
         for (const e of extras) {
+          if (e.is_active === false || e.is_food === false) {
+            blockedIds.add(e.id as string)
+            continue
+          }
           map.set(e.id as string, {
             origin: e.origin as string | undefined,
             origin_detail: e.origin_detail as string | undefined,
@@ -1205,8 +1213,12 @@ export async function findComparisonMatches(
             subcategory: e.subcategory as string | undefined,
           })
         }
-        cj_candidates = cj_candidates.map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
-        ssg_candidates = ssg_candidates.map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
+        cj_candidates = cj_candidates
+          .filter((c) => !blockedIds.has(c.id))
+          .map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
+        ssg_candidates = ssg_candidates
+          .filter((c) => !blockedIds.has(c.id))
+          .map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
       }
     }
 
