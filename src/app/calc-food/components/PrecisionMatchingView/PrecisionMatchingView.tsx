@@ -1353,19 +1353,37 @@ function ShinsegaeMatching({
                 <textarea
                   value={reviewerNote}
                   onChange={(e) => onNoteChange(e.target.value)}
+                  onBlur={() => {
+                    // textarea blur 즉시 PATCH (다른 품목 이동/Confirm 클릭 시 debounce 손실 방지)
+                    if (reviewerNote !== (item.reviewer_note ?? '')) {
+                      void fetch(`/api/audit-items/${item.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ reviewer_note: reviewerNote || null }),
+                      }).catch((e) => console.warn('reviewer_note onBlur 저장 실패:', e))
+                    }
+                  }}
                   placeholder="검수자 의견 (AI 학습용) — 예: '실제로는 차수수 국내산이 맞음'"
                   rows={2}
                   className="w-full resize-none bg-transparent text-xs text-gray-800 placeholder-gray-400 focus:outline-none"
                 />
               </label>
               <button
-                onClick={() =>
+                onClick={() => {
+                  // 검수자 의견 즉시 PATCH (debounce 우회) — Confirm 직후 unmount 시 600ms 타이머 취소되어 손실 방지
+                  if (reviewerNote !== (item.reviewer_note ?? '')) {
+                    void fetch(`/api/audit-items/${item.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ reviewer_note: reviewerNote || null }),
+                    }).catch((e) => console.warn('reviewer_note 저장 실패:', e))
+                  }
                   onConfirm({
                     adjusted_quantity: quantity,
                     adjusted_unit_weight_g: unitWeightG || undefined,
                     adjusted_pack_unit: packUnit,
                   })
-                }
+                }}
                 className="flex shrink-0 items-center gap-1 self-stretch rounded-md bg-blue-600 px-3 text-sm font-semibold text-white shadow hover:bg-blue-700"
               >
                 <CheckCircle2 size={14} /> Confirm
