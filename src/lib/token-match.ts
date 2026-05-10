@@ -44,13 +44,15 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
 export function isProcessedProduct(productName: string): boolean {
   if (!productName) return false
   const PROCESSED_KEYWORDS = [
-    '한컵', '한입', '한입톡톡', '컵과일', '한컵과일',
+    '한컵', '한입', '한입톡톡', '컵과일', '한컵과일', '식재 컵', '식재컵',
     '샌드위치', '도시락', '김밥', '주먹밥',
-    '즉석', '인스턴트', '레토르트', '바로먹는', '하루한컵', '오든든',
-    '스낵', '간식세트', '디저트',
-    '바', '쿠키', '와플', '머핀', '케이크',
+    '즉석', '인스턴트', '레토르트', '바로먹는', '바로 먹는',
+    '하루한컵', '오든든', '스낵', '간식세트', '디저트',
+    '쿠키', '와플', '머핀', '케이크',
     // 음료/우유 가공 (식자재가 아니라 가공)
     '한컵음료', '큐브과일',
+    // 컵 형태 가공 — "사과+대추방울토마토 컵(100G)", "컵 200G"
+    '컵(', '컵 (',
   ]
   return PROCESSED_KEYWORDS.some((k) => productName.includes(k))
 }
