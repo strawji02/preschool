@@ -1495,7 +1495,11 @@ function CandidatesAndSearchPanel({
     if (!q.trim()) return
     setSearching(true)
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
+      // broad=true: 다중 필드 검색 (spec/origin/category/subcategory/협력사)
+      // limit=30: 다양한 결과 수집 후 토큰 정렬에서 best 위로
+      const res = await fetch(
+        `/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30&broad=true`,
+      )
       const data = await res.json()
       if (data.success && Array.isArray(data.products)) {
         setSearchResults(data.products as SupplierMatch[])

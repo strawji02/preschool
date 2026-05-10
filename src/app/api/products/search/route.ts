@@ -25,6 +25,9 @@ export async function GET(request: NextRequest) {
     const query = searchParams.get('q')
     const supplier = searchParams.get('supplier') as Supplier | null
     const limit = parseInt(searchParams.get('limit') || '10', 10)
+    // broad=true: 다중 필드 ILIKE (spec/origin/category/subcategory/supplier_partner)
+    // — 신세계 DB 직접 검색용 (manual search). 자동 매칭은 사용 X (의미적 매칭 유지)
+    const broad = searchParams.get('broad') === 'true'
 
     // Validate query
     if (!query || query.trim().length === 0) {
@@ -249,6 +252,44 @@ export async function GET(request: NextRequest) {
           }
         } catch (e) {
           console.warn('ILIKE fallback 실패:', e)
+        }
+      }
+
+      // ── broad search (manual search 전용) ──
+      // 사용자가 spec/origin/category/품목군/협력사 키워드로 검색하는 경우 매칭 (예: "찌게용", "국내산", "주식회사명천")
+      // 자동 매칭은 사용 X (의미적 매칭이 우선)
+      if (broad) {
+        try {
+          const q = query.trim()
+          if (q.length >= 2) {
+            const { data: broadData } = await supabase
+              .from('products')
+              .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
+              .eq('supplier', supplier ?? 'SHINSEGAE')
+              .or('is_active.eq.true,is_active.is.null')
+              .or(
+                `product_name.ilike.%${q}%,spec_raw.ilike.%${q}%,origin.ilike.%${q}%,origin_detail.ilike.%${q}%,category.ilike.%${q}%,subcategory.ilike.%${q}%,supplier_partner.ilike.%${q}%`,
+              )
+              .limit(60)
+            if (broadData && broadData.length > 0) {
+              const seen = new Set(results.map((p) => p.id))
+              const broadResults: RpcResult[] = broadData
+                .filter((p) => !seen.has(p.id as string))
+                .map((p) => ({
+                  id: p.id as string,
+                  product_name: p.product_name as string,
+                  standard_price: p.standard_price as number,
+                  unit_normalized: p.unit_normalized as string,
+                  spec_quantity: p.spec_quantity as number | null,
+                  spec_unit: p.spec_unit as string | null,
+                  supplier: p.supplier as string,
+                  match_score: 0.0005, // 가장 낮은 점수 — 토큰 정렬에서 product_name 매칭 우선
+                }))
+              results = [...results, ...broadResults]
+            }
+          }
+        } catch (e) {
+          console.warn('broad search 실패:', e)
         }
       }
 
