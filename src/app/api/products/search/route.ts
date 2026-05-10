@@ -302,16 +302,19 @@ export async function GET(request: NextRequest) {
       // 예: "칼집비엔나" → "칼집비엔나 진주햄"(ratio=1.0)이 일반 "비엔나"(ratio=0.7)보다 위로
       // 동률 시: 가공품(한컵과일/샌드위치/도시락 등)을 후순위로 → 메인 식자재 우선
       // 단, 검색어 자체가 가공품 키워드면 적용 X (예: "한컵 사과" 검색 시 한컵류가 정답)
+      // 정렬 (2026-05-10 강화):
+      // 1) 토큰 매칭 비율에서 가공품 페널티 차감 (-0.3)
+      //    → 가공품 ratio 0.6, 식자재 0.4 케이스에서도 식자재(0.4) > 가공품(0.3) 정렬
+      //    → substring 매칭(1.5) 가공품도 1.2로 떨어져 식자재 1.0과 비슷한 영역
+      // 2) 검수 query 자체가 가공품이면 페널티 X (정상 매칭 유지)
       const queryIsProcessed = isProcessedProduct(query)
+      const PROC_PENALTY = 0.3
+      const adjusted = (name: string, baseRatio: number) =>
+        !queryIsProcessed && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
       results.sort((a, b) => {
-        const aR = getTokenMatchRatio(query, a.product_name)
-        const bR = getTokenMatchRatio(query, b.product_name)
+        const aR = adjusted(a.product_name, getTokenMatchRatio(query, a.product_name))
+        const bR = adjusted(b.product_name, getTokenMatchRatio(query, b.product_name))
         if (aR !== bR) return bR - aR
-        if (!queryIsProcessed) {
-          const aProc = isProcessedProduct(a.product_name)
-          const bProc = isProcessedProduct(b.product_name)
-          if (aProc !== bProc) return aProc ? 1 : -1
-        }
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       })
       results = results.slice(0, limit)

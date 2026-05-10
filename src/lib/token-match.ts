@@ -223,18 +223,24 @@ export function getTokenMatchRatio(
     if (t.length >= 4) {
       let suffixLen = 0
       let prefixLen = 0
-      // 가장 긴 suffix 매칭
+      // 가장 긴 suffix 매칭 — modifier만 매칭되는 substring은 무시
+      // (예: "신선한계란"의 suffix "한계란"이 "촉촉한계란"에 매칭 → 사실상 "한계란"이라는 의미 단위 X)
       for (let len = Math.min(t.length - 1, 4); len >= 2; len--) {
         const sub = t.slice(t.length - len)
-        if (sub.length >= 2 && includesPositive(n, sub)) {
+        if (sub.length < 2) continue
+        if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
+        if (includesPositive(n, sub)) {
           suffixLen = len
           break
         }
       }
-      // 가장 긴 prefix 매칭
+      // 가장 긴 prefix 매칭 — modifier prefix(신선한/친환경/무항생제 등)는 매칭 시 specifier 효과 없음
+      // (예: "신선한계란"의 prefix "신선한"이 "신선한 김밥/신선해달콤" 등에 매칭 → 잘못된 가공품 매칭)
       for (let len = Math.min(t.length, 4); len >= 2; len--) {
         const sub = t.slice(0, len)
-        if (sub.length >= 2 && includesPositive(n, sub)) {
+        if (sub.length < 2) continue
+        if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
+        if (includesPositive(n, sub)) {
           prefixLen = len
           break
         }

@@ -1539,28 +1539,25 @@ function CandidatesAndSearchPanel({
   const itemIsProcessedRef = isProcessedProduct(item.extracted_name ?? '')
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
+    // 가공품 페널티: ratio - 0.3 → 가공품 0.6 < 식자재 0.4가 안 되도록 (식자재 0.4 > 가공품 0.3)
+    const PROC_PENALTY = 0.3
+    const adjusted = (name: string, baseRatio: number) =>
+      !itemIsProcessedRef && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
     list.sort((a, b) => {
       if (sortMode === 'match') {
-        // 1) 토큰 매칭 비율 우선 → "참고" 항목은 자동으로 맨 아래
-        const aR = candidateConfidences.get(a.id)?.matchRatio ?? 0
-        const bR = candidateConfidences.get(b.id)?.matchRatio ?? 0
+        // 1) 토큰 매칭 비율 (가공품 페널티 차감) — "참고" 항목 자동 맨 아래
+        const aR = adjusted(a.product_name, candidateConfidences.get(a.id)?.matchRatio ?? 0)
+        const bR = adjusted(b.product_name, candidateConfidences.get(b.id)?.matchRatio ?? 0)
         if (aR !== bR) return bR - aR
 
-        // 2) 토큰 동률 → 가공품 후순위 (검수 품목이 가공품이 아닐 때만)
-        if (!itemIsProcessedRef) {
-          const aProc = isProcessedProduct(a.product_name)
-          const bProc = isProcessedProduct(b.product_name)
-          if (aProc !== bProc) return aProc ? 1 : -1
-        }
-
-        // 3) 원산지 일치 우선
+        // 2) 원산지 일치 우선
         if (itemOrigin !== 'UNKNOWN') {
           const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
           const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
-        // 4) 마지막 tiebreak — score
+        // 3) 마지막 tiebreak — score
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
@@ -1584,18 +1581,15 @@ function CandidatesAndSearchPanel({
   // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
   const sortedSearchResults = useMemo(() => {
     if (searchResults.length === 0) return [] as SupplierMatch[]
-    // 검수 item이 가공품이면 후보도 가공품 매칭이 정답 → 페널티 적용 X
+    // 가공품 페널티 (-0.3) — 검수가 가공품이 아닐 때만, ratio 차이가 있어도 식자재 우선
     const itemIsProcessed = isProcessedProduct(item.extracted_name ?? '')
+    const PROC_PENALTY = 0.3
+    const adjusted = (name: string, baseRatio: number) =>
+      !itemIsProcessed && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
     return [...searchResults].sort((a, b) => {
-      const aR = getMatchConfidence(item.extracted_name, a.product_name).matchRatio
-      const bR = getMatchConfidence(item.extracted_name, b.product_name).matchRatio
+      const aR = adjusted(a.product_name, getMatchConfidence(item.extracted_name, a.product_name).matchRatio)
+      const bR = adjusted(b.product_name, getMatchConfidence(item.extracted_name, b.product_name).matchRatio)
       if (aR !== bR) return bR - aR
-      // 토큰 동률 시 가공품 후순위 (한컵과일/샌드위치 등) — 메인 식자재 우선
-      if (!itemIsProcessed) {
-        const aProc = isProcessedProduct(a.product_name)
-        const bProc = isProcessedProduct(b.product_name)
-        if (aProc !== bProc) return aProc ? 1 : -1
-      }
       if (itemOrigin !== 'UNKNOWN') {
         const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
         const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
