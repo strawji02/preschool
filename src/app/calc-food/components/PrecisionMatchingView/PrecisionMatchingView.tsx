@@ -25,7 +25,7 @@ import {
 } from '@/lib/unit-conversion'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
-  normalizeOrigin, originMatchScore,
+  normalizeOrigin, originMatchScore, isProcessedProduct,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -1436,6 +1436,7 @@ function CandidatesAndSearchPanel({
   // 기존 업체 품목 원산지 (정렬 가중치용)
   const itemOrigin = useMemo(() => getItemOrigin(item), [item])
 
+  const itemIsProcessedRef = isProcessedProduct(item.extracted_name ?? '')
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
     list.sort((a, b) => {
@@ -1445,15 +1446,21 @@ function CandidatesAndSearchPanel({
         const bR = candidateConfidences.get(b.id)?.matchRatio ?? 0
         if (aR !== bR) return bR - aR
 
-        // 2) 토큰 동률 → 원산지 일치 우선 (기존 "국내산"이면 후보 "국내산"이 위로)
+        // 2) 토큰 동률 → 가공품 후순위 (검수 품목이 가공품이 아닐 때만)
+        if (!itemIsProcessedRef) {
+          const aProc = isProcessedProduct(a.product_name)
+          const bProc = isProcessedProduct(b.product_name)
+          if (aProc !== bProc) return aProc ? 1 : -1
+        }
+
+        // 3) 원산지 일치 우선
         if (itemOrigin !== 'UNKNOWN') {
-          // origin 컬럼 누락 시 product_name에서 추출 (예: "세척당근 중국 실온" → CN)
           const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
           const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
-        // 3) 마지막 tiebreak — score
+        // 4) 마지막 tiebreak — score
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
@@ -1472,17 +1479,24 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef])
 
   // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
   const sortedSearchResults = useMemo(() => {
     if (searchResults.length === 0) return [] as SupplierMatch[]
+    // 검수 item이 가공품이면 후보도 가공품 매칭이 정답 → 페널티 적용 X
+    const itemIsProcessed = isProcessedProduct(item.extracted_name ?? '')
     return [...searchResults].sort((a, b) => {
       const aR = getMatchConfidence(item.extracted_name, a.product_name).matchRatio
       const bR = getMatchConfidence(item.extracted_name, b.product_name).matchRatio
       if (aR !== bR) return bR - aR
+      // 토큰 동률 시 가공품 후순위 (한컵과일/샌드위치 등) — 메인 식자재 우선
+      if (!itemIsProcessed) {
+        const aProc = isProcessedProduct(a.product_name)
+        const bProc = isProcessedProduct(b.product_name)
+        if (aProc !== bProc) return aProc ? 1 : -1
+      }
       if (itemOrigin !== 'UNKNOWN') {
-        // origin 컬럼 누락 시 product_name에서 추출 (예: "세척당근 중국 실온" → CN)
         const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
         const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
         if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1

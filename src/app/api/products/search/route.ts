@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
-import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS } from '@/lib/token-match'
+import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -295,10 +295,18 @@ export async function GET(request: NextRequest) {
 
       // 누적 결과를 토큰 매칭 비율로 재정렬 (정확한 매칭이 위로)
       // 예: "칼집비엔나" → "칼집비엔나 진주햄"(ratio=1.0)이 일반 "비엔나"(ratio=0.7)보다 위로
+      // 동률 시: 가공품(한컵과일/샌드위치/도시락 등)을 후순위로 → 메인 식자재 우선
+      // 단, 검색어 자체가 가공품 키워드면 적용 X (예: "한컵 사과" 검색 시 한컵류가 정답)
+      const queryIsProcessed = isProcessedProduct(query)
       results.sort((a, b) => {
         const aR = getTokenMatchRatio(query, a.product_name)
         const bR = getTokenMatchRatio(query, b.product_name)
         if (aR !== bR) return bR - aR
+        if (!queryIsProcessed) {
+          const aProc = isProcessedProduct(a.product_name)
+          const bProc = isProcessedProduct(b.product_name)
+          if (aProc !== bProc) return aProc ? 1 : -1
+        }
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       })
       results = results.slice(0, limit)

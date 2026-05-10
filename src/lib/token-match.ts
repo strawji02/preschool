@@ -37,6 +37,25 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
 ])
 
 /**
+ * 가공/즉석섭취/스낵 등 메인 식자재가 아닌 가공품 키워드.
+ * 검수 품목이 단순 식자재("방울토마토")인데 후보가 가공품("한컵과일 사과+방울토마토")이면
+ * 동일 토큰 매칭이라도 가공품을 후순위로 (영양 분석/가격 비교 의미 다름).
+ */
+export function isProcessedProduct(productName: string): boolean {
+  if (!productName) return false
+  const PROCESSED_KEYWORDS = [
+    '한컵', '한입', '한입톡톡', '컵과일', '한컵과일',
+    '샌드위치', '도시락', '김밥', '주먹밥',
+    '즉석', '인스턴트', '레토르트', '바로먹는', '하루한컵', '오든든',
+    '스낵', '간식세트', '디저트',
+    '바', '쿠키', '와플', '머핀', '케이크',
+    // 음료/우유 가공 (식자재가 아니라 가공)
+    '한컵음료', '큐브과일',
+  ]
+  return PROCESSED_KEYWORDS.some((k) => productName.includes(k))
+}
+
+/**
  * 토큰 기반 매칭 신뢰도 계산 (2026-05-04)
  *
  * 한국어 검색어와 후보 제품명의 의미적 유사도 측정.
