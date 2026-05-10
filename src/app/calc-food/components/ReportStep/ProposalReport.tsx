@@ -312,9 +312,9 @@ export function ProposalReport({
       </div>
 
       {/* 보고서 본체 (인쇄 영역) */}
-      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-none print:p-6 print:shadow-none">
+      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-none print:p-5 print:shadow-none">
         {/* ─── 헤더 ─── */}
-        <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-4 print:pb-3">
+        <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-2 print:pb-2">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
             급식 제안서 · Foodservice Proposal
           </div>
@@ -340,40 +340,40 @@ export function ProposalReport({
         </header>
 
         {/* ─── HERO: 연간 절감액 강조 ─── */}
-        <section className="mb-10 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white shadow-lg print:mb-4 print:p-5 print:bg-blue-700 print:break-inside-avoid">
+        <section className="mb-10 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white shadow-lg print:mb-2 print:p-3 print:bg-blue-700 print:break-inside-avoid">
           <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">연간 절감 효과</div>
-          <div className="mt-2 flex items-baseline gap-3">
-            <div className="text-5xl font-bold print:text-4xl">{formatCurrency(annualSavings)}</div>
-            <div className="text-2xl font-semibold text-blue-100 print:text-xl">▼ {savingsPercent.toFixed(1)}%</div>
+          <div className="mt-2 flex items-baseline gap-3 print:mt-0.5">
+            <div className="text-5xl font-bold print:text-3xl">{formatCurrency(annualSavings)}</div>
+            <div className="text-2xl font-semibold text-blue-100 print:text-lg">▼ {savingsPercent.toFixed(1)}%</div>
           </div>
-          <div className="mt-3 text-sm text-blue-100 print:mt-1">
+          <div className="mt-3 text-sm text-blue-100 print:mt-0.5 print:text-xs">
             월 평균 <strong className="text-white">{formatCurrency(monthlySavings)}</strong> 절감
           </div>
         </section>
 
         {/* ─── 월/연간 비교 카드 ─── */}
-        <section className="mb-10 grid grid-cols-3 gap-4 print:mb-4 print:gap-2">
-          <div className="rounded-xl border-2 border-gray-200 bg-white p-5 print:p-3">
+        <section className="mb-10 grid grid-cols-3 gap-4 print:mb-2 print:gap-2">
+          <div className="rounded-xl border-2 border-gray-200 bg-white p-5 print:p-2">
             <div className="mb-1 text-xs font-medium text-gray-500">현 거래처 (월)</div>
-            <div className="text-2xl font-bold text-gray-700 print:text-xl">{formatCurrency(monthlyOurCost)}</div>
-            <div className="mt-2 text-xs text-gray-400 print:mt-0.5">연간 {formatCurrency(annualOurCost)}</div>
+            <div className="text-2xl font-bold text-gray-700 print:text-base">{formatCurrency(monthlyOurCost)}</div>
+            <div className="mt-2 text-xs text-gray-400 print:mt-0 print:text-[10px]">연간 {formatCurrency(annualOurCost)}</div>
           </div>
-          <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-5 print:p-3">
+          <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-5 print:p-2">
             <div className="mb-1 text-xs font-medium text-blue-700">신세계푸드 (월)</div>
-            <div className="text-2xl font-bold text-blue-900 print:text-xl">{formatCurrency(monthlySsgCost)}</div>
-            <div className="mt-2 text-xs text-blue-700 print:mt-0.5">연간 {formatCurrency(annualSsgCost)}</div>
+            <div className="text-2xl font-bold text-blue-900 print:text-base">{formatCurrency(monthlySsgCost)}</div>
+            <div className="mt-2 text-xs text-blue-700 print:mt-0 print:text-[10px]">연간 {formatCurrency(annualSsgCost)}</div>
           </div>
-          <div className="rounded-xl border-2 border-green-300 bg-green-50 p-5 print:p-3">
+          <div className="rounded-xl border-2 border-green-300 bg-green-50 p-5 print:p-2">
             <div className="mb-1 text-xs font-medium text-green-700">절감 효과</div>
-            <div className="text-2xl font-bold text-green-700 print:text-xl">- {formatCurrency(monthlySavings)}</div>
-            <div className="mt-2 text-xs text-green-700 print:mt-0.5">▼ {savingsPercent.toFixed(1)}% (월)</div>
+            <div className="text-2xl font-bold text-green-700 print:text-base">- {formatCurrency(monthlySavings)}</div>
+            <div className="mt-2 text-xs text-green-700 print:mt-0 print:text-[10px]">▼ {savingsPercent.toFixed(1)}% (월)</div>
           </div>
         </section>
 
         {/* ─── 카테고리별 절감 (메인) ─── */}
         <section className="mb-10 print:mb-0">
-          <h2 className="mb-4 text-xl font-bold text-gray-900 print:mb-2 print:text-lg">카테고리별 절감 (월 기준)</h2>
-          <div className="space-y-3 print:space-y-1.5">
+          <h2 className="mb-4 text-xl font-bold text-gray-900 print:mb-1 print:text-sm">카테고리별 절감 (월 기준)</h2>
+          <div className="space-y-3 print:space-y-1">
             {categoryStats.map((stat) => {
               const style = CATEGORY_STYLE[stat.category]
               const barPct = monthlyOurCost > 0 ? (stat.ourCost / monthlyOurCost) * 100 : 0
@@ -381,35 +381,35 @@ export function ProposalReport({
                 <div
                   key={stat.category}
                   className={cn(
-                    'rounded-xl border-2 p-4 transition print:p-2.5 print:break-inside-avoid',
+                    'rounded-xl border-2 p-4 transition print:p-2 print:break-inside-avoid',
                     style.bg,
                     style.ring,
                   )}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 print:gap-2">
-                      <span className="text-3xl print:text-2xl">{style.emoji}</span>
+                      <span className="text-3xl print:text-lg">{style.emoji}</span>
                       <div>
-                        <div className={cn('text-base font-bold', style.text)}>{stat.category}</div>
-                        <div className="text-[11px] text-gray-500">
+                        <div className={cn('text-base font-bold print:text-sm', style.text)}>{stat.category}</div>
+                        <div className="text-[11px] text-gray-500 print:text-[10px]">
                           {formatNumber(stat.itemCount)}개 품목 · 전체의 {barPct.toFixed(1)}%
                         </div>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500 line-through print:text-xs">
+                      <div className="text-sm text-gray-500 line-through print:text-[10px]">
                         {formatCurrency(stat.ourCost)}
                       </div>
-                      <div className={cn('text-lg font-bold print:text-base', style.text)}>
+                      <div className={cn('text-lg font-bold print:text-sm', style.text)}>
                         {formatCurrency(stat.ssgCost)}
                       </div>
-                      <div className="mt-0.5 text-xs font-semibold text-green-700">
+                      <div className="mt-0.5 text-xs font-semibold text-green-700 print:mt-0 print:text-[10px]">
                         ▼ {formatCurrency(stat.savings)} ({stat.savingsPercent.toFixed(1)}%)
                       </div>
                     </div>
                   </div>
                   {/* 카테고리 비중 바 */}
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/60 print:mt-1.5 print:h-1">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/60 print:mt-1 print:h-0.5">
                     <div
                       className={cn(
                         'h-full rounded-full',
@@ -424,7 +424,7 @@ export function ProposalReport({
                   {/* 주요 절감 품목 — 농산/축산/수산만 (가공·기타 제외)
                       신뢰성 보강: 품목명 + 절감액 약식만 (단가/% 미노출) */}
                   {stat.category !== '가공·기타' && stat.topItems.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t border-white/50 pt-1.5 text-[11px] print:mt-1 print:pt-1">
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t border-white/50 pt-1.5 text-[11px] print:mt-0.5 print:pt-0.5 print:text-[10px]">
                       <span className="font-semibold text-gray-500">주요 절감 품목</span>
                       {stat.topItems.map((it, i) => (
                         <span key={i} className="text-gray-600">
