@@ -44,6 +44,29 @@ export async function GET(
       return NextResponse.json({ success: false, error: itemsErr.message }, { status: 500 })
     }
 
+    // 단종 후보 제외용 — 모든 match_candidates의 product_id 수집 → is_active 일괄 조회 (2026-05-10)
+    // 매칭 시점에 저장된 후보 중 매월 sync로 단종된 품목을 ssg_candidates에서 제외
+    const allCandidateIds = new Set<string>()
+    for (const it of itemsRaw ?? []) {
+      if (Array.isArray(it.match_candidates)) {
+        for (const c of it.match_candidates as SupplierMatch[]) {
+          if (c?.id) allCandidateIds.add(c.id)
+        }
+      }
+    }
+    const deactivatedIds = new Set<string>()
+    if (allCandidateIds.size > 0) {
+      const { data: activeData } = await supabase
+        .from('products')
+        .select('id, is_active')
+        .in('id', [...allCandidateIds])
+      if (activeData) {
+        for (const r of activeData) {
+          if (r.is_active === false) deactivatedIds.add(r.id as string)
+        }
+      }
+    }
+
     // ComparisonItem 형태로 매핑 — 3중 검증 (supplier + 토큰 매칭 + status 일관성)
     let invalidCjMatchCount = 0
     let lowConfidenceMatchCount = 0
@@ -120,9 +143,12 @@ export async function GET(
       )
 
       // 옵션 3 (2026-05-04): match_candidates JSONB → ssg_candidates 복원
-      // 매칭 시점의 후보를 그대로 사용 → DB 매칭과 후보 표시 일관성
+      // 단종 품목(is_active=false) 제외 (2026-05-10) — 매월 신세계 sync 후 단종된 후보가
+      // 매칭 시점 저장본에 남아 사용자에게 표시되던 문제 fix
       const storedCandidates = Array.isArray(it.match_candidates)
-        ? (it.match_candidates as SupplierMatch[]).filter((c) => c && c.id)
+        ? (it.match_candidates as SupplierMatch[]).filter(
+            (c) => c && c.id && !deactivatedIds.has(c.id),
+          )
         : []
 
       return {
