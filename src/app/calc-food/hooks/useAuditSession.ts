@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useCallback, useMemo, useEffect } from 'react'
+import { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'
 import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
@@ -687,14 +687,34 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
     case 'CONFIRM_ALL_AUTO_MATCHED': {
       // 매칭 후보가 존재하는 모든 품목 일괄 확정 (담당자가 개별 검토 대신 한 번에 처리)
-      // 매칭 score 낮아도 어차피 보고서에서 개별로 제외 토글 가능
+      // 일괄 확정 시 adjusted_* 자동 채움 (2026-05-10) — 사용자 수동 검수 안 해도 KPI/리포트 정밀화
+      const now = new Date().toISOString()
       const newItems = state.items.map((item) => {
         if (item.is_confirmed) return item
         const hasAnyMatch = Boolean(item.cj_match || item.ssg_match)
-        if (hasAnyMatch) {
-          return { ...item, is_confirmed: true }
+        if (!hasAnyMatch) return item
+
+        // adjusted_unit_weight_g 자동 채움 (ssg_match.spec_quantity*spec_unit → g)
+        let autoWeight: number | undefined = item.adjusted_unit_weight_g
+        if (!autoWeight && item.ssg_match?.spec_quantity && item.ssg_match.spec_unit) {
+          const u = item.ssg_match.spec_unit.toUpperCase()
+          if (u === 'KG') autoWeight = item.ssg_match.spec_quantity * 1000
+          else if (u === 'G') autoWeight = item.ssg_match.spec_quantity
+          else if (u === 'L') autoWeight = item.ssg_match.spec_quantity * 1000
+          else if (u === 'ML') autoWeight = item.ssg_match.spec_quantity
         }
-        return item
+
+        return {
+          ...item,
+          is_confirmed: true,
+          ssg_confirmed: true,
+          match_status: 'manual_matched' as const,
+          adjusted_quantity: item.adjusted_quantity ?? item.extracted_quantity,
+          adjusted_unit_weight_g: autoWeight,
+          adjusted_pack_unit:
+            item.adjusted_pack_unit ?? item.ssg_match?.spec_unit?.toUpperCase() ?? 'EA',
+          precision_reviewed_at: item.precision_reviewed_at ?? now,
+        }
       })
 
       return {
@@ -760,6 +780,12 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
 export function useAuditSession() {
   const [state, dispatch] = useReducer(auditReducer, initialState)
+
+  // state ref — async/setTimeout 콜백에서 최신 state 접근용 (closure 캡처 방지)
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   // 저장된 세션 불러오기 (2026-04-26)
   const loadSession = useCallback(async (sessionId: string) => {
@@ -1636,6 +1662,29 @@ export function useAuditSession() {
 
   const confirmAllAutoMatched = useCallback(() => {
     dispatch({ type: 'CONFIRM_ALL_AUTO_MATCHED' })
+    // 일괄 확정된 모든 품목을 DB에 일괄 저장 (2026-05-10)
+    // adjusted_*가 reducer에서 자동 채워졌으므로 그대로 PATCH
+    const now = new Date().toISOString()
+    setTimeout(() => {
+      // setState 후 다음 tick에 최신 state 사용
+      const itemsToSync = stateRef.current.items.filter(
+        (it) => it.is_confirmed && (it.cj_match || it.ssg_match) && it.match_status === 'manual_matched',
+      )
+      for (const item of itemsToSync) {
+        const body: Record<string, unknown> = {
+          match_status: 'manual_matched',
+          precision_reviewed_at: item.precision_reviewed_at ?? now,
+        }
+        if (item.adjusted_quantity !== undefined) body.adjusted_quantity = item.adjusted_quantity
+        if (item.adjusted_unit_weight_g !== undefined) body.adjusted_unit_weight_g = item.adjusted_unit_weight_g
+        if (item.adjusted_pack_unit !== undefined) body.adjusted_pack_unit = item.adjusted_pack_unit
+        void fetch(`/api/audit-items/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).catch((e) => console.warn('confirmAll DB 저장 실패:', e))
+      }
+    }, 50)
   }, [])
 
   const autoExcludeUnmatched = useCallback(() => {

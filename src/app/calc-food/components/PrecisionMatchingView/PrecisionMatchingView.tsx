@@ -60,6 +60,10 @@ interface ProductDetail {
   supply_status?: string
   spec_raw?: string
   unit_raw?: string
+  // 단가 변경 추적 (2026-05-09 migration 042)
+  previous_price?: number
+  price_changed_at?: string
+  supplier_partner?: string
 }
 
 const PACK_UNITS = ['EA', 'BAG', 'BOX', 'PAC', '봉', 'KG', 'L'] as const
@@ -967,6 +971,8 @@ function ShinsegaeMatching({
   const [unitWeightG, setUnitWeightG] = useState<number>(0)
   const [packUnit, setPackUnit] = useState<string>('EA')
   const [quantity, setQuantity] = useState<number>(item.adjusted_quantity ?? item.extracted_quantity)
+  // 후보 변경 시 시각 피드백 — 단위중량 칸 1초 노란색 깜빡임 (2026-05-10)
+  const [highlightSpec, setHighlightSpec] = useState(false)
 
   // 발주수량 동기화 — item 변경 또는 후보 변경(adjusted_quantity reset 포함) 시
   useEffect(() => {
@@ -996,7 +1002,32 @@ function ShinsegaeMatching({
       setUnitWeightG(0)
     }
     setPackUnit(item.adjusted_pack_unit ?? ssgMatch.spec_unit?.toUpperCase() ?? 'EA')
+    // 후보 변경 시 깜빡임 (1초)
+    setHighlightSpec(true)
+    const t = setTimeout(() => setHighlightSpec(false), 1200)
+    return () => clearTimeout(t)
   }, [ssgMatch?.id, ssgMatch?.spec_quantity, ssgMatch?.spec_unit, item.adjusted_unit_weight_g, item.adjusted_pack_unit])
+
+  // 자동 환산 버튼 — 검수 총량 ÷ 신세계 단위중량 = 발주수량 자동 계산 (2026-05-10)
+  const handleAutoQuantity = () => {
+    if (!existingWeightG || !unitWeightG || existingWeightG <= 0 || unitWeightG <= 0) return
+    const total = existingWeightG * item.extracted_quantity
+    const auto = Math.max(1, Math.round(total / unitWeightG))
+    setQuantity(auto)
+  }
+  const canAutoQuantity = !!(
+    existingWeightG && existingWeightG > 0 && unitWeightG > 0 && item.extracted_quantity > 0
+  )
+
+  // 단가 변경 배지 — previous_price 있으면 변동률 표시 (2026-05-10)
+  const priceChange = useMemo(() => {
+    const prev = matchDetail?.previous_price
+    const curr = ssgMatch?.standard_price
+    if (!prev || !curr || prev === curr) return null
+    const diff = curr - prev
+    const pct = (diff / prev) * 100
+    return { diff, pct, increased: diff > 0 }
+  }, [matchDetail?.previous_price, ssgMatch?.standard_price])
 
   // 매칭 상세 lazy fetch (부모로 끌어올림 — commonTokens 계산용)
   useEffect(() => {
@@ -1178,10 +1209,53 @@ function ShinsegaeMatching({
                   {matchDetail.subcategory && `·${matchDetail.subcategory}`}
                 </span>
               )}
+              {/* 단가 변경 배지 — previous_price 있으면 변동률 (2026-05-10) */}
+              {priceChange && (
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-0.5 rounded-md px-2 py-0.5 text-xs font-semibold',
+                    priceChange.increased
+                      ? 'bg-rose-100 text-rose-700'
+                      : 'bg-emerald-100 text-emerald-700',
+                  )}
+                  title={`이전 단가 ${formatCurrency(matchDetail!.previous_price!)} → 현재 ${formatCurrency(ssgMatch.standard_price)}`}
+                >
+                  {priceChange.increased ? '▲' : '▼'} {Math.abs(priceChange.pct).toFixed(1)}%
+                </span>
+              )}
             </div>
 
+            {/* 자동 환산 도우미 — 검수 총량 ÷ 신세계 단위중량 = 발주수량 (2026-05-10) */}
+            {canAutoQuantity && (
+              <div className="mt-1.5 flex items-center justify-end gap-2 text-[11px] text-gray-500">
+                <span>
+                  총량 환산 시 발주수량:{' '}
+                  <strong className="font-mono text-gray-800">
+                    {Math.max(
+                      1,
+                      Math.round((existingWeightG! * item.extracted_quantity) / unitWeightG),
+                    )}{' '}
+                    {packUnit}
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleAutoQuantity}
+                  className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                  title={`검수 총량(${formatNumber(existingWeightG! * item.extracted_quantity)}g) ÷ 신세계 단위중량(${formatNumber(unitWeightG)}g)`}
+                >
+                  📐 자동 환산
+                </button>
+              </div>
+            )}
+
             {/* 금액 5분할 한 줄 */}
-            <div className="mt-1.5 grid grid-cols-5 gap-1">
+            <div
+              className={cn(
+                'mt-1.5 grid grid-cols-5 gap-1 rounded-md transition-all',
+                highlightSpec && 'ring-2 ring-yellow-300 bg-yellow-50',
+              )}
+            >
               <FinanceInputCardCompact label="단위중량" value={unitWeightG} suffix="g" onChange={setUnitWeightG} />
               <FinanceInputCardCompact
                 label="발주"
@@ -1564,18 +1638,32 @@ function CandidatesAndSearchPanel({
             </div>
           )}
           <div className="space-y-2">
-            {sortedCandidates.map((c, i) => (
-              <CandidateCard
-                key={c.id}
-                index={i + 1}
-                candidate={c}
-                isSelected={ssgMatch?.id === c.id}
-                item={item}
-                existingTotal={existingTotal}
-                confidence={candidateConfidences.get(c.id) ?? getMatchConfidence(item.extracted_name, c.product_name)}
-                onSelect={() => onSelectCandidate(c)}
-              />
-            ))}
+            {sortedCandidates.map((c, i) => {
+              const conf = candidateConfidences.get(c.id) ?? getMatchConfidence(item.extracted_name, c.product_name)
+              return (
+                <CandidateCard
+                  key={c.id}
+                  index={i + 1}
+                  candidate={c}
+                  isSelected={ssgMatch?.id === c.id}
+                  item={item}
+                  existingTotal={existingTotal}
+                  confidence={conf}
+                  onSelect={() => {
+                    // 참고(ratio < MIN_VALID_MATCH_RATIO=0.3) 후보는 확인 후 선택 (실수 방지, 2026-05-10)
+                    if (conf.matchRatio < 0.3) {
+                      const ok = window.confirm(
+                        `매칭 신뢰도가 낮습니다 (${conf.label}, ratio ${conf.matchRatio.toFixed(2)}).\n\n` +
+                          `검수 품목: ${item.extracted_name}\n후보: ${c.product_name}\n\n` +
+                          `정말 선택하시겠습니까?`,
+                      )
+                      if (!ok) return
+                    }
+                    onSelectCandidate(c)
+                  }}
+                />
+              )
+            })}
           </div>
         </div>
       </div>
