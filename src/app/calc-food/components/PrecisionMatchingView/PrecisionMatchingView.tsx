@@ -557,22 +557,75 @@ function ItemListPanel({
   onSelect: (idx: number) => void
   filterMode: FilterMode
 }) {
+  // 좌측 패널 자체 필터 (2026-05-10): 품목명 검색 + 금액 정렬
+  const [searchQuery, setSearchQuery] = useState('')
+  const [priceSort, setPriceSort] = useState(false)
+
   const filtered = useMemo(() => {
-    return items
-      .map((it, idx) => ({ it, idx }))
-      .filter(({ it }) => {
-        if (filterMode === 'unconfirmed') return !it.is_confirmed
-        if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match
-        return true
-      })
-  }, [items, filterMode])
+    let list = items.map((it, idx) => ({ it, idx }))
+    // 1) 상위 필터 (filterMode)
+    list = list.filter(({ it }) => {
+      if (filterMode === 'unconfirmed') return !it.is_confirmed
+      if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match
+      return true
+    })
+    // 2) 품목명 검색 (extracted_name + extracted_spec 부분 매칭)
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      list = list.filter(({ it }) =>
+        (it.extracted_name?.toLowerCase().includes(q) ?? false) ||
+        (it.extracted_spec?.toLowerCase().includes(q) ?? false),
+      )
+    }
+    // 3) 금액 높은 순 정렬 (priceSort=true)
+    if (priceSort) {
+      list = [...list].sort((a, b) => getExistingTotal(b.it) - getExistingTotal(a.it))
+    }
+    return list
+  }, [items, filterMode, searchQuery, priceSort])
 
   return (
     <section className="col-span-3 flex min-h-0 flex-col rounded-xl border bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b px-4 py-2.5 text-sm font-semibold text-gray-700">
+      <div className="flex items-center justify-between border-b px-4 py-2 text-sm font-semibold text-gray-700">
         <span>📋 거래명세표 품목</span>
         <span className="text-xs text-gray-500">{filtered.length}개</span>
       </div>
+
+      {/* 검색 + 금액 정렬 */}
+      <div className="flex items-center gap-2 border-b bg-gray-50/60 px-3 py-2">
+        <div className="relative flex-1">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="품목명 검색..."
+            className="w-full rounded border border-gray-200 bg-white py-1 pl-7 pr-6 text-xs focus:border-blue-400 focus:outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+              title="검색 지우기"
+            >
+              <X size={11} />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => setPriceSort(!priceSort)}
+          className={cn(
+            'shrink-0 rounded border px-2 py-1 text-xs font-medium transition',
+            priceSort
+              ? 'border-blue-400 bg-blue-100 text-blue-800'
+              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100',
+          )}
+          title="금액 높은 순으로 정렬"
+        >
+          💰 금액순
+        </button>
+      </div>
+
       <div className="flex-1 overflow-y-auto">
         {filtered.map(({ it, idx }) => {
           const isSelected = idx === selectedIndex
