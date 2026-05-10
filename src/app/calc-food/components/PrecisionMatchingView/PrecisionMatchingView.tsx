@@ -1484,8 +1484,12 @@ function CandidatesAndSearchPanel({
   onSortChange: (m: SortMode) => void
   onSelectCandidate: (c: SupplierMatch) => void
 }) {
-  const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>(() => item.ssg_candidates ?? [])
-  const [loadingCandidates, setLoadingCandidates] = useState(false)
+  // (2026-05-11) 옵션 A: flicker 방지 — 마운트 시 빈 배열로 시작, fetch 완료 후 단일 setState로 merge.
+  // 이전: useState init에서 ssg_candidates 즉시 표시 → fetch 후 merged로 재정렬 → #1이 #5로 밀리는 깜빡임
+  // 변경: 빈 배열 + 로딩 스켈레톤 → fetch 완료 시 한 번에 표시 → sort 1회만 발생
+  // fetch 실패/timeout fallback: dbCandsAtMount로 set
+  const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>([])
+  const [loadingCandidates, setLoadingCandidates] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SupplierMatch[]>([])
   const [searching, setSearching] = useState(false)
@@ -1493,15 +1497,20 @@ function CandidatesAndSearchPanel({
   const ssgMatch = item.ssg_match
   const existingTotal = getExistingTotal(item)
 
-  // 후보 자동 채움 — 항목 변경 시 1회 lazy fetch + DB 후보와 merge (2026-05-04)
+  // 후보 자동 채움 — 항목 변경 시 1회 lazy fetch + DB 후보와 merge (2026-05-04, 2026-05-11 flicker fix)
   // 매칭 시점의 후보가 잘못된 경우 (예: 느타리버섯 → 유리창닦이) 실시간 검색으로 보충
   useEffect(() => {
     const q = item.extracted_name?.trim()
-    if (!q) return
+    const dbCandsAtMount = item.ssg_candidates ?? []
+    if (!q) {
+      // query 없으면 fetch 생략하고 DB 후보만 표시
+      setLiveCandidates(dbCandsAtMount)
+      setLoadingCandidates(false)
+      return
+    }
     let cancelled = false
     setLoadingCandidates(true)
-    // closure로 item 캡처 (의존성 안정화 — 부모 리렌더로 인한 무한 fetch 방지)
-    const dbCandsAtMount = item.ssg_candidates ?? []
+    setLiveCandidates([]) // 항목 전환 시 이전 후보 즉시 비움 (잘못된 정렬 표시 방지)
     fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30`)
       .then((r) => r.json())
       .then((data) => {
@@ -1509,12 +1518,17 @@ function CandidatesAndSearchPanel({
         if (data.success && Array.isArray(data.products)) {
           const dbIds = new Set(dbCandsAtMount.map((c) => c.id))
           const fresh = data.products as SupplierMatch[]
-          // DB 후보 + 신선한 검색 결과 (중복 제거) → 토큰 정렬 시 정확한 매칭이 위로
+          // DB 후보 + 신선한 검색 결과 (중복 제거) → 토큰 정렬 1회로 안정
           const merged = [...dbCandsAtMount, ...fresh.filter((p) => !dbIds.has(p.id))]
           setLiveCandidates(merged)
+        } else {
+          // API 실패 fallback — DB 후보라도 표시
+          setLiveCandidates(dbCandsAtMount)
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setLiveCandidates(dbCandsAtMount)
+      })
       .finally(() => {
         if (!cancelled) setLoadingCandidates(false)
       })
