@@ -160,6 +160,7 @@ export function estimateSsgTotal(item: {
     spec_quantity?: number | null
     spec_unit?: string | null
     ppu?: number | null
+    tax_type?: '과세' | '면세' | string
   } | null
   extracted_quantity: number
   adjusted_quantity?: number
@@ -173,17 +174,28 @@ export function estimateSsgTotal(item: {
     m.ppu ?? null,
   )
   const qty = item.adjusted_quantity ?? item.extracted_quantity
+
+  // 1. subtotal (공급가액) 계산
+  let subtotal: number
   if (ppk && item.adjusted_unit_weight_g) {
-    return Math.round((ppk / 1000) * item.adjusted_unit_weight_g) * qty
-  }
-  if (ppk && m.spec_quantity && m.spec_unit) {
+    subtotal = Math.round((ppk / 1000) * item.adjusted_unit_weight_g) * qty
+  } else if (ppk && m.spec_quantity && m.spec_unit) {
     const u = m.spec_unit.toUpperCase()
     let g = 0
     if (u === 'KG') g = m.spec_quantity * 1000
     else if (u === 'G') g = m.spec_quantity
     else if (u === 'L') g = m.spec_quantity * 1000
     else if (u === 'ML') g = m.spec_quantity
-    if (g > 0) return Math.round((ppk / 1000) * g) * qty
+    subtotal = g > 0 ? Math.round((ppk / 1000) * g) * qty : (m.standard_price ?? 0) * qty
+  } else {
+    subtotal = (m.standard_price ?? 0) * qty
   }
-  return (m.standard_price ?? 0) * qty
+
+  // 2. 부가세 처리 (2026-05-10 fix) — 과세 품목은 10% 추가
+  // 검수 품목 totalPrice는 부가세 포함이므로 신세계 추정도 부가세 포함으로 통일
+  // (이전 미포함이라 매칭 카드 vs 좌측 패널/KPI/리포트 절감액 불일치)
+  if (m.tax_type === '과세') {
+    return subtotal + Math.round(subtotal * 0.1)
+  }
+  return subtotal
 }
