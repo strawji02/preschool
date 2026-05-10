@@ -124,28 +124,34 @@ export function getTokenMatchRatio(
       continue
     }
     // 4자 이상 토큰: 한국어 합성어 prefix/suffix 부분 매칭
+    // 점수 = 매칭된 길이 / 전체 토큰 길이 (긴 부분 매칭이 더 강한 신호)
+    // 예: "얼갈이배추" (5자) vs "얼갈이 국내산" → prefix 3자 매칭 → 3/5=0.6
+    //     "얼갈이배추" (5자) vs "양배추채칼" → suffix 2자 매칭 → 2/5=0.4
+    //     → "얼갈이"가 specifier로 더 의미있는 매칭이 위로 (이전: suffix 우선이라 양배추채칼이 위)
     if (t.length >= 4) {
-      let suffixMatched = false
-      let prefixMatched = false
-      // suffix 매칭 (메인 명사 — 한국어 합성어 뒷부분이 핵심)
+      let suffixLen = 0
+      let prefixLen = 0
+      // 가장 긴 suffix 매칭
       for (let len = Math.min(t.length - 1, 4); len >= 2; len--) {
         const sub = t.slice(t.length - len)
         if (sub.length >= 2 && includesPositive(n, sub)) {
-          suffixMatched = true
+          suffixLen = len
           break
         }
       }
-      // prefix 매칭 (수식어 — 약한 신호)
+      // 가장 긴 prefix 매칭
       for (let len = Math.min(t.length, 4); len >= 2; len--) {
         const sub = t.slice(0, len)
         if (sub.length >= 2 && includesPositive(n, sub)) {
-          prefixMatched = true
+          prefixLen = len
           break
         }
       }
-      if (suffixMatched && prefixMatched) matched += 1.0
-      else if (suffixMatched) matched += 0.7
-      else if (prefixMatched) matched += 0.3
+      // 둘 중 긴 매칭을 점수로 (둘 다 매칭이면 자연스럽게 max)
+      const bestLen = Math.max(suffixLen, prefixLen)
+      if (bestLen > 0) {
+        matched += bestLen / t.length
+      }
     }
   }
   return effectiveTokens.length > 0 ? matched / effectiveTokens.length : 0
