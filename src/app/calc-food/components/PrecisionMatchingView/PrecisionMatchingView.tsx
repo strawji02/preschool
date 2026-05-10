@@ -963,19 +963,25 @@ function ShinsegaeMatching({
     specToUnitFallback(item.extracted_name)
   const existingTotal = getExistingTotal(item)
 
-  // 검수자가 직접 조정한 값을 추적 (true면 자동 갱신 막음)
+  // 검수자 조정값 (mount 시 초기화 — useEffect로 ssgMatch 변경 시 자동 동기화)
   const [unitWeightG, setUnitWeightG] = useState<number>(0)
   const [packUnit, setPackUnit] = useState<string>('EA')
   const [quantity, setQuantity] = useState<number>(item.adjusted_quantity ?? item.extracted_quantity)
 
-  // 매칭 변경 시 unitWeightG/packUnit 자동 갱신 (P0 버그 fix — 후보 선택 반영)
+  // 발주수량 동기화 — item 변경 또는 후보 변경(adjusted_quantity reset 포함) 시
+  useEffect(() => {
+    setQuantity(item.adjusted_quantity ?? item.extracted_quantity)
+  }, [item.adjusted_quantity, item.extracted_quantity, ssgMatch?.id])
+
+  // 단위중량/포장단위 동기화 — 매칭 변경 시 새 후보 spec 우선 적용
+  // 검수자 조정값(adjusted_*)은 reducer가 후보 변경 시 clear하므로 자동으로 새 spec 사용
   useEffect(() => {
     if (!ssgMatch) {
       if (!item.adjusted_unit_weight_g) setUnitWeightG(0)
       if (!item.adjusted_pack_unit) setPackUnit('EA')
       return
     }
-    // 검수자 조정값 우선
+    // 검수자 조정값이 명시적으로 있으면 우선 (Confirm 후 다시 진입한 케이스)
     if (item.adjusted_unit_weight_g) {
       setUnitWeightG(item.adjusted_unit_weight_g)
     } else if (ssgMatch.spec_quantity && ssgMatch.spec_unit) {
@@ -986,6 +992,8 @@ function ShinsegaeMatching({
       else if (u === 'L') g = ssgMatch.spec_quantity * 1000
       else if (u === 'ML') g = ssgMatch.spec_quantity
       setUnitWeightG(g)
+    } else {
+      setUnitWeightG(0)
     }
     setPackUnit(item.adjusted_pack_unit ?? ssgMatch.spec_unit?.toUpperCase() ?? 'EA')
   }, [ssgMatch?.id, ssgMatch?.spec_quantity, ssgMatch?.spec_unit, item.adjusted_unit_weight_g, item.adjusted_pack_unit])

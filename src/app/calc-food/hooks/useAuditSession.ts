@@ -612,7 +612,12 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         if (action.supplier === 'CJ') {
           updatedItem.cj_match = action.candidate
         } else {
+          // 신세계 후보 변경 — 이전 검수자 조정값 초기화 → 새 후보 spec이 자동 적용
+          // (이전 매칭 confirm 시 저장된 adjusted_*가 새 후보 spec을 가리던 버그 fix, 2026-05-10)
           updatedItem.ssg_match = action.candidate
+          updatedItem.adjusted_quantity = undefined
+          updatedItem.adjusted_unit_weight_g = undefined
+          updatedItem.adjusted_pack_unit = undefined
         }
 
         // savings 재계산
@@ -1584,15 +1589,22 @@ export function useAuditSession() {
       dispatch({ type: 'SELECT_CANDIDATE', itemId, supplier, candidate })
       // DB 저장: 빈 매칭(id 없음)은 매칭 제거, 그 외는 매칭 변경
       const isClearMatch = !candidate.id
+      // 신세계 후보 변경 시 이전 adjusted_* clear → 새 후보 spec 자동 적용 (2026-05-10)
+      const body: Record<string, unknown> = {
+        matched_product_id: isClearMatch ? null : candidate.id,
+        standard_price: isClearMatch ? null : candidate.standard_price,
+        match_score: isClearMatch ? null : candidate.match_score,
+        match_status: isClearMatch ? 'unmatched' : 'manual_matched',
+      }
+      if (supplier === 'SHINSEGAE') {
+        body.adjusted_quantity = null
+        body.adjusted_unit_weight_g = null
+        body.adjusted_pack_unit = null
+      }
       void fetch(`/api/audit-items/${itemId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          matched_product_id: isClearMatch ? null : candidate.id,
-          standard_price: isClearMatch ? null : candidate.standard_price,
-          match_score: isClearMatch ? null : candidate.match_score,
-          match_status: isClearMatch ? 'unmatched' : 'manual_matched',
-        }),
+        body: JSON.stringify(body),
       }).catch((e) => console.warn('selectCandidate DB 저장 실패:', e))
     },
     []
