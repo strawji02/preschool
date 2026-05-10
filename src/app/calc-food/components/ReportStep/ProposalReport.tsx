@@ -11,7 +11,8 @@
  * - PDF 출력: window.print() + @media print
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Printer, Loader2, Save } from 'lucide-react'
+import { Printer, Loader2, Save, FileText } from 'lucide-react'
+import { downloadProposalPptx } from './proposal-pptx'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import {
@@ -273,7 +274,7 @@ export function ProposalReport({
     const style = document.createElement('style')
     style.textContent = `
       @media print {
-        @page { size: A4 landscape; margin: 10mm; }
+        @page { size: A4 landscape; margin: 15mm; }
       }
     `
     document.head.appendChild(style)
@@ -285,6 +286,34 @@ export function ProposalReport({
   // 인쇄 트리거
   const handlePrint = () => {
     window.print()
+  }
+
+  // PPT 다운로드 (영업자 편집 가능 — 텍스트/도형/색상 그대로)
+  const [pptxLoading, setPptxLoading] = useState(false)
+  const handleDownloadPptx = async () => {
+    setPptxLoading(true)
+    try {
+      await downloadProposalPptx({
+        proposedTo,
+        period,
+        monthlyOurCost,
+        monthlySsgCost,
+        monthlySavings,
+        annualOurCost,
+        annualSsgCost,
+        annualSavings,
+        savingsPercent,
+        categoryStats,
+        extras: extrasComputed,
+        totalExtrasAnnual,
+        childrenCount,
+      })
+    } catch (e) {
+      console.error('PPT 다운로드 실패:', e)
+      alert('PPT 다운로드 실패: ' + (e instanceof Error ? e.message : 'Unknown'))
+    } finally {
+      setPptxLoading(false)
+    }
   }
 
   return (
@@ -303,16 +332,28 @@ export function ProposalReport({
             </span>
           )}
         </div>
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700"
-        >
-          <Printer size={16} /> 인쇄 / PDF 저장
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadPptx}
+            disabled={pptxLoading}
+            className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 disabled:opacity-60"
+          >
+            {pptxLoading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+            PPT 다운로드 (편집 가능)
+          </button>
+          <button
+            onClick={handlePrint}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700"
+          >
+            <Printer size={16} /> 인쇄 / PDF 저장
+          </button>
+        </div>
       </div>
 
-      {/* 보고서 본체 (인쇄 영역) */}
-      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-none print:p-5 print:shadow-none">
+      {/* 보고서 본체 (인쇄 영역)
+          PDF: A4 landscape (267mm 가로 — 15mm 마진 차감) — max-w로 좌우 자연 여백
+          2페이지(연간환산+부가서비스)는 콘텐츠 적어 수직 중앙 정렬 */}
+      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-[260mm] print:p-0 print:shadow-none">
         {/* ─── 헤더 ─── */}
         <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-2 print:pb-2">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
@@ -381,14 +422,16 @@ export function ProposalReport({
                 <div
                   key={stat.category}
                   className={cn(
-                    'rounded-xl border-2 p-4 transition print:p-2 print:break-inside-avoid',
+                    'rounded-xl border-2 p-4 transition print:p-3 print:break-inside-avoid',
                     style.bg,
                     style.ring,
                   )}
                 >
-                  <div className="flex items-center justify-between">
+                  {/* 3열 grid — 좌(카테고리) / 중(진행바+주요품목) / 우(금액) */}
+                  <div className="grid grid-cols-[1.3fr_2fr_1.3fr] items-center gap-4 print:gap-3">
+                    {/* 좌: 카테고리 정보 */}
                     <div className="flex items-center gap-3 print:gap-2">
-                      <span className="text-3xl print:text-lg">{style.emoji}</span>
+                      <span className="text-3xl print:text-2xl">{style.emoji}</span>
                       <div>
                         <div className={cn('text-base font-bold print:text-sm', style.text)}>{stat.category}</div>
                         <div className="text-[11px] text-gray-500 print:text-[10px]">
@@ -396,11 +439,40 @@ export function ProposalReport({
                         </div>
                       </div>
                     </div>
+
+                    {/* 중: 진행 바 + 주요 절감 품목 */}
+                    <div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-white/70 print:h-1">
+                        <div
+                          className={cn(
+                            'h-full rounded-full',
+                            stat.category === '농산' ? 'bg-emerald-500' :
+                            stat.category === '축산' ? 'bg-rose-500' :
+                            stat.category === '수산' ? 'bg-sky-500' : 'bg-amber-500'
+                          )}
+                          style={{ width: `${Math.min(100, barPct)}%` }}
+                        />
+                      </div>
+                      {/* 주요 절감 품목 — 농산/축산/수산만 (가공·기타 제외) */}
+                      {stat.category !== '가공·기타' && stat.topItems.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] print:mt-1 print:text-[10px]">
+                          <span className="font-semibold text-gray-500">주요</span>
+                          {stat.topItems.map((it, i) => (
+                            <span key={i} className="text-gray-600">
+                              <span className={cn('font-medium', style.text)}>{shortItemName(it.name)}</span>
+                              <span className="ml-1 font-mono font-semibold text-green-700">-₩{formatShortKRW(it.savings)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 우: 금액 */}
                     <div className="text-right">
-                      <div className="text-sm text-gray-500 line-through print:text-[10px]">
+                      <div className="text-sm text-gray-500 line-through print:text-[11px]">
                         {formatCurrency(stat.ourCost)}
                       </div>
-                      <div className={cn('text-lg font-bold print:text-sm', style.text)}>
+                      <div className={cn('text-lg font-bold print:text-base', style.text)}>
                         {formatCurrency(stat.ssgCost)}
                       </div>
                       <div className="mt-0.5 text-xs font-semibold text-green-700 print:mt-0 print:text-[10px]">
@@ -408,40 +480,16 @@ export function ProposalReport({
                       </div>
                     </div>
                   </div>
-                  {/* 카테고리 비중 바 */}
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/60 print:mt-1 print:h-0.5">
-                    <div
-                      className={cn(
-                        'h-full rounded-full',
-                        stat.category === '농산' ? 'bg-emerald-500' :
-                        stat.category === '축산' ? 'bg-rose-500' :
-                        stat.category === '수산' ? 'bg-sky-500' : 'bg-amber-500'
-                      )}
-                      style={{ width: `${Math.min(100, barPct)}%` }}
-                    />
-                  </div>
-
-                  {/* 주요 절감 품목 — 농산/축산/수산만 (가공·기타 제외)
-                      신뢰성 보강: 품목명 + 절감액 약식만 (단가/% 미노출) */}
-                  {stat.category !== '가공·기타' && stat.topItems.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t border-white/50 pt-1.5 text-[11px] print:mt-0.5 print:pt-0.5 print:text-[10px]">
-                      <span className="font-semibold text-gray-500">주요 절감 품목</span>
-                      {stat.topItems.map((it, i) => (
-                        <span key={i} className="text-gray-600">
-                          <span className={cn('font-medium', style.text)}>{shortItemName(it.name)}</span>
-                          <span className="ml-1 font-mono font-semibold text-green-700">-₩{formatShortKRW(it.savings)}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )
             })}
           </div>
         </section>
 
-        {/* ─── 2페이지 시작: 연간 환산 (블루 강조 카드) ─── */}
-        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-xl print:mt-0 print:break-before-page print:break-inside-avoid">
+        {/* ─── 2페이지 시작 — 콘텐츠 적어 수직 중앙 정렬 + 좌우 적절한 padding ─── */}
+        <div className="print:break-before-page print:flex print:min-h-[180mm] print:flex-col print:justify-center">
+        {/* ─── 연간 환산 (블루 강조 카드) ─── */}
+        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-xl print:mt-0 print:break-inside-avoid">
           <div className="px-7 pt-6 pb-4 print:px-6 print:pt-5 print:pb-3">
             <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
               연간 환산 (월 합계 × 12)
@@ -652,9 +700,11 @@ export function ProposalReport({
             )
           })()}
         </section>
+        </div>
+        {/* /2페이지 묶음 */}
 
         {/* ─── 푸터 ─── */}
-        <footer className="mt-10 border-t pt-4 text-center text-xs text-gray-400">
+        <footer className="mt-10 border-t pt-4 text-center text-xs text-gray-400 print:mt-4">
           본 제안서는 {period} 거래명세표 기준으로 작성되었습니다.
         </footer>
       </div>
