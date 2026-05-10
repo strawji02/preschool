@@ -25,7 +25,7 @@ import {
 } from '@/lib/unit-conversion'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
-  normalizeOrigin, originMatchScore, isProcessedProduct,
+  normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -1538,19 +1538,28 @@ function CandidatesAndSearchPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id, item.extracted_name])
 
+  // (2026-05-11) 정렬용 query 정제 — extracted_name이 OCR 그대로면 spec/원산지가 토큰 분해를 깨뜨림
+  // 예: "세척무우(특품 1.5KG/EA)" → tokens 4개 → 세척무 ratio 0.25, 가공품도 0.33으로 위로
+  // cleanProductQuery 적용 시 "세척무우" → 세척무 0.75, 가공품 0.00 (정상)
+  const cleanedItemName = useMemo(
+    () => cleanProductQuery(item.extracted_name ?? ''),
+    [item.extracted_name],
+  )
+
   // 토큰 매칭 비율 캐시 (정렬용 + UI 표시용)
+  // 표시용은 원본 extracted_name 사용 (사용자가 본 OCR 텍스트와 동일), 정렬용은 cleaned
   const candidateConfidences = useMemo(() => {
     const map = new Map<string, MatchConfidence>()
     for (const c of candidates) {
-      map.set(c.id, getMatchConfidence(item.extracted_name, c.product_name))
+      map.set(c.id, getMatchConfidence(cleanedItemName, c.product_name))
     }
     return map
-  }, [candidates, item.extracted_name])
+  }, [candidates, cleanedItemName])
 
   // 기존 업체 품목 원산지 (정렬 가중치용)
   const itemOrigin = useMemo(() => getItemOrigin(item), [item])
 
-  const itemIsProcessedRef = isProcessedProduct(item.extracted_name ?? '')
+  const itemIsProcessedRef = isProcessedProduct(cleanedItemName)
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
     // 가공품 페널티: ratio - 0.3 → 가공품 0.6 < 식자재 0.4가 안 되도록 (식자재 0.4 > 가공품 0.3)
@@ -1596,13 +1605,13 @@ function CandidatesAndSearchPanel({
   const sortedSearchResults = useMemo(() => {
     if (searchResults.length === 0) return [] as SupplierMatch[]
     // 가공품 페널티 (-0.3) — 검수가 가공품이 아닐 때만, ratio 차이가 있어도 식자재 우선
-    const itemIsProcessed = isProcessedProduct(item.extracted_name ?? '')
+    // (2026-05-11) cleaned query 사용 — OCR 노이즈 토큰 제거
     const PROC_PENALTY = 0.3
     const adjusted = (name: string, baseRatio: number) =>
-      !itemIsProcessed && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
+      !itemIsProcessedRef && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
     return [...searchResults].sort((a, b) => {
-      const aR = adjusted(a.product_name, getMatchConfidence(item.extracted_name, a.product_name).matchRatio)
-      const bR = adjusted(b.product_name, getMatchConfidence(item.extracted_name, b.product_name).matchRatio)
+      const aR = adjusted(a.product_name, getMatchConfidence(cleanedItemName, a.product_name).matchRatio)
+      const bR = adjusted(b.product_name, getMatchConfidence(cleanedItemName, b.product_name).matchRatio)
       if (aR !== bR) return bR - aR
       if (itemOrigin !== 'UNKNOWN') {
         const aOriginMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
@@ -1611,7 +1620,7 @@ function CandidatesAndSearchPanel({
       }
       return (b.match_score ?? 0) - (a.match_score ?? 0)
     })
-  }, [searchResults, item.extracted_name, itemOrigin])
+  }, [searchResults, cleanedItemName, itemIsProcessedRef, itemOrigin])
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return
@@ -1665,7 +1674,7 @@ function CandidatesAndSearchPanel({
           )}
           <div className="space-y-2">
             {sortedCandidates.map((c, i) => {
-              const conf = candidateConfidences.get(c.id) ?? getMatchConfidence(item.extracted_name, c.product_name)
+              const conf = candidateConfidences.get(c.id) ?? getMatchConfidence(cleanedItemName, c.product_name)
               return (
                 <CandidateCard
                   key={c.id}
