@@ -43,6 +43,8 @@ interface PrecisionMatchingViewProps {
   onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
   onReload?: () => void
+  /** 거래명세표 재확인/수정 모달 트리거 (2026-05-10) */
+  onOpenInvoiceReview?: () => void
 }
 
 interface ProductDetail {
@@ -175,6 +177,7 @@ export function PrecisionMatchingView({
   onAutoExcludeUnmatched,
   onProceedToReport,
   onReload,
+  onOpenInvoiceReview,
 }: PrecisionMatchingViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
@@ -293,6 +296,15 @@ export function PrecisionMatchingView({
           <span className="ml-2 text-xs text-gray-500">
             {selectedIndex + 1} / {items.length}
           </span>
+          {onOpenInvoiceReview && (
+            <button
+              onClick={onOpenInvoiceReview}
+              className="ml-2 flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
+              title="거래명세표 재확인 또는 수정 (매칭에 영향)"
+            >
+              📄 명세표 재확인
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">필터:</span>

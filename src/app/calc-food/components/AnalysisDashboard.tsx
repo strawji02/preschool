@@ -39,6 +39,8 @@ interface AnalysisDashboardProps {
   onUpdateSupplierName?: (name: string) => void
   // 제안서 모드 (2026-04-27)
   sessionId?: string | null
+  /** 거래명세표 재확인/수정 모달 트리거 (2026-05-10) */
+  onOpenInvoiceReview?: () => void
 }
 
 export function AnalysisDashboard({
@@ -63,6 +65,7 @@ export function AnalysisDashboard({
   onToggleExclude,
   onUpdateSupplierName,
   sessionId,
+  onOpenInvoiceReview,
 }: AnalysisDashboardProps) {
   if (currentStep === 'matching') {
     return (
@@ -98,6 +101,7 @@ export function AnalysisDashboard({
       onToggleExclude={onToggleExclude}
       onUpdateSupplierName={onUpdateSupplierName}
       sessionId={sessionId}
+      onOpenInvoiceReview={onOpenInvoiceReview}
     />
   )
 }

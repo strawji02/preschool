@@ -934,8 +934,8 @@ function PageSection({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <div className="min-w-[860px]">
-          <div className="grid grid-cols-[32px_minmax(120px,2.2fr)_minmax(72px,1.1fr)_44px_52px_72px_84px_72px_88px_48px] gap-2 border-b bg-gray-50/60 px-3 py-1.5 text-xs font-medium text-gray-600">
+          <div className="min-w-[940px]">
+          <div className="grid grid-cols-[32px_minmax(180px,3fr)_minmax(160px,2.5fr)_36px_48px_72px_84px_72px_88px_44px] gap-2 border-b bg-gray-50/60 px-3 py-1.5 text-xs font-medium text-gray-600">
             <div className="text-center">No</div>
             <div>품목명</div>
             <div>규격</div>
@@ -979,7 +979,7 @@ function PageSection({
                 <div
                   key={item.id}
                   className={cn(
-                    'group grid items-center grid-cols-[32px_minmax(120px,2.2fr)_minmax(72px,1.1fr)_44px_52px_72px_84px_72px_88px_48px] gap-2 border-b px-3 py-2 text-sm last:border-0',
+                    'group grid items-center grid-cols-[32px_minmax(180px,3fr)_minmax(160px,2.5fr)_36px_48px_72px_84px_72px_88px_44px] gap-2 border-b px-3 py-2 text-sm last:border-0',
                     rowMismatch ? 'bg-red-50' : 'hover:bg-gray-50',
                   )}
                 >
@@ -1119,7 +1119,7 @@ function RowEditor({ draft, setDraft, onSave, onCancel, no, isNew, originalName 
   return (
     <div
       className={cn(
-        'grid grid-cols-[32px_minmax(120px,2.2fr)_minmax(72px,1.1fr)_44px_52px_72px_84px_72px_88px_48px] gap-2 border-b px-3 py-2 text-sm',
+        'grid grid-cols-[32px_minmax(180px,3fr)_minmax(160px,2.5fr)_36px_48px_72px_84px_72px_88px_44px] gap-2 border-b px-3 py-2 text-sm',
         isNew ? 'bg-blue-50/40' : 'bg-yellow-50/60',
       )}
     >

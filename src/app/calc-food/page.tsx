@@ -1,9 +1,11 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { useState } from 'react'
 import { ArrowLeft, RefreshCw, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuditSession } from './hooks/useAuditSession'
+import { InvoiceReviewModal } from './components/InvoiceReviewModal'
 
 // SSR 비활성화 - PDF.js가 클라이언트에서만 동작
 const UploadZone = dynamic(() => import('./components/UploadZone').then(mod => ({ default: mod.UploadZone })), {
@@ -102,6 +104,9 @@ export default function CalcFoodPage() {
     // Phase 2 페이지별 검수 완료 토글 (2026-04-26)
     togglePageReviewed,
   } = useAuditSession()
+
+  // 거래명세표 재확인/수정 모달 (매칭/보고서 단계에서 사용)
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -215,6 +220,7 @@ export default function CalcFoodPage() {
               onAutoExcludeUnmatched={autoExcludeUnmatched}
               onProceedToReport={proceedToReport}
               onReload={() => state.sessionId && loadSession(state.sessionId)}
+              onOpenInvoiceReview={() => setInvoiceModalOpen(true)}
             />
           </div>
         )}
@@ -231,6 +237,7 @@ export default function CalcFoodPage() {
             confirmationStats={confirmationStats}
             totalPages={state.totalPages}
             scenarios={scenarios}
+            onOpenInvoiceReview={() => setInvoiceModalOpen(true)}
             // Matching step callbacks
             onSelectCandidate={selectCandidate}
             onConfirmItem={confirmItem}
@@ -263,6 +270,28 @@ export default function CalcFoodPage() {
           </div>
         )}
       </main>
+
+      {/* 거래명세표 재확인/수정 모달 (2026-05-10) — 매칭/보고서 단계에서 트리거 */}
+      <InvoiceReviewModal
+        isOpen={invoiceModalOpen}
+        onClose={() => setInvoiceModalOpen(false)}
+        items={state.items}
+        fileName={state.fileName || ''}
+        supplierName={state.supplierName || '업체'}
+        pageTotals={state.pageTotals}
+        pageSourceFiles={state.pageSourceFiles}
+        totalPages={state.totalPages}
+        sessionId={state.sessionId}
+        pages={state.pages}
+        onSupplierNameChange={updateSupplierName}
+        onUpdateItem={updateItem}
+        onRemoveItem={removeItem}
+        onAddItem={addItem}
+        onUpdatePageOcrTotal={updatePageOcrTotal}
+        onTogglePageReviewed={togglePageReviewed}
+        onReplacePage={replacePage}
+        onExtendUpload={extendSession}
+      />
     </div>
   )
 }

@@ -28,6 +28,8 @@ interface ReportViewProps {
   onUpdateSupplierName?: (name: string) => void  // 2026-04-21
   // 제안서 모드 (2026-04-27)
   sessionId?: string | null
+  /** 거래명세표 재확인/수정 모달 트리거 (2026-05-10) */
+  onOpenInvoiceReview?: () => void
 }
 
 export function ReportView({
@@ -42,6 +44,7 @@ export function ReportView({
   onToggleExclude,
   onUpdateSupplierName,
   sessionId,
+  onOpenInvoiceReview,
 }: ReportViewProps) {
   // 'analysis' = 검수자 분석 화면 (좌측 이미지 + 우측 분석)
   // 'proposal' = 고객 제출용 제안서 (인포그래픽)
@@ -109,15 +112,26 @@ export function ReportView({
           onBackToMatching={onBackToMatching}
           onUpdateSupplierName={onUpdateSupplierName}
         />
-        {/* 제안서 모드 진입 (2026-04-27) */}
-        <button
-          onClick={() => setMode('proposal')}
-          className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-blue-700"
-          title="고객 제출용 제안서 (인포그래픽 보고서)"
-        >
-          <ClipboardList size={16} />
-          제안서 보기
-        </button>
+        {/* 명세표 재확인 버튼 + 제안서 모드 진입 */}
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          {onOpenInvoiceReview && (
+            <button
+              onClick={onOpenInvoiceReview}
+              className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 shadow-sm hover:bg-amber-100"
+              title="거래명세표 재확인 또는 수정"
+            >
+              📄 명세표 재확인
+            </button>
+          )}
+          <button
+            onClick={() => setMode('proposal')}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-blue-700"
+            title="고객 제출용 제안서 (인포그래픽 보고서)"
+          >
+            <ClipboardList size={16} />
+            제안서 보기
+          </button>
+        </div>
 
         <div className="flex-1 overflow-y-auto p-6">
           {/* 시나리오 비교 */}
