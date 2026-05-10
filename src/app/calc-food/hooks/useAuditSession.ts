@@ -653,28 +653,30 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
             }
           : {}
 
-        // 공급사별 확정 처리
+        // 공급사별 확정 처리 (2026-05-10 fix)
+        // 이전: !item.cj_confirmed / !item.ssg_confirmed 로 toggle → 이미 확정된 품목 재Confirm 시 미확정으로 강등
+        // 변경: 항상 true로 set (Confirm = "이 매칭/조정값으로 확정한다"는 멱등 명시적 동작)
+        // 확정 해제는 별도 UI/액션이 필요 (현재 UI에 없음)
         if (action.supplier) {
           const updatedItem = { ...item, ...mergedAdjusted }
           if (action.supplier === 'CJ') {
-            updatedItem.cj_confirmed = !item.cj_confirmed
+            updatedItem.cj_confirmed = true
           } else {
-            updatedItem.ssg_confirmed = !item.ssg_confirmed
+            updatedItem.ssg_confirmed = true
           }
-          // 전체 확정 여부: 둘 중 하나라도 확정되면 true
-          updatedItem.is_confirmed = updatedItem.cj_confirmed || updatedItem.ssg_confirmed
-          updatedItem.match_status = updatedItem.is_confirmed ? 'manual_matched' as const : item.match_status
+          updatedItem.is_confirmed = true
+          updatedItem.match_status = 'manual_matched' as const
           return updatedItem
         }
 
-        // supplier가 없으면 기존 방식 (전체 토글)
+        // supplier 미지정 — 둘 중 매칭이 있는 쪽 모두 확정 (toggle X, 멱등)
         return {
           ...item,
           ...mergedAdjusted,
-          is_confirmed: !item.is_confirmed,
-          cj_confirmed: !item.is_confirmed,
-          ssg_confirmed: !item.is_confirmed,
-          match_status: item.is_confirmed ? item.match_status : 'manual_matched' as const
+          is_confirmed: true,
+          cj_confirmed: !!item.cj_match,
+          ssg_confirmed: !!item.ssg_match,
+          match_status: 'manual_matched' as const,
         }
       })
 
