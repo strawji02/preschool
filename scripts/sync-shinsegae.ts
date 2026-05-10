@@ -29,6 +29,7 @@ import * as XLSX from 'xlsx'
 import { createClient } from '@supabase/supabase-js'
 import * as path from 'path'
 import * as fs from 'fs'
+import { parseShinsegaeSpec } from './lib/spec-parser'
 
 // .env.local 로드
 const envPath = path.join(__dirname, '..', '.env.local')
@@ -58,13 +59,12 @@ interface ParsedRow {
   supplier_partner: string | null
 }
 
-// 단순 spec_quantity / spec_unit 파싱 (천단위 콤마 제거 후 첫 무게/부피 추출)
+// spec_quantity / spec_unit 파싱 — scripts/lib/spec-parser의 parseShinsegaeSpec 사용
+// (이전 단순 정규식은 "10G*100개" 같은 곱셈 패턴을 못 잡아 baseQty만 저장 → 단위중량 잘못)
 function parseSpecQU(spec: string | null): { quantity: number | null; unit: string | null } {
   if (!spec) return { quantity: null, unit: null }
-  const cleaned = spec.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
-  const m = cleaned.match(/(\d+(?:\.\d+)?)\s*(KG|G|L|ML|EA|개|봉|박스|BOX|팩|PAC|PACK)/i)
-  if (m) return { quantity: parseFloat(m[1]), unit: m[2].toUpperCase() }
-  return { quantity: null, unit: null }
+  const r = parseShinsegaeSpec(spec)
+  return { quantity: r.quantity, unit: r.unit }
 }
 
 /** tax_type 정규화 — "과세 / 의제매입대상" 같은 변형을 "과세"/"면세" 두 값으로 매핑 (DB check constraint) */
