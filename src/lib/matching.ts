@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MatchResult, MatchCandidate, Supplier, SupplierMatch, SavingsResult, MatchStatus, ExtractedItem } from '@/types/audit'
 import { preprocessKoreanFoodName, dualNormalize, splitCompoundWord, cleanInput, extractCoreKeyword, extractSearchHints, splitBrandCompound } from '@/lib/preprocessing'
-import { cleanProductQuery } from '@/lib/token-match'
+import { cleanProductQuery, extractIdentifiers } from '@/lib/token-match'
 import { expandWithSynonyms, expandBrandEquivalents } from '@/lib/synonyms'
 import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
@@ -869,9 +869,15 @@ export async function findComparisonMatches(
       // and cleaned itemName for BM25 (token overlap)
       // 2026-05-10: cleanProductQuery로 spec/원산지 메타 사전 제거
       // (예: "세척당근(특품 200~280g/개 한국Wn※국내산)" → "세척당근")
+      // 2026-05-10 (추가): spec에서 식별자 키워드(등급/인증/크기/원산지) 추출 후 결합
+      // (예: name="이츠웰 신선한계란" + spec="1등급, 무항생제, 특란..."
+      //  → "이츠웰 신선한계란 1등급 무항생제 특란 국내산"
+      //  → OCR 변형(괄호 안에 등급)되어도 동일 매칭 결과)
+      const identifiers = extractIdentifiers(`${itemName} ${specStr}`)
       const cleanedItemName = cleanProductQuery(itemName)
-      const sauceExpandedH = expandSauceQuery(cleanedItemName)
-      const cleanedPrimary = cleanInput(cleanedItemName).primary
+      const enrichedItemName = identifiers ? `${cleanedItemName} ${identifiers}` : cleanedItemName
+      const sauceExpandedH = expandSauceQuery(enrichedItemName)
+      const cleanedPrimary = cleanInput(enrichedItemName).primary
       const searchRawH: string = sauceExpandedH.length > 1 ? sauceExpandedH[0] : cleanedPrimary
 
       ;[cjResult, ssgResult] = await Promise.all([

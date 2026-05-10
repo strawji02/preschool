@@ -67,6 +67,39 @@ export function cleanProductQuery(q: string): string {
 }
 
 /**
+ * spec/이름에서 매칭 식별자 키워드 추출 (2026-05-10)
+ *
+ * 검수 품목의 product name이 짧고 spec에 등급/인증/크기 정보가 있는 케이스 (OCR 변형)
+ * 자동 매칭 시 spec을 활용해 식별자 키워드만 추가 → 매칭 정확도 향상
+ *
+ * 예: "이츠웰 신선한계란" + spec "1등급, 무항생제, 특란, 60g*30입"
+ *     → identifiers: "1등급 무항생제 특란"
+ *     → enriched: "이츠웰 신선한계란 1등급 무항생제 특란"
+ *     → 신세계 "1등급 무항생제 계란 특란" 정확 매칭
+ *
+ * 추출 패턴:
+ *  - 등급: 1등급, 2등급, 특등급, 상등급, A등급
+ *  - 인증: 무항생제, 무첨가, 친환경, 유기농, 동물복지, 무농약, HACCP
+ *  - 크기: 특란, 대란, 중란, 소란, 왕란
+ *  - 원산지: 국내산, 한국산, 국산, 국내제조
+ */
+export function extractIdentifiers(text: string | undefined | null): string {
+  if (!text) return ''
+  const tokens: string[] = []
+  const patterns = [
+    /\d+\s*등급|특등급|상등급|[Aa]등급/g,
+    /무항생제|친환경|유기농|동물복지|무농약|무첨가|HACCP|haccp/g,
+    /특란|대란|중란|소란|왕란/g,
+    /국내산|한국산|국산|국내제조/g,
+  ]
+  for (const p of patterns) {
+    const matches = text.match(p)
+    if (matches) tokens.push(...matches.map((m) => m.replace(/\s+/g, '')))
+  }
+  return [...new Set(tokens)].join(' ')
+}
+
+/**
  * 가공/즉석섭취/스낵 등 메인 식자재가 아닌 가공품 키워드.
  * 검수 품목이 단순 식자재("방울토마토")인데 후보가 가공품("한컵과일 사과+방울토마토")이면
  * 동일 토큰 매칭이라도 가공품을 후순위로 (영양 분석/가격 비교 의미 다름).
