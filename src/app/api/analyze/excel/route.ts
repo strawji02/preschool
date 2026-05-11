@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
       return findComparisonMatches(item.name, supabase, undefined, {
         name: item.name,
         spec: item.spec,
+        origin: item.origin,  // (2026-05-11) D열 원산지 컬럼 전달 — matching origin 가중치 적용
         quantity: item.quantity,
         unit_price: item.unit_price,
         total_price: item.total_price,

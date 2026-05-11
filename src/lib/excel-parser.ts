@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx'
 export interface ExtractedExcelItem {
   name: string
   spec?: string
+  /** 원산지 (2026-05-11) — D열 별도 컬럼에 있는 경우 추출 */
+  origin?: string
   /** 단위 (KG, PAC, EA 등) - 규격 컬럼과 별도 존재 시 파싱 */
   unit?: string
   quantity: number
@@ -42,6 +44,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   name: ['품명', '품목명', '상품명', '제품명', '품목', '상품', '제품', 'name', 'item', 'product'],
   // 규격: "규격" 전용 (별도 "단위" 컬럼이 있는 명세서를 위해 '단위' 제거)
   spec: ['규격', '용량', '사양', 'spec', 'size'],
+  // 원산지 (2026-05-11) — 별도 D열 컬럼 케이스 (식자재 매칭 핵심 식별 요소)
+  origin: ['원산지', '산지', '제조국', '생산지', 'origin', 'country', 'country of origin'],
   // 단위 전용 (PAC, KG, EA 등)
   unit: ['단위', 'unit', 'uom'],
   quantity: ['수량', '갯수', '개수', 'qty', 'quantity', 'count'],
@@ -139,6 +143,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     // 이렇게 해야 "공급가액"이 "금액" alias에 잘못 잡히지 않음
     const nameIdx = findColumnIndex(headers, COLUMN_ALIASES.name)
     const specIdx = findColumnIndex(headers, COLUMN_ALIASES.spec)
+    const originIdx = findColumnIndex(headers, COLUMN_ALIASES.origin)
     const unitIdx = findColumnIndex(headers, COLUMN_ALIASES.unit)
     const qtyIdx = findColumnIndex(headers, COLUMN_ALIASES.quantity)
     const unitPriceIdx = findColumnIndex(headers, COLUMN_ALIASES.unit_price)
@@ -182,6 +187,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       }
 
       const spec = specIdx !== -1 ? String(row[specIdx] || '').trim() : undefined
+      const origin = originIdx !== -1 ? String(row[originIdx] || '').trim() : undefined
       const unit = unitIdx !== -1 ? String(row[unitIdx] || '').trim() : undefined
       const quantity = qtyIdx !== -1 ? parseNumber(row[qtyIdx]) : 1
       const unitPrice = unitPriceIdx !== -1 ? parseNumber(row[unitPriceIdx]) : 0
@@ -223,6 +229,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       items.push({
         name,
         spec: spec || undefined,
+        origin: origin || undefined,
         unit: unit || undefined,
         quantity,
         unit_price: finalUnitPrice,
