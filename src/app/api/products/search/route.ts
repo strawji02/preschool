@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
-import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery } from '@/lib/token-match'
+import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery, tokenize } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -54,7 +54,16 @@ export async function GET(request: NextRequest) {
 
     // Synonym expansion for better search recall
     const { forKeyword } = dualNormalize(cleanedQuery)
-    const synonymTerms = expandWithSynonyms(forKeyword)
+    // (2026-05-11) 브랜드/modifier 제거 후 단일 식자재 토큰이면 그 토큰으로 expand
+    // 예: "아이누리 무우" → dualNormalize forKeyword="아이누리무우" (동의어 없음)
+    //     → meaningful tokens ["무우"] → expand("무우") = ['무우', '무', '세척무', '세척무우', ...]
+    const cleanTokens = tokenize(cleanedQuery)
+    const meaningfulCleanTokens = cleanTokens.filter(
+      (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
+    )
+    const expandKeyword =
+      meaningfulCleanTokens.length === 1 ? meaningfulCleanTokens[0] : forKeyword
+    const synonymTerms = expandWithSynonyms(expandKeyword)
     // (2026-05-11) slice 3 → 8로 확장 — 동의어가 많은 케이스 (멸치 시리즈, 쌀 시리즈 등)에서
     // 5번째 이후 동의어 (예: 국멸치, 다시멸치, 육수용멸치)가 BM25 검색에 포함되어 직접 매칭
     const expandedQuery = synonymTerms.length > 1
