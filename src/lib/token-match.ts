@@ -141,6 +141,8 @@ export function isProcessedProduct(productName: string): boolean {
     // 쌀/곡물 가공품 확장 (2026-05-11) — '쌀 20kg' 양곡 vs '쌀가루' 가공품 구분
     '쌀가루', '멥쌀가루', '찹쌀가루', '박력쌀가루', '쌀튀김', '쌀과자', '쌀튀밥', '쌀강정',
     '쌀국수장국', '쌀쫄면', '쌀죽', '쌀초고추장', '쌀올리고당', '튀김가루', '부침가루',
+    // 분말/파우더 가공품 (2026-05-11) — 양파파우더/마늘파우더 등 신선 식자재 vs 분말 구분
+    '파우더', '분말',
     '핫바', '핫도그', '햄버거', '소시지', '베이컨', '미트볼',
     '돈까스', '돈가스', '치킨까스', '치킨가스', '커틀렛', '돈카츠',
     '너겟', '너겟', '치킨너겟', '튀김',
@@ -218,6 +220,26 @@ export function getTokenMatchRatio(
       (t) => t === q || (t.length > 1 && (t.startsWith(q) || t.endsWith(q))),
     )
     if (wordBoundary) return 1.5
+  }
+
+  // (2026-05-11) Synonym substring boost — 동의어가 product에 substring 정확 매칭되면 1.5
+  // 예: query="양파" → expand에 "깐양파" → product "깐양파 국내산"에 "깐양파" substring → 1.5
+  // 효과: 가공품(양파파우더 ratio 1.5 - 0.3 = 1.2) vs 깐양파(이전 ratio 1.0) → 깐양파 1.5로 부스트
+  if (q.length >= 1 && /^[가-힣]/.test(q)) {
+    const syns = expandWithSynonyms(query ?? '')
+    for (const syn of syns) {
+      const synLower = syn.toLowerCase().replace(/\s+/g, '')
+      if (synLower.length >= 2 && synLower !== q && n.includes(synLower)) {
+        // 3자 이상은 substring으로 충분히 식별력 있음
+        if (synLower.length >= 3) return 1.5
+        // 2자 동의어는 word-boundary 매칭만 허용
+        const productTokens = tokenize(productName ?? '')
+        const exactOrPrefix = productTokens.some(
+          (t) => t === synLower || (t.length > synLower.length && t.startsWith(synLower)),
+        )
+        if (exactOrPrefix) return 1.5
+      }
+    }
   }
 
   // 토큰 분리 + 공급사 브랜드/일반 수식어 제거 (식자재 메인 명사만 매칭에 사용)
