@@ -1,4 +1,4 @@
-import { expandWithSynonyms } from '@/lib/synonyms'
+import { expandWithSynonyms, getStandardTerm } from '@/lib/synonyms'
 
 /**
  * 공급사/브랜드 토큰 — 매칭 변별력 없음 (모든 제품에 등장).
@@ -325,11 +325,18 @@ export function getTokenMatchRatio(
         if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
         const subSyns = expandWithSynonyms(sub)
         if (subSyns.length > 1) {
-          // 1) sub 자체 또는 동의어가 product에 매칭되면 full match
-          //    (sub이 등록된 식자재 표준어 → 합성어의 본질로 인정)
+          // (2026-05-12) sub의 동의어가 product에 매칭되되 동일 standard term인 경우만 인정
+          // 예: sub="고춧가루" → syn="고추분" → 둘 다 standard "고추가루" → 매칭 OK
+          //     sub="전분" → syn="옥수수전분" → standard "전분" vs "옥수수전분" → 다름 → 차단
+          // 이유: '전분' 일반어 동의어 그룹에 구체 전분(감자/옥수수/고구마)이 포함되어
+          //       '감자전분' 검수가 '옥수수전분' product와 잘못 매칭되는 회귀 방지
+          const subStandard = getStandardTerm(sub)
           for (const syn of subSyns) {
             const synL = syn.toLowerCase()
-            if (synL.length >= 2 && tokenMatchesProduct(synL)) {
+            if (synL.length < 2) continue
+            if (!tokenMatchesProduct(synL)) continue
+            // standard term이 같아야 동일 식자재로 인정
+            if (getStandardTerm(syn) === subStandard) {
               compoundSynMatched = true
               break
             }
