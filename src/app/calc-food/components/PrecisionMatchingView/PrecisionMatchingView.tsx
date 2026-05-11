@@ -290,6 +290,12 @@ export function PrecisionMatchingView({
 }: PrecisionMatchingViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
+  // (2026-05-11) 좌측 패널의 정렬된 visible idx 동기화 (가나다/금액순 정렬 반영)
+  // ItemListPanel이 자체 sort 후 이 ref를 업데이트 → Confirm 시 부모가 정렬 순서대로 다음 idx 결정
+  const sortedVisibleIndicesRef = useRef<number[]>([])
+  const onSortedVisibleChange = useCallback((idxs: number[]) => {
+    sortedVisibleIndicesRef.current = idxs
+  }, [])
   const [sortMode, setSortMode] = useState<SortMode>('match')
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -356,25 +362,36 @@ export function PrecisionMatchingView({
 
   const visiblePos = visibleIndices.indexOf(selectedIndex)
 
+  // (2026-05-11) 정렬된 visible idx 우선 (좌측 패널 가나다/금액 정렬 반영), 비어있으면 단조 idx fallback
   const moveToNext = useCallback(() => {
-    if (visibleIndices.length === 0) return
-    if (visiblePos === -1) {
-      setSelectedIndex(visibleIndices[0])
+    const sortedList =
+      sortedVisibleIndicesRef.current.length > 0
+        ? sortedVisibleIndicesRef.current
+        : visibleIndices
+    if (sortedList.length === 0) return
+    const currentPos = sortedList.indexOf(selectedIndex)
+    if (currentPos === -1) {
+      setSelectedIndex(sortedList[0])
       return
     }
-    const next = visibleIndices[visiblePos + 1]
+    const next = sortedList[currentPos + 1]
     if (next != null) setSelectedIndex(next)
-  }, [visibleIndices, visiblePos])
+  }, [visibleIndices, selectedIndex])
 
   const moveToPrev = useCallback(() => {
-    if (visibleIndices.length === 0) return
-    if (visiblePos === -1) {
-      setSelectedIndex(visibleIndices[0])
+    const sortedList =
+      sortedVisibleIndicesRef.current.length > 0
+        ? sortedVisibleIndicesRef.current
+        : visibleIndices
+    if (sortedList.length === 0) return
+    const currentPos = sortedList.indexOf(selectedIndex)
+    if (currentPos === -1) {
+      setSelectedIndex(sortedList[0])
       return
     }
-    const prev = visibleIndices[visiblePos - 1]
+    const prev = sortedList[currentPos - 1]
     if (prev != null) setSelectedIndex(prev)
-  }, [visibleIndices, visiblePos])
+  }, [visibleIndices, selectedIndex])
 
   if (!currentItem) {
     return <div className="flex h-full items-center justify-center text-gray-400">품목이 없습니다.</div>
@@ -443,6 +460,7 @@ export function PrecisionMatchingView({
           selectedIndex={selectedIndex}
           onSelect={setSelectedIndex}
           filterMode={filterMode}
+          onSortedVisibleChange={onSortedVisibleChange}
         />
 
         {/* 중앙(col-5): 상하 분할 — commonTokens로 동일 텍스트 색상 매칭 */}
@@ -474,15 +492,18 @@ export function PrecisionMatchingView({
                 item={currentItem}
                 onSelectCandidate={(c) => onSelectCandidate(currentItem.id, 'SHINSEGAE', c)}
                 onConfirm={(adjustments) => {
-                  // (2026-05-11) 컨펌 후 다음 미확정 품목 자동 이동
-                  // 현재 visibleIndices 기준으로 다음 idx를 미리 계산 (state update race 회피)
-                  const nextVisibleIdx = visibleIndices.find((idx) => idx > selectedIndex)
+                  // (2026-05-11) 컨펌 후 다음 품목 자동 이동
+                  // 좌측 패널의 정렬 순서(가나다/금액/기본) 그대로 다음 idx 사용
+                  const sortedList =
+                    sortedVisibleIndicesRef.current.length > 0
+                      ? sortedVisibleIndicesRef.current
+                      : visibleIndices
+                  const currentPos = sortedList.indexOf(selectedIndex)
+                  const nextVisibleIdx = currentPos !== -1 ? sortedList[currentPos + 1] : undefined
                   onConfirmItem(currentItem.id, 'SHINSEGAE', adjustments)
                   if (nextVisibleIdx != null) {
                     setSelectedIndex(nextVisibleIdx)
                   } else {
-                    // 마지막 미확정 품목이면 visibleIndices 재계산 후 첫 unconfirmed로
-                    // (또는 모두 확정 시 그대로 유지)
                     moveToNext()
                   }
                 }}
@@ -580,8 +601,13 @@ export function PrecisionMatchingView({
         onPrev={moveToPrev}
         onNext={moveToNext}
         onConfirm={() => {
-          // 컨펌 전 다음 미확정 idx 미리 계산 (state update race 회피)
-          const nextVisibleIdx = visibleIndices.find((idx) => idx > selectedIndex)
+          // (2026-05-11) 좌측 패널 정렬 순서(가나다/금액/기본) 기준 다음 idx
+          const sortedList =
+            sortedVisibleIndicesRef.current.length > 0
+              ? sortedVisibleIndicesRef.current
+              : visibleIndices
+          const currentPos = sortedList.indexOf(selectedIndex)
+          const nextVisibleIdx = currentPos !== -1 ? sortedList[currentPos + 1] : undefined
           onConfirmItem(currentItem.id, 'SHINSEGAE')
           if (nextVisibleIdx != null) {
             setSelectedIndex(nextVisibleIdx)
@@ -675,11 +701,13 @@ function ItemListPanel({
   selectedIndex,
   onSelect,
   filterMode,
+  onSortedVisibleChange,
 }: {
   items: ComparisonItem[]
   selectedIndex: number
   onSelect: (idx: number) => void
   filterMode: FilterMode
+  onSortedVisibleChange?: (sortedIdxs: number[]) => void
 }) {
   // (2026-05-11) selectedIndex 변경 시 좌측 패널 자동 스크롤 — Confirm 후 다음 품목으로 이동
   const listContainerRef = useRef<HTMLDivElement>(null)
@@ -724,6 +752,11 @@ function ItemListPanel({
     }
     return list
   }, [items, filterMode, searchQuery, leftSort])
+
+  // (2026-05-11) 부모에 정렬된 visible idx 배열 동기화 — Confirm 시 정렬 순서대로 다음 idx 사용
+  useEffect(() => {
+    onSortedVisibleChange?.(filtered.map(({ idx }) => idx))
+  }, [filtered, onSortedVisibleChange])
 
   return (
     <section className="col-span-3 flex min-h-0 flex-col rounded-xl border bg-white shadow-sm">
