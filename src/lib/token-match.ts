@@ -65,6 +65,11 @@ export function cleanProductQuery(q: string): string {
   s = s.replace(/[()]/g, ' ')                                   // 짝 안 맞는 단독 괄호 제거
   s = s.replace(/Wn\s*※[^\s,)]*/gi, ' ')                        // OCR Wn※국내산
   s = s.replace(/[※]/g, ' ')                                    // ※ 단독
+  // (2026-05-11) origin 키워드 제거 — extracted_origin 별도 추출로 origin 정보는 보존됨
+  // 매칭 ratio 계산에서 "국내산_100%" 같은 노이즈 토큰이 BM25를 망가뜨리는 문제 차단
+  s = s.replace(/국내산|한국산|국산|국내제조|수입산|외국산|중국산|호주산|미국산|캐나다산|베트남산|태국산|뉴질랜드산|일본산|러시아산/g, ' ')
+  s = s.replace(/\d+\s*%/g, ' ')                                // 100%, 50% 같은 비율 표기 제거
+  s = s.replace(/[_]+/g, ' ')                                   // _ 구분자 (예: 국내산_100%)
   s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개
   s = s.replace(/\d+\.?\d*\s*[Kk][Gg]\s*\/?\s*[A-Za-z가-힣]*/g, ' ')        // 1KG, 1.5KG/EA
   s = s.replace(/\d+\.?\d*\s*[Mm][Ll]\s*\/?\s*[A-Za-z가-힣]*/g, ' ')        // 500ml
