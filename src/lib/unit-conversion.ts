@@ -31,6 +31,19 @@ export function parseSpecToGrams(spec: string | undefined | null): number | null
   if (!spec) return null
   const text = spec.toLowerCase()
 
+  // (2026-05-11) 액체류 부피 우선 — '참기름 1.8L 1.65kg' 케이스에서 1.8L 추출
+  //   신세계 카탈로그가 액체류를 L 단위로 표기 (예: '쉐프초이스 참기름 1.800L')
+  //   검수도 L 우선 추출하여 매칭 단위 일치 (1.8L=1800g vs 1.65kg=1650g)
+  //   ml 또는 L 표기가 있으면 무게(kg/g)보다 우선
+  const volumeMatches: number[] = []
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*ml(?![a-z])/gi)) {
+    volumeMatches.push(Math.round(parseFloat(m[1])))
+  }
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*l(?![a-z])/gi)) {
+    volumeMatches.push(Math.round(parseFloat(m[1]) * 1000))
+  }
+  if (volumeMatches.length > 0) return Math.max(...volumeMatches)
+
   // 2-tier 전략 (2026-05-04 개정):
   //  Tier 1: 단위 suffix("/EA", "/개", "/팩", "/봉", "/박스" 등)가 명시된 무게 패턴 우선
   //          예: "1Kg/EA, ... (4KG)" → "1Kg/EA"만 채택 → 1000g
@@ -42,7 +55,7 @@ export function parseSpecToGrams(spec: string | undefined | null): number | null
   const SUFFIX = '(?:ea|개|입|매|팩|pac|pack|봉|봉지|봉투|박스|box|상자)'
   const tier1: number[] = []
   const perUnitRe = new RegExp(
-    `(\\d+(?:\\.\\d+)?)\\s*(kg|g|l|ml)(?![a-z])\\s*\\/\\s*${SUFFIX}`,
+    `(\\d+(?:\\.\\d+)?)\\s*(kg|g)(?![a-z])\\s*\\/\\s*${SUFFIX}`,
     'gi',
   )
   for (const m of text.matchAll(perUnitRe)) {
@@ -50,21 +63,13 @@ export function parseSpecToGrams(spec: string | undefined | null): number | null
     const u = m[2].toLowerCase()
     if (u === 'kg') tier1.push(Math.round(qty * 1000))
     else if (u === 'g') tier1.push(Math.round(qty))
-    else if (u === 'l') tier1.push(Math.round(qty * 1000))
-    else if (u === 'ml') tier1.push(Math.round(qty))
   }
   if (tier1.length > 0) return Math.max(...tier1)
 
-  // Tier 2: 모든 무게/부피 매치 → 최대값
+  // Tier 2: 모든 무게 매치 → 최대값
   const tier2: number[] = []
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*kg/gi)) {
     tier2.push(Math.round(parseFloat(m[1]) * 1000))
-  }
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*l(?![a-z])/gi)) {
-    tier2.push(Math.round(parseFloat(m[1]) * 1000))
-  }
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*ml/gi)) {
-    tier2.push(parseFloat(m[1]))
   }
   for (const m of text.matchAll(/(?<![a-z])(\d+(?:\.\d+)?)\s*g(?![a-z])/gi)) {
     tier2.push(parseFloat(m[1]))
