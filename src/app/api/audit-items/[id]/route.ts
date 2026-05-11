@@ -31,6 +31,8 @@ const ALLOWED_FIELDS = [
   'is_excluded',
   // 검수자 의견 (2026-05-08, migration 041) — AI 학습용
   'reviewer_note',
+  // 원산지 수정 (2026-05-11, migration 044) — OCR 누락/오판정 보강
+  'extracted_origin',
 ] as const
 
 export async function PATCH(

@@ -170,6 +170,101 @@ function getItemOrigin(item: ComparisonItem): string {
   return normalizeOrigin(`${item.extracted_name ?? ''} ${item.extracted_spec ?? ''}`)
 }
 
+
+/**
+ * 원산지 편집 chip (2026-05-11)
+ * - 표시: 현재 값 또는 '원산지 미확인'
+ * - 클릭 시 빠른 선택 dropdown (자주 사용되는 8개 옵션) + 직접 입력
+ * - onSave는 PATCH 호출 (extracted_origin)
+ */
+const ORIGIN_QUICK_OPTIONS = [
+  '국내산', '외국산', '중국', '호주산', '미국', '캐나다', '베트남', '태국', '뉴질랜드',
+]
+function OriginEditor({ itemId, initialValue }: { itemId: string; initialValue: string }) {
+  const [value, setValue] = useState(initialValue)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(initialValue)
+  useEffect(() => {
+    setValue(initialValue)
+    setDraft(initialValue)
+  }, [itemId, initialValue])
+  const normalized = value ? normalizeOrigin(value) : 'UNKNOWN'
+  const labelColor =
+    normalized === 'UNKNOWN'
+      ? 'border-amber-300 bg-amber-50 text-amber-700'
+      : 'border-emerald-300 bg-emerald-50 text-emerald-700'
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 hover:opacity-80 ${labelColor}`}
+        title="클릭하여 원산지 수정"
+      >
+        🌍 {value || '원산지 미확인'}
+      </button>
+    )
+  }
+  const commit = (next: string) => {
+    const trimmed = next.trim()
+    setValue(trimmed)
+    setDraft(trimmed)
+    setEditing(false)
+    if (trimmed === initialValue) return
+    void fetch(`/api/audit-items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extracted_origin: trimmed || null }),
+    }).catch((e) => console.warn('extracted_origin 저장 실패:', e))
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1">
+      <input
+        autoFocus
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => commit(draft)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit(draft)
+          if (e.key === 'Escape') {
+            setDraft(value)
+            setEditing(false)
+          }
+        }}
+        placeholder="예: 국내산, 캐나다, 호주산"
+        className="rounded border border-gray-300 px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+        size={18}
+      />
+      <span className="text-xs text-gray-500">빠른 선택:</span>
+      {ORIGIN_QUICK_OPTIONS.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            commit(opt)
+          }}
+          className="rounded bg-white px-1.5 py-0.5 text-xs text-gray-700 hover:bg-blue-100"
+        >
+          {opt}
+        </button>
+      ))}
+      <button
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          commit('')
+        }}
+        className="rounded px-1.5 py-0.5 text-xs text-red-600 hover:bg-red-50"
+        title="원산지 정보 제거"
+      >
+        ✕
+      </button>
+    </span>
+  )
+}
+
 function getExistingTotal(item: ComparisonItem): number {
   return item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
 }
@@ -827,6 +922,8 @@ function ExistingItemDetail({
               단위 <HighlightedText text={item.extracted_unit} commonTokens={commonTokens} />
             </span>
           )}
+          {/* 원산지 chip + 수정 (2026-05-11) — OCR 누락/오판정 시 검수자가 보강 */}
+          <OriginEditor itemId={item.id} initialValue={item.extracted_origin ?? ''} />
         </div>
 
         {/* 금액 5분할 한 줄 */}
