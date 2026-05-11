@@ -9,7 +9,7 @@
  *  - 중앙(col-5): 상하 분할 — 위(기존 업체 품목 상세) / 아래(신세계 매칭 + 조정)
  *  - 우(col-4): 후보 리스트 (상시) + 검정 검색 카드 (하단 고정, 항상 보임)
  */
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2, AlertTriangle,
   FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X, RefreshCw,
@@ -474,8 +474,17 @@ export function PrecisionMatchingView({
                 item={currentItem}
                 onSelectCandidate={(c) => onSelectCandidate(currentItem.id, 'SHINSEGAE', c)}
                 onConfirm={(adjustments) => {
+                  // (2026-05-11) 컨펌 후 다음 미확정 품목 자동 이동
+                  // 현재 visibleIndices 기준으로 다음 idx를 미리 계산 (state update race 회피)
+                  const nextVisibleIdx = visibleIndices.find((idx) => idx > selectedIndex)
                   onConfirmItem(currentItem.id, 'SHINSEGAE', adjustments)
-                  moveToNext()
+                  if (nextVisibleIdx != null) {
+                    setSelectedIndex(nextVisibleIdx)
+                  } else {
+                    // 마지막 미확정 품목이면 visibleIndices 재계산 후 첫 unconfirmed로
+                    // (또는 모두 확정 시 그대로 유지)
+                    moveToNext()
+                  }
                 }}
                 commonTokens={commonTokens}
                 matchDetail={matchDetail}
@@ -571,8 +580,14 @@ export function PrecisionMatchingView({
         onPrev={moveToPrev}
         onNext={moveToNext}
         onConfirm={() => {
+          // 컨펌 전 다음 미확정 idx 미리 계산 (state update race 회피)
+          const nextVisibleIdx = visibleIndices.find((idx) => idx > selectedIndex)
           onConfirmItem(currentItem.id, 'SHINSEGAE')
-          moveToNext()
+          if (nextVisibleIdx != null) {
+            setSelectedIndex(nextVisibleIdx)
+          } else {
+            moveToNext()
+          }
         }}
         onSelectCandidate={(idx) => {
           const c = (currentItem.ssg_candidates ?? [])[idx]
@@ -666,6 +681,16 @@ function ItemListPanel({
   onSelect: (idx: number) => void
   filterMode: FilterMode
 }) {
+  // (2026-05-11) selectedIndex 변경 시 좌측 패널 자동 스크롤 — Confirm 후 다음 품목으로 이동
+  const listContainerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!listContainerRef.current) return
+    const selectedBtn = listContainerRef.current.querySelector<HTMLElement>(
+      `[data-item-idx="${selectedIndex}"]`,
+    )
+    selectedBtn?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedIndex])
+
   // 좌측 패널 자체 필터/정렬 (2026-05-10): 품목명 검색 + 금액순/가나다순
   const [searchQuery, setSearchQuery] = useState('')
   type LeftSort = 'default' | 'price_desc' | 'name_asc'
@@ -754,7 +779,7 @@ function ItemListPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" ref={listContainerRef}>
         {filtered.map(({ it, idx }) => {
           const isSelected = idx === selectedIndex
           const total = getExistingTotal(it)
@@ -765,6 +790,7 @@ function ItemListPanel({
           return (
             <button
               key={it.id}
+              data-item-idx={idx}
               onClick={() => onSelect(idx)}
               className={cn(
                 'flex w-full items-stretch gap-2 border-b border-gray-100 px-3 py-2.5 text-left transition',
