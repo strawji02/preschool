@@ -317,13 +317,15 @@ export async function GET(request: NextRequest) {
       //    → 가공품 ratio 0.6, 식자재 0.4 케이스에서도 식자재(0.4) > 가공품(0.3) 정렬
       //    → substring 매칭(1.5) 가공품도 1.2로 떨어져 식자재 1.0과 비슷한 영역
       // 2) 검수 query 자체가 가공품이면 페널티 X (정상 매칭 유지)
-      const queryIsProcessed = isProcessedProduct(query)
+      // (2026-05-11) cleanedQuery 사용 — raw에는 "아이누리 쌀(엄선 20Kg/EA)" 같은 노이즈 토큰
+      // 이 영향으로 ratio 계산이 부정확해짐. cleanedQuery는 "아이누리 쌀"로 정제되어 매칭 향상
+      const queryIsProcessed = isProcessedProduct(cleanedQuery)
       const PROC_PENALTY = 0.3
       const adjusted = (name: string, baseRatio: number) =>
         !queryIsProcessed && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
       results.sort((a, b) => {
-        const aR = adjusted(a.product_name, getTokenMatchRatio(query, a.product_name))
-        const bR = adjusted(b.product_name, getTokenMatchRatio(query, b.product_name))
+        const aR = adjusted(a.product_name, getTokenMatchRatio(cleanedQuery, a.product_name))
+        const bR = adjusted(b.product_name, getTokenMatchRatio(cleanedQuery, b.product_name))
         if (aR !== bR) return bR - aR
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       })
