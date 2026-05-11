@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateEmbedding } from '@/lib/embedding'
-import { expandWithSynonyms } from '@/lib/synonyms'
+import { expandWithSynonyms, REVERSE_SYNONYMS } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
 import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery, tokenize } from '@/lib/token-match'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
@@ -61,8 +61,29 @@ export async function GET(request: NextRequest) {
     const meaningfulCleanTokens = cleanTokens.filter(
       (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
     )
-    const expandKeyword =
+    // (2026-05-12) 합성어 안의 식자재 키워드 추출
+    // 예: "햇살가득고춧가루" → suffix "고춧가루" 식별 → expand("고춧가루") 동의어 그룹
+    //     "냉동참기름" → suffix "참기름" 식별
+    // REVERSE_SYNONYMS의 키 중 가장 긴 prefix/suffix 매치를 찾음 (4자+ 토큰만)
+    let expandKeyword =
       meaningfulCleanTokens.length === 1 ? meaningfulCleanTokens[0] : forKeyword
+    if (meaningfulCleanTokens.length === 1 && meaningfulCleanTokens[0].length >= 4) {
+      const token = meaningfulCleanTokens[0]
+      let bestKey: string | null = null
+      let bestLen = 0
+      for (const key of Object.keys(REVERSE_SYNONYMS)) {
+        if (key.length >= 2 && key.length > bestLen) {
+          // 토큰 안에 식자재 키워드가 substring으로 포함되면 후보 (prefix/suffix 우선)
+          if (token === key || token.endsWith(key) || token.startsWith(key)) {
+            bestLen = key.length
+            bestKey = key
+          }
+        }
+      }
+      if (bestKey && bestKey !== token) {
+        expandKeyword = bestKey
+      }
+    }
     const synonymTerms = expandWithSynonyms(expandKeyword)
     // (2026-05-11) slice 3 → 8로 확장 — 동의어가 많은 케이스 (멸치 시리즈, 쌀 시리즈 등)에서
     // 5번째 이후 동의어 (예: 국멸치, 다시멸치, 육수용멸치)가 BM25 검색에 포함되어 직접 매칭
