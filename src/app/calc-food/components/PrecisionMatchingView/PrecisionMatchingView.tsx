@@ -19,7 +19,7 @@ import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { PdfModal } from '../SplitView/PdfModal'
-import { formatCurrency, formatNumber } from '@/lib/format'
+import { formatCurrency, formatNumber, formatWeight } from '@/lib/format'
 import {
   parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
@@ -993,7 +993,7 @@ function ExistingItemDetail({
 
         {/* 금액 5분할 한 줄 */}
         <div className="mt-1.5 grid grid-cols-5 gap-1">
-          <FinanceCardCompact label="단위중량" value={existingWeightG ? `${formatNumber(existingWeightG)}g` : '-'} />
+          <FinanceCardCompact label="단위중량" value={formatWeight(existingWeightG)} />
           <FinanceCardCompact
             label="발주"
             value={`${formatNumber(item.extracted_quantity)} ${item.extracted_unit ?? 'EA'}`}
@@ -1022,11 +1022,11 @@ function ExistingItemDetail({
           <div className="mt-1.5 flex items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1 ring-1 ring-amber-200">
             <span className="text-[11px] font-semibold text-amber-700">총 발주량</span>
             <span className="font-mono text-xs text-gray-700">
-              {formatNumber(existingWeightG)}g × {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
+              {formatWeight(existingWeightG)} × {formatNumber(item.extracted_quantity)} {item.extracted_unit ?? 'EA'}
             </span>
             <span className="text-xs text-gray-400">=</span>
             <span className="text-sm font-bold text-amber-900">
-              {formatNumber(existingWeightG * item.extracted_quantity)}g
+              {formatWeight(existingWeightG * item.extracted_quantity)}
             </span>
           </div>
         )}
@@ -1191,6 +1191,25 @@ function ShinsegaeMatching({
     existingWeightG && existingWeightG > 0 && unitWeightG > 0 && item.extracted_quantity > 0
   )
 
+  // (2026-05-11) 자동 환산 추천도 — 정수배 차이면 강한 추천, 현재 quantity와 다르면 prominent
+  const autoQuantitySuggestion = useMemo(() => {
+    if (!canAutoQuantity || !existingWeightG || !unitWeightG) return null
+    const total = existingWeightG * item.extracted_quantity
+    const exact = total / unitWeightG
+    if (exact <= 0) return null
+    const rounded = Math.round(exact)
+    const isInteger = Math.abs(exact - rounded) / exact < 0.01
+    const ratioCurrent = (unitWeightG * quantity) / total
+    const fourTimesPlus = ratioCurrent < 0.25 || ratioCurrent > 4
+    return {
+      suggested: rounded,
+      isInteger,
+      fourTimesPlus,
+      // strong = 정수배 + 현재 quantity와 다름 + 4배+ 차이 → 즉시 클릭 권장
+      strong: isInteger && rounded !== quantity && fourTimesPlus,
+    }
+  }, [canAutoQuantity, existingWeightG, unitWeightG, item.extracted_quantity, quantity])
+
   // 단가 변경 배지 — previous_price 있으면 변동률 표시 (2026-05-10)
   const priceChange = useMemo(() => {
     const prev = matchDetail?.previous_price
@@ -1260,7 +1279,7 @@ function ShinsegaeMatching({
   const diffs = useMemo(() => {
     const list: { label: string; existing: string; ssg: string }[] = []
     if (existingWeightG && unitWeightG && existingWeightG !== unitWeightG) {
-      list.push({ label: '단위 중량', existing: `${existingWeightG}g`, ssg: `${unitWeightG}g` })
+      list.push({ label: '단위 중량', existing: formatWeight(existingWeightG), ssg: formatWeight(unitWeightG) })
     }
     return list
   }, [existingWeightG, unitWeightG])
@@ -1399,23 +1418,34 @@ function ShinsegaeMatching({
             </div>
 
             {/* 자동 환산 도우미 — 검수 총량 ÷ 신세계 단위중량 = 발주수량 (2026-05-10) */}
+            {/* (2026-05-11) strong 추천 시 pulse 애니메이션 + 진한 색상 */}
             {canAutoQuantity && (
               <div className="mt-1.5 flex items-center justify-end gap-2 text-[11px] text-gray-500">
                 <span>
                   총량 환산 시 발주수량:{' '}
                   <strong className="font-mono text-gray-800">
-                    {Math.max(
+                    {autoQuantitySuggestion?.suggested ?? Math.max(
                       1,
                       Math.round((existingWeightG! * item.extracted_quantity) / unitWeightG),
                     )}{' '}
                     {packUnit}
                   </strong>
+                  {autoQuantitySuggestion?.strong && (
+                    <span className="ml-1 rounded bg-red-100 px-1 py-0.5 text-[10px] font-bold text-red-700">
+                      ⚠ 4배+ 차이 — 환산 권장
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
                   onClick={handleAutoQuantity}
-                  className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-                  title={`검수 총량(${formatNumber(existingWeightG! * item.extracted_quantity)}g) ÷ 신세계 단위중량(${formatNumber(unitWeightG)}g)`}
+                  className={cn(
+                    'rounded border px-2 py-0.5 text-[11px] font-semibold',
+                    autoQuantitySuggestion?.strong
+                      ? 'animate-pulse border-blue-500 bg-blue-600 text-white shadow ring-2 ring-blue-300 hover:bg-blue-700'
+                      : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100',
+                  )}
+                  title={`검수 총량(${formatWeight(existingWeightG! * item.extracted_quantity)}) ÷ 신세계 단위중량(${formatWeight(unitWeightG)})`}
                 >
                   📐 자동 환산
                 </button>
@@ -1473,15 +1503,15 @@ function ShinsegaeMatching({
                     총 발주량
                   </span>
                   <span className="font-mono text-xs text-gray-700">
-                    {formatNumber(unitWeightG)}g × {formatNumber(quantity)} {packUnit}
+                    {formatWeight(unitWeightG)} × {formatNumber(quantity)} {packUnit}
                   </span>
                   <span className="text-xs text-gray-400">=</span>
                   <span className={cn('text-sm font-bold', matched ? 'text-emerald-900' : 'text-amber-900')}>
-                    {formatNumber(ssgTotalG)}g
+                    {formatWeight(ssgTotalG)}
                   </span>
                   {existingTotalG > 0 && (
                     <span className={cn('ml-auto text-[11px]', matched ? 'text-emerald-700' : 'text-amber-700')}>
-                      {matched ? '✓ 기존과 일치' : `기존 ${formatNumber(existingTotalG)}g 대비 ${ssgTotalG > existingTotalG ? '+' : ''}${formatNumber(ssgTotalG - existingTotalG)}g`}
+                      {matched ? '✓ 기존과 일치' : `기존 ${formatWeight(existingTotalG)} 대비 ${ssgTotalG > existingTotalG ? '+' : ''}${formatWeight(ssgTotalG - existingTotalG)}`}
                     </span>
                   )}
                 </div>
