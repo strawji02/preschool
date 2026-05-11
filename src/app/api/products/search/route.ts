@@ -271,6 +271,8 @@ export async function GET(request: NextRequest) {
       }
       for (const ilikeKw of ilikeTargets) {
         try {
+          // (2026-05-11) limit 40 → 200 — '쌀'/'무'같이 흔한 substring은 90건+ 후보 존재
+          // 40개 fetch 시 양곡 후보(product_code 늦은 쪽)가 누락되는 문제
           const { data: likeData } = await supabase
             .from('products')
             .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
@@ -278,7 +280,7 @@ export async function GET(request: NextRequest) {
             .or('is_active.eq.true,is_active.is.null')
             .or('is_food.eq.true,is_food.is.null')
             .ilike('product_name', `%${ilikeKw}%`)
-            .limit(40)
+            .limit(200)
           if (likeData && likeData.length > 0) {
             const seen = new Set(results.map((p) => p.id))
             const likeResults: RpcResult[] = likeData
@@ -330,7 +332,8 @@ export async function GET(request: NextRequest) {
               .or('is_active.eq.true,is_active.is.null')
               .or('is_food.eq.true,is_food.is.null')
               .or(orFilter)
-              .limit(broad ? 60 : 30)
+              // (2026-05-11) limit 상향 — '쌀'/'무'같이 흔한 substring은 90건+ 후보 존재
+              .limit(broad ? 100 : 80)
             if (broadData && broadData.length > 0) {
               const seen = new Set(results.map((p) => p.id))
               const broadResults: RpcResult[] = broadData
