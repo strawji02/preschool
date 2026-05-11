@@ -141,7 +141,9 @@ export async function GET(request: NextRequest) {
       // 1) 마지막 어절 (예: "이츠웰 신선한계란" → "신선한계란")
       // 2) 마지막 어절의 suffix 2~3자 (한국어 합성어 분해, 예: "신선한계란" → "계란")
       // 3) extractCoreKeyword
-      const tokens = query.trim().split(/\s+/).filter((t) => t.length >= 2)
+      // (2026-05-11) cleanedQuery 사용 — raw에는 '팝콘치킨(약6g*(166±5)입' 같은 노이즈 토큰이 섞여
+      // BM25 fallback이 무의미한 키워드로 검색 → 정답 후보 못 찾음
+      const tokens = cleanedQuery.split(/\s+/).filter((t) => t.length >= 2)
       const candidateKws: string[] = []
       // brand/modifier 제외한 의미있는 토큰만 fallback 후보로 (식자재명만)
       // "삼승 프리미엄 닭다리살(1등급) 덩어리" → ["닭다리살"]
@@ -150,13 +152,13 @@ export async function GET(request: NextRequest) {
       )
       if (meaningfulTokens.length > 0) {
         for (const t of meaningfulTokens) {
-          if (t.length >= 2 && t !== query) candidateKws.push(t)
+          if (t.length >= 2 && t !== cleanedQuery) candidateKws.push(t)
         }
       }
       // 마지막 어절 fallback (의미있는 토큰이 없을 때만)
       if (candidateKws.length === 0 && tokens.length > 0) {
         const lastTok = tokens[tokens.length - 1]
-        if (lastTok.length >= 2 && lastTok !== query) candidateKws.push(lastTok)
+        if (lastTok.length >= 2 && lastTok !== cleanedQuery) candidateKws.push(lastTok)
       }
       // 한국어 합성어 suffix/prefix 분해 (각 의미있는 토큰의)
       const subjectTok = meaningfulTokens.length > 0 ? meaningfulTokens[meaningfulTokens.length - 1] : tokens[tokens.length - 1]
@@ -184,8 +186,8 @@ export async function GET(request: NextRequest) {
           if (!candidateKws.includes(prefix)) candidateKws.push(prefix)
         }
       }
-      const coreKw = extractCoreKeyword(query)
-      if (coreKw && coreKw !== query && coreKw.length >= 2 && !candidateKws.includes(coreKw)) {
+      const coreKw = extractCoreKeyword(cleanedQuery)
+      if (coreKw && coreKw !== cleanedQuery && coreKw.length >= 2 && !candidateKws.includes(coreKw)) {
         candidateKws.push(coreKw)
       }
       // fallback에서는 충분히 많이 가져오기 (정확한 매칭이 limit 밖에 있으면 누락 — 최종 sort 후 slice)
