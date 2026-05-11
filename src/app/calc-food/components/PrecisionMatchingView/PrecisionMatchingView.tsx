@@ -2091,16 +2091,10 @@ function CandidateCard({
               </h4>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1">
-              {/* (2026-05-11) 신세계 코드 강조 chip — 3곳에서 동일 스타일로 통일 */}
-              {candidate.product_code && (
-                <span
-                  className={cn(
-                    'inline-flex items-center rounded px-1.5 py-0 font-mono text-[11px] font-bold',
-                    isSelected
-                      ? 'bg-blue-600 text-white ring-1 ring-blue-700'
-                      : 'bg-blue-100 text-blue-700',
-                  )}
-                >
+              {/* (2026-05-11) 신세계 코드 강조 chip — 현재 매칭된 후보만 표시 (사용자 피드백 반영) */}
+              {/* 일반 후보는 코드 숨김 — 검수자가 매칭/컨펌 시점에만 코드 인지 */}
+              {candidate.product_code && isSelected && (
+                <span className="inline-flex items-center rounded bg-blue-600 px-1.5 py-0 font-mono text-[11px] font-bold text-white ring-1 ring-blue-700">
                   #{candidate.product_code}
                 </span>
               )}
