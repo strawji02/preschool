@@ -143,22 +143,27 @@ export async function GET(request: NextRequest) {
       // 3) extractCoreKeyword
       // (2026-05-11) cleanedQuery 사용 — raw에는 '팝콘치킨(약6g*(166±5)입' 같은 노이즈 토큰이 섞여
       // BM25 fallback이 무의미한 키워드로 검색 → 정답 후보 못 찾음
-      const tokens = cleanedQuery.split(/\s+/).filter((t) => t.length >= 2)
+      // 1자 한국어 토큰 (쌀/무/콩/팥/파)도 식자재 핵심이므로 보존
+      const tokens = cleanedQuery
+        .split(/\s+/)
+        .filter((t) => t.length >= 2 || /^[가-힣]$/.test(t))
       const candidateKws: string[] = []
       // brand/modifier 제외한 의미있는 토큰만 fallback 후보로 (식자재명만)
       // "삼승 프리미엄 닭다리살(1등급) 덩어리" → ["닭다리살"]
       const meaningfulTokens = tokens.filter(
         (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
       )
+      // (2026-05-11) 1자 한국어 식자재 토큰 (쌀/무/콩/팥/파)도 candidateKw로 허용
+      const validKwLen = (t: string) => t.length >= 2 || /^[가-힣]$/.test(t)
       if (meaningfulTokens.length > 0) {
         for (const t of meaningfulTokens) {
-          if (t.length >= 2 && t !== cleanedQuery) candidateKws.push(t)
+          if (validKwLen(t) && t !== cleanedQuery) candidateKws.push(t)
         }
       }
       // 마지막 어절 fallback (의미있는 토큰이 없을 때만)
       if (candidateKws.length === 0 && tokens.length > 0) {
         const lastTok = tokens[tokens.length - 1]
-        if (lastTok.length >= 2 && lastTok !== cleanedQuery) candidateKws.push(lastTok)
+        if (validKwLen(lastTok) && lastTok !== cleanedQuery) candidateKws.push(lastTok)
       }
       // 한국어 합성어 suffix/prefix 분해 (각 의미있는 토큰의)
       const subjectTok = meaningfulTokens.length > 0 ? meaningfulTokens[meaningfulTokens.length - 1] : tokens[tokens.length - 1]
@@ -224,7 +229,8 @@ export async function GET(request: NextRequest) {
 
       // ILIKE 직접 쿼리 — RPC가 못 가져오는 substring 매칭 보강
       // 예: "수수" 검색 → trigram에서 "차수수 국내산" 누락 → ILIKE %수수%로 보강
-      if (subjectTok && subjectTok.length >= 2) {
+      // (2026-05-11) 1자 한국어 식자재 (쌀/무/콩/팥/파)도 ILIKE fallback 허용
+      if (subjectTok && (subjectTok.length >= 2 || /^[가-힣]$/.test(subjectTok))) {
         try {
           // GENERIC_MODIFIERS 제거된 핵심어로 ILIKE
           let coreSearch = subjectTok
@@ -232,7 +238,7 @@ export async function GET(request: NextRequest) {
             if (coreSearch.startsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(m.length)
             if (coreSearch.endsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(0, coreSearch.length - m.length)
           }
-          if (coreSearch.length >= 2) {
+          if (coreSearch.length >= 2 || /^[가-힣]$/.test(coreSearch)) {
             const { data: likeData } = await supabase
               .from('products')
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')

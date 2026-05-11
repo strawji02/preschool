@@ -1666,6 +1666,10 @@ function CandidatesAndSearchPanel({
   // 기존 업체 품목 원산지 (정렬 가중치용)
   const itemOrigin = useMemo(() => getItemOrigin(item), [item])
 
+  // (2026-05-11) 검수 품목 tax_type — 면세 검수면 면세 후보 우선
+  // 농/축/수산 면세 품목 (쌀/소고기/생선 등)이 과세 가공품과 동일 선상 경쟁하던 문제 해결
+  const itemTaxType: '면세' | '과세' = (item.extracted_tax_amount ?? 0) === 0 ? '면세' : '과세'
+
   const itemIsProcessedRef = isProcessedProduct(cleanedItemName)
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
@@ -1687,7 +1691,13 @@ function CandidatesAndSearchPanel({
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
-        // 3) 마지막 tiebreak — score
+        // 3) tax_type 일치 우선 (면세 검수 → 면세 후보 우선, 2026-05-11)
+        if (a.tax_type && b.tax_type && a.tax_type !== b.tax_type) {
+          if (a.tax_type === itemTaxType) return -1
+          if (b.tax_type === itemTaxType) return 1
+        }
+
+        // 4) 마지막 tiebreak — score
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
@@ -1706,7 +1716,7 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef, itemTaxType])
 
   // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
   const sortedSearchResults = useMemo(() => {
@@ -1725,9 +1735,14 @@ function CandidatesAndSearchPanel({
         const bOriginMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
         if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
       }
+      // tax_type 일치 우선 (2026-05-11)
+      if (a.tax_type && b.tax_type && a.tax_type !== b.tax_type) {
+        if (a.tax_type === itemTaxType) return -1
+        if (b.tax_type === itemTaxType) return 1
+      }
       return (b.match_score ?? 0) - (a.match_score ?? 0)
     })
-  }, [searchResults, cleanedItemName, itemIsProcessedRef, itemOrigin])
+  }, [searchResults, cleanedItemName, itemIsProcessedRef, itemOrigin, itemTaxType])
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) return

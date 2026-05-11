@@ -1244,7 +1244,10 @@ export async function findComparisonMatches(
       }
     }
 
-    // 토큰 + origin 가중치로 후보 재정렬
+    // 검수 품목 tax_type — 면세 검수면 면세 후보 우선 (2026-05-11)
+    const itemTaxType: '면세' | '과세' = (extractedItem?.tax_amount ?? 0) === 0 ? '면세' : '과세'
+
+    // 토큰 + origin + tax_type 가중치로 후보 재정렬
     const reorderByOrigin = (cands: SupplierMatch[]): SupplierMatch[] => {
       return [...cands].sort((a, b) => {
         const aR = getTokenMatchRatio(itemName, a.product_name)
@@ -1256,6 +1259,11 @@ export async function findComparisonMatches(
           const aMatch = normalizeOrigin(a.origin || a.product_name) === itemOrigin
           const bMatch = normalizeOrigin(b.origin || b.product_name) === itemOrigin
           if (aMatch !== bMatch) return aMatch ? -1 : 1
+        }
+        // tax_type 일치 우선 (면세 검수 → 면세 후보 우선, 2026-05-11)
+        if (a.tax_type && b.tax_type && a.tax_type !== b.tax_type) {
+          if (a.tax_type === itemTaxType) return -1
+          if (b.tax_type === itemTaxType) return 1
         }
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       })

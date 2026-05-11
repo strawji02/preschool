@@ -152,7 +152,9 @@ export function tokenize(text: string | undefined | null): string[] {
   return text
     .toLowerCase()
     .split(/[\s,./()※*+|·#\-\[\]]+/)
-    .filter((t) => t.length >= 2)
+    // (2026-05-11) 1자 한국어 음절 토큰 허용 — 쌀/무/콩/팥/파 같은 핵심 식자재명 보존
+    // 영문/숫자 1자는 변별력 없으므로 제외 유지
+    .filter((t) => t.length >= 2 || /^[가-힣]$/.test(t))
 }
 
 /**
@@ -171,19 +173,25 @@ export function getTokenMatchRatio(
   const n = (productName ?? '').toLowerCase().replace(/\s+/g, '')
 
   // Full substring match → 확실
-  // (2026-05-11) 2자 query는 word-boundary 매칭만 허용 — "수수"가 "옥수수전분"의 일부로 매칭되는 문제
+  // (2026-05-11) 1~2자 query는 word-boundary 매칭만 허용 — substring이 너무 광범위
   // 3자 이상은 한국어 합성어 식별력 충분 → 일반 substring 허용
   if (q.length >= 3 && (n.includes(q) || q.includes(n))) return 1.5
   if (q.length === 2 && n.includes(q)) {
     const productTokens = tokenize(productName ?? '')
-    // 정확 토큰 또는 token-prefix만 인정 (token-suffix "옥수수→수수" 등 잘못 매칭 차단)
-    // 예: "수수" → "수수 중국 실온" 토큰 정확 매치 ✅ / "수수가루" prefix 매치 ✅ / "옥수수전분" 거부 ❌
-    // 예: "고추" → "고추장" prefix 매치 ✅
+    // 정확 토큰 또는 token-prefix만 인정 (token-suffix "옥수수→수수" 잘못 매칭 차단)
     const exactOrPrefix = productTokens.some(
       (t) => t === q || (t.length > q.length && t.startsWith(q)),
     )
     if (exactOrPrefix) return 1.5
-    // 그 외 substring 매칭은 거부하고 token-level 매칭으로 fallthrough
+  }
+  // 1자 한국어 query (쌀/무/콩/팥/파 등) — token-exact + token-prefix + token-suffix 모두 허용
+  // 한국어 식자재 합성어 패턴이 광범위 (찹쌀/쌀가루/대파/총각무) → suffix도 안전
+  if (q.length === 1 && /^[가-힣]$/.test(q) && n.includes(q)) {
+    const productTokens = tokenize(productName ?? '')
+    const wordBoundary = productTokens.some(
+      (t) => t === q || (t.length > 1 && (t.startsWith(q) || t.endsWith(q))),
+    )
+    if (wordBoundary) return 1.5
   }
 
   // 토큰 분리 + 공급사 브랜드/일반 수식어 제거 (식자재 메인 명사만 매칭에 사용)
@@ -214,14 +222,21 @@ export function getTokenMatchRatio(
     if (!text.includes(sub)) return false
     return !isNegatedSubstring(text, sub)
   }
-  // (2026-05-11) 2자 토큰은 word-boundary 매칭만 — substring 매칭이 "수수→옥수수" 같은 잘못 매칭 유발
+  // (2026-05-11) 1~2자 토큰은 word-boundary 매칭만 — substring 매칭이 "수수→옥수수" 잘못 매칭 유발
   // 3자 이상은 한국어 합성어 식별력 충분 → 일반 substring 허용
   const productTokensCached = tokenize(productName ?? '')
   const tokenMatchesProduct = (sub: string): boolean => {
     if (!sub) return false
     if (sub.length >= 3) return includesPositive(n, sub)
-    // 2자 토큰: token-exact 또는 token-prefix만 (token-suffix는 잘못 매칭 위험)
     if (!includesPositive(n, sub)) return false
+    // 1자 한국어 토큰: token-exact + token-prefix + token-suffix 모두 허용
+    // (찹쌀/쌀가루/대파/총각무 같은 합성어 매칭 필수)
+    if (sub.length === 1 && /^[가-힣]$/.test(sub)) {
+      return productTokensCached.some(
+        (pt) => pt === sub || (pt.length > 1 && (pt.startsWith(sub) || pt.endsWith(sub))),
+      )
+    }
+    // 2자 토큰: token-exact 또는 token-prefix만 (token-suffix "옥수수→수수" 위험)
     return productTokensCached.some(
       (pt) => pt === sub || (pt.length > sub.length && pt.startsWith(sub)),
     )
