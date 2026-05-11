@@ -867,7 +867,13 @@ function ItemListPanel({
                 </div>
                 {hasMatch && sav !== 0 && (
                   <div className="mt-0.5 flex items-center justify-between text-[10px]">
-                    <span className="text-gray-500 truncate">
+                    <span className="truncate text-gray-500">
+                      {/* (2026-05-11) 컨펌 완료 품목에 신세계 코드 배지 — 검수자가 한눈에 인지 */}
+                      {it.is_confirmed && it.ssg_match?.product_code && (
+                        <span className="mr-1 inline-flex items-center rounded bg-blue-100 px-1 py-0.5 font-mono text-[9px] font-bold text-blue-700">
+                          #{it.ssg_match.product_code}
+                        </span>
+                      )}
                       {it.ssg_match?.product_name?.slice(0, 18) || '신세계 매칭'}
                     </span>
                     <span
