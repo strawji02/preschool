@@ -229,7 +229,9 @@ export async function GET(request: NextRequest) {
           if (filteredFb.length > 0) {
             const existing = new Set(results.map((p) => p.id))
             const newOnes = filteredFb.filter((p) => !existing.has(p.id))
-            results = [...results, ...newOnes].slice(0, fbLimit)
+            // (2026-05-11) slice 제거 — fallback loop 내에서 잘리면 후속 동의어 결과 누락
+            // 최종 sort 후에 limit 적용 (results 끝에 push만)
+            results = [...results, ...newOnes]
           }
         } catch (e) {
           console.warn(`Fallback search "${fbKw}" 실패:`, e)
