@@ -137,8 +137,11 @@ export async function GET(request: NextRequest) {
     // 한국어 식자재명 관행: 브랜드명이 앞에 오고 식자재명이 뒤에 옴
     // (2026-05-11) threshold 0.015 → 0.025로 상향 — '수수' 같은 짧은 query에서
     //              top score가 임계값 살짝 위로 떨어져 fallback 활성화 안 되는 케이스 대응
+    // (2026-05-11) synonyms 동의어 있는 query는 무조건 fallback — '국물용멸치' BM25가 '국물/용' 분리로
+    //              점수 높게 잡혀도 동의어 검색은 항상 필요 (국멸치/다시멸치 등 별도 매칭)
     const topScore = results[0]?.match_score ?? 0
-    if (topScore < 0.025 && searchMode !== 'semantic') {
+    const hasSynonyms = synonymTerms.length > 1 && synonymTerms.some((s) => s.toLowerCase() !== forKeyword.toLowerCase())
+    if ((topScore < 0.025 || hasSynonyms) && searchMode !== 'semantic') {
       // 후보 키워드 (우선순위):
       // 1) 마지막 어절 (예: "이츠웰 신선한계란" → "신선한계란")
       // 2) 마지막 어절의 suffix 2~3자 (한국어 합성어 분해, 예: "신선한계란" → "계란")
