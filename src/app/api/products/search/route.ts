@@ -135,8 +135,10 @@ export async function GET(request: NextRequest) {
     // ── Fallback search (2026-05-04): 결과 점수 너무 낮으면 핵심 키워드로 재검색 ──
     // 예: "이츠웰아이누리 느타리버섯" → 무관한 결과 → 마지막 어절 "느타리버섯"으로 재검색
     // 한국어 식자재명 관행: 브랜드명이 앞에 오고 식자재명이 뒤에 옴
+    // (2026-05-11) threshold 0.015 → 0.025로 상향 — '수수' 같은 짧은 query에서
+    //              top score가 임계값 살짝 위로 떨어져 fallback 활성화 안 되는 케이스 대응
     const topScore = results[0]?.match_score ?? 0
-    if (topScore < 0.015 && searchMode !== 'semantic') {
+    if (topScore < 0.025 && searchMode !== 'semantic') {
       // 후보 키워드 (우선순위):
       // 1) 마지막 어절 (예: "이츠웰 신선한계란" → "신선한계란")
       // 2) 마지막 어절의 suffix 2~3자 (한국어 합성어 분해, 예: "신선한계란" → "계란")
@@ -158,6 +160,14 @@ export async function GET(request: NextRequest) {
       if (meaningfulTokens.length > 0) {
         for (const t of meaningfulTokens) {
           if (validKwLen(t) && t !== cleanedQuery) candidateKws.push(t)
+        }
+      }
+      // (2026-05-11) synonym 동의어도 candidateKws에 추가 — '수수' → '차수수/찰수수' 별도 RPC 검색
+      // BM25/trigram이 한국어 합성어 (차수수, 옥수수전분 등)를 단일 토큰으로 인식 못 하는 케이스 보강
+      for (const syn of synonymTerms) {
+        const synLower = syn.toLowerCase()
+        if (validKwLen(synLower) && synLower !== cleanedQuery.toLowerCase() && !candidateKws.includes(synLower)) {
+          candidateKws.push(synLower)
         }
       }
       // 마지막 어절 fallback (의미있는 토큰이 없을 때만)
