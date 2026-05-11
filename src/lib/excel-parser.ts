@@ -48,7 +48,12 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   origin: ['원산지', '산지', '제조국', '생산지', 'origin', 'country', 'country of origin'],
   // 단위 전용 (PAC, KG, EA 등)
   unit: ['단위', 'unit', 'uom'],
-  quantity: ['수량', '갯수', '개수', 'qty', 'quantity', 'count'],
+  quantity: [
+    '수량', '갯수', '개수', 'qty', 'quantity', 'count',
+    // (2026-05-11) 거래명세표 다양한 표기 추가 — 사용자 거래명세표 "주문량" 컬럼 케이스
+    '주문량', '발주량', '주문수량', '발주수량', '주문', '발주',
+    '출고량', '출고수량', '배송량', '납품량', '납품수량',
+  ],
   unit_price: ['단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행'],
   // 세액 포함 최종 총액 (최우선)
   total_price: ['총액', '총계', '합계', '최종금액', 'grand_total', 'total_amount', 'total_price'],
@@ -189,7 +194,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       const spec = specIdx !== -1 ? String(row[specIdx] || '').trim() : undefined
       const origin = originIdx !== -1 ? String(row[originIdx] || '').trim() : undefined
       const unit = unitIdx !== -1 ? String(row[unitIdx] || '').trim() : undefined
-      const quantity = qtyIdx !== -1 ? parseNumber(row[qtyIdx]) : 1
+      let quantity = qtyIdx !== -1 ? parseNumber(row[qtyIdx]) : 1
       const unitPrice = unitPriceIdx !== -1 ? parseNumber(row[unitPriceIdx]) : 0
 
       // 총액(세액 포함) 우선 추출:
@@ -201,6 +206,15 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       const taxAmount = taxIdx !== -1 ? parseNumber(row[taxIdx]) : 0
       const explicitTotal = totalPriceIdx !== -1 ? parseNumber(row[totalPriceIdx]) : 0
       const fallbackAmount = amountIdx !== -1 ? parseNumber(row[amountIdx]) : 0
+
+      // (2026-05-11) 수량 안전망 — quantity 컬럼 미검출(default 1) + supply/unit_price 정수비 일치 시 역산
+      // 예: '주문량' 같은 미등록 헤더로 qtyIdx=-1 → default 1 → supply 28140, unit_price 9380 → ratio 3.0 → quantity=3 보정
+      if (qtyIdx === -1 && unitPrice > 0 && supplyAmount > 0) {
+        const ratio = supplyAmount / unitPrice
+        if (Number.isFinite(ratio) && ratio > 0 && Math.abs(ratio - Math.round(ratio)) < 0.01) {
+          quantity = Math.round(ratio)
+        }
+      }
 
       let totalPrice = 0
       if (explicitTotal > 0) {
