@@ -222,18 +222,14 @@ export async function GET(request: NextRequest) {
           })
           const fb = (fbData as RpcResult[] | null) ?? []
           const filteredFb = supplier ? fb.filter((p) => p.supplier === supplier) : fb
-          const fbTopScore = filteredFb[0]?.match_score ?? 0
-          // fallback 결과를 항상 누적 (>= 비교) — 토큰 매칭 sort에서 정확한 매칭이 위로 가도록
-          // 예: "수수(상품)" → 1차에 "차수수 국내산" 없어도 "수수" fallback에서 가져와 누적
-          if (fbTopScore >= topScore && filteredFb.length > 0) {
-            // fallback 결과 누적 (sort 전이라 fbLimit으로 자르기)
-            const seen = new Set(filteredFb.map((p) => p.id))
-            results = [
-              ...filteredFb,
-              ...results.filter((p) => !seen.has(p.id)),
-            ].slice(0, fbLimit)
-            console.log(`  [Search] Fallback applied: "${query}" → "${fbKw}" (score ${topScore.toFixed(4)} → ${fbTopScore.toFixed(4)})`)
-            // ⚠️ break 제거 — 모든 fallback 후보 시도해서 결과 누적 (예: 칼집비엔나 → 비엔나 + 칼집 둘 다)
+          // (2026-05-11) fallback 결과 무조건 누적 — score 비교 제거
+          // 동의어 fallback의 경우 BM25 score가 원본 query보다 낮을 수 있지만 토큰 매칭에는 적절
+          // (예: "국물용멸치" → "국멸치" 동의어 검색 점수 낮아도 토큰 ratio 1.5로 정렬 상위)
+          // 최종 sort에서 ratio로 정렬되므로 누적 후 sort에 위임
+          if (filteredFb.length > 0) {
+            const existing = new Set(results.map((p) => p.id))
+            const newOnes = filteredFb.filter((p) => !existing.has(p.id))
+            results = [...results, ...newOnes].slice(0, fbLimit)
           }
         } catch (e) {
           console.warn(`Fallback search "${fbKw}" 실패:`, e)
