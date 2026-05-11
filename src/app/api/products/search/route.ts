@@ -55,8 +55,10 @@ export async function GET(request: NextRequest) {
     // Synonym expansion for better search recall
     const { forKeyword } = dualNormalize(cleanedQuery)
     const synonymTerms = expandWithSynonyms(forKeyword)
+    // (2026-05-11) slice 3 → 8로 확장 — 동의어가 많은 케이스 (멸치 시리즈, 쌀 시리즈 등)에서
+    // 5번째 이후 동의어 (예: 국멸치, 다시멸치, 육수용멸치)가 BM25 검색에 포함되어 직접 매칭
     const expandedQuery = synonymTerms.length > 1
-      ? synonymTerms.slice(0, 3).join(' ')
+      ? synonymTerms.slice(0, 8).join(' ')
       : forKeyword
 
     let results: RpcResult[] = []
