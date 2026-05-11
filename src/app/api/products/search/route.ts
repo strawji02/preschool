@@ -294,20 +294,34 @@ export async function GET(request: NextRequest) {
       // ── broad search (manual search 전용) ──
       // 사용자가 spec/origin/category/품목군/협력사 키워드로 검색하는 경우 매칭 (예: "찌게용", "국내산", "주식회사명천")
       // 자동 매칭은 사용 X (의미적 매칭이 우선)
-      if (broad) {
+      // (2026-05-11) synonym 있는 query에서도 broad search 활성화 — 동의어 ILIKE 보장
+      const shouldBroadSearch = broad || hasSynonyms
+      if (shouldBroadSearch) {
         try {
-          const q = query.trim()
-          if (q.length >= 2) {
+          // synonym 있으면 각 동의어로 product_name ILIKE — 가장 확실한 매칭 보장
+          const broadTargets: string[] = [query.trim()]
+          if (hasSynonyms) {
+            for (const syn of synonymTerms) {
+              const sl = syn.toLowerCase()
+              if (sl !== forKeyword.toLowerCase() && sl.length >= 2 && !broadTargets.includes(sl)) {
+                broadTargets.push(sl)
+              }
+            }
+          }
+          for (const bq of broadTargets) {
+            if (bq.length < 2 && !/^[가-힣]$/.test(bq)) continue
+            // broad=true (manual search)이면 다중 필드 ILIKE, 아니면 product_name만 (성능)
+            const orFilter = broad
+              ? `product_name.ilike.%${bq}%,spec_raw.ilike.%${bq}%,origin.ilike.%${bq}%,origin_detail.ilike.%${bq}%,category.ilike.%${bq}%,subcategory.ilike.%${bq}%,supplier_partner.ilike.%${bq}%`
+              : `product_name.ilike.%${bq}%`
             const { data: broadData } = await supabase
               .from('products')
               .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
               .eq('supplier', supplier ?? 'SHINSEGAE')
               .or('is_active.eq.true,is_active.is.null')
-              .or('is_food.eq.true,is_food.is.null') // 비식자재 제외 (2026-05-11)
-              .or(
-                `product_name.ilike.%${q}%,spec_raw.ilike.%${q}%,origin.ilike.%${q}%,origin_detail.ilike.%${q}%,category.ilike.%${q}%,subcategory.ilike.%${q}%,supplier_partner.ilike.%${q}%`,
-              )
-              .limit(60)
+              .or('is_food.eq.true,is_food.is.null')
+              .or(orFilter)
+              .limit(broad ? 60 : 30)
             if (broadData && broadData.length > 0) {
               const seen = new Set(results.map((p) => p.id))
               const broadResults: RpcResult[] = broadData
@@ -320,7 +334,7 @@ export async function GET(request: NextRequest) {
                   spec_quantity: p.spec_quantity as number | null,
                   spec_unit: p.spec_unit as string | null,
                   supplier: p.supplier as string,
-                  match_score: 0.0005, // 가장 낮은 점수 — 토큰 정렬에서 product_name 매칭 우선
+                  match_score: 0.0005,
                 }))
               results = [...results, ...broadResults]
             }
