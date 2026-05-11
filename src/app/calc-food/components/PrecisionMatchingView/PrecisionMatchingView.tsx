@@ -1733,10 +1733,10 @@ function CandidatesAndSearchPanel({
     if (!q.trim()) return
     setSearching(true)
     try {
-      // broad=true: 다중 필드 검색 (spec/origin/category/subcategory/협력사)
+      // broad=true: 다중 필드 검색 (spec/origin/category/subcategory/협력사) — limit 50 (사용자가 모두 보기 위함)
       // limit=30: 다양한 결과 수집 후 토큰 정렬에서 best 위로
       const res = await fetch(
-        `/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30&broad=true`,
+        `/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=50&broad=true`,
       )
       const data = await res.json()
       if (data.success && Array.isArray(data.products)) {
@@ -1852,14 +1852,19 @@ function CandidatesAndSearchPanel({
           </div>
         </div>
         {(searching || searchResults.length > 0) && (
-          <div className="max-h-48 overflow-y-auto border-t border-gray-700 p-2">
+          <div className="max-h-[480px] overflow-y-auto border-t border-gray-700 p-2">
             {searching && (
               <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-gray-400">
                 <Loader2 size={12} className="animate-spin" /> 검색 중…
               </div>
             )}
+            {!searching && searchResults.length > 0 && (
+              <div className="px-1 pb-1.5 text-[11px] text-gray-400">
+                총 {sortedSearchResults.length}개 결과 (스크롤하여 모두 보기)
+              </div>
+            )}
             <div className="space-y-1.5">
-              {sortedSearchResults.slice(0, 8).map((r) => {
+              {sortedSearchResults.map((r) => {
                 const pk = computeShinsegaePerKg(
                   r.standard_price,
                   { quantity: r.spec_quantity, unit: r.spec_unit },
