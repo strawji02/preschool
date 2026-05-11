@@ -310,6 +310,33 @@ export function getTokenMatchRatio(
       matched += 1
       continue
     }
+    // (2026-05-12) 합성어 안의 식자재 키워드 동의어 매칭
+    // 예: "햇살가득고춧가루" → suffix "고춧가루" → expand에 "고추분" → product에 "고추분" 매치
+    //     "냉동참기름" → suffix "참기름" → 동일 식자재
+    if (t.length >= 4) {
+      let compoundSynMatched = false
+      // suffix 우선 (식자재 본질은 보통 끝에 위치)
+      for (let len = Math.min(t.length - 1, 6); len >= 2; len--) {
+        const sub = t.slice(t.length - len)
+        if (sub.length < 2) continue
+        if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
+        const subSyns = expandWithSynonyms(sub)
+        if (subSyns.length > 1) {
+          for (const syn of subSyns) {
+            const synL = syn.toLowerCase()
+            if (synL !== sub.toLowerCase() && synL.length >= 2 && tokenMatchesProduct(synL)) {
+              compoundSynMatched = true
+              break
+            }
+          }
+        }
+        if (compoundSynMatched) break
+      }
+      if (compoundSynMatched) {
+        matched += 1
+        continue
+      }
+    }
     // 4자 이상 토큰: 한국어 합성어 prefix/suffix 부분 매칭
     // 점수 = 매칭된 길이 / 전체 토큰 길이 (긴 부분 매칭이 더 강한 신호)
     // 예: "얼갈이배추" (5자) vs "얼갈이 국내산" → prefix 3자 매칭 → 3/5=0.6
