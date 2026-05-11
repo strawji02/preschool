@@ -55,7 +55,14 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
 export function cleanProductQuery(q: string): string {
   if (!q) return ''
   let s = q
-  s = s.replace(/\([^)]*\)/g, ' ')                              // 괄호 안 메타
+  // (2026-05-11) 중첩 괄호 처리 — "(약6g*(166±5)입 1Kg/EA)"같은 다중 괄호 케이스
+  // 안쪽부터 반복 제거 (최대 5회 반복으로 무한 루프 방지)
+  for (let i = 0; i < 5; i++) {
+    const next = s.replace(/\([^()]*\)/g, ' ')
+    if (next === s) break
+    s = next
+  }
+  s = s.replace(/[()]/g, ' ')                                   // 짝 안 맞는 단독 괄호 제거
   s = s.replace(/Wn\s*※[^\s,)]*/gi, ' ')                        // OCR Wn※국내산
   s = s.replace(/[※]/g, ' ')                                    // ※ 단독
   s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개
