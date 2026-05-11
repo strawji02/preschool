@@ -17,6 +17,8 @@ export const SUPPLIER_BRANDS: Set<string> = new Set([
   '효성', '효성어묵', '삼승', '에쓰푸드', '면사랑', '하림', '체리부로',
   '진주햄', '송학식품', '평화식품', '동성식품', '사조오양', '진주햄',
   '예소담', '뚜레반', '담터', '맛뜨락', '칠갑농산', '마차촌', '굿초이스',
+  // 추가 브랜드 (2026-05-12)
+  '크레잇', '롯데제과', '그린베이크', '백두농산식품', '에쓰푸드',
 ])
 
 /**
@@ -313,6 +315,7 @@ export function getTokenMatchRatio(
     // (2026-05-12) 합성어 안의 식자재 키워드 동의어 매칭
     // 예: "햇살가득고춧가루" → suffix "고춧가루" → expand에 "고추분" → product에 "고추분" 매치
     //     "냉동참기름" → suffix "참기름" → 동일 식자재
+    //     "미니크리스피핫도그" → suffix "핫도그" → product에 "핫도그" → full match
     if (t.length >= 4) {
       let compoundSynMatched = false
       // suffix 우선 (식자재 본질은 보통 끝에 위치)
@@ -322,9 +325,11 @@ export function getTokenMatchRatio(
         if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
         const subSyns = expandWithSynonyms(sub)
         if (subSyns.length > 1) {
+          // 1) sub 자체 또는 동의어가 product에 매칭되면 full match
+          //    (sub이 등록된 식자재 표준어 → 합성어의 본질로 인정)
           for (const syn of subSyns) {
             const synL = syn.toLowerCase()
-            if (synL !== sub.toLowerCase() && synL.length >= 2 && tokenMatchesProduct(synL)) {
+            if (synL.length >= 2 && tokenMatchesProduct(synL)) {
               compoundSynMatched = true
               break
             }
