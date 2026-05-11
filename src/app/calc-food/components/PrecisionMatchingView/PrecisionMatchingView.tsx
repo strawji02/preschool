@@ -1766,6 +1766,27 @@ function CandidatesAndSearchPanel({
   // 농/축/수산 면세 품목 (쌀/소고기/생선 등)이 과세 가공품과 동일 선상 경쟁하던 문제 해결
   const itemTaxType: '면세' | '과세' = (item.extracted_tax_amount ?? 0) === 0 ? '면세' : '과세'
 
+  // (2026-05-11) 검수 단위중량 — 단위중량 가까운 후보 우선 정렬용
+  // 예: '쌀 20kg' 검수 → 신세계 20kg 양곡 후보 우선, 1kg 가공품 후순위
+  const itemWeightG =
+    unitToGrams(item.extracted_unit) ??
+    parseSpecToGrams(item.extracted_spec) ??
+    parseSpecToGrams(item.extracted_name) ??
+    specToUnitFallback(item.extracted_spec) ??
+    specToUnitFallback(item.extracted_name) ??
+    0
+  const candWeightOf = (c: SupplierMatch): number => {
+    if (c.spec_quantity == null || !c.spec_unit) return 0
+    const u = c.spec_unit.toUpperCase()
+    if (u === 'KG' || u === 'L') return c.spec_quantity * 1000
+    if (u === 'G' || u === 'ML') return c.spec_quantity
+    return 0
+  }
+  const weightCloseness = (cw: number): number => {
+    if (!itemWeightG || itemWeightG <= 0 || cw <= 0) return 0
+    return Math.min(itemWeightG, cw) / Math.max(itemWeightG, cw)
+  }
+
   const itemIsProcessedRef = isProcessedProduct(cleanedItemName)
   const sortedCandidates = useMemo(() => {
     const list = [...candidates]
@@ -1793,7 +1814,15 @@ function CandidatesAndSearchPanel({
           if (b.tax_type === itemTaxType) return 1
         }
 
-        // 4) 마지막 tiebreak — score
+        // 4) 단위중량 가까움 (2026-05-11) — '쌀 20kg' 검수 → 신세계 20kg 양곡 후보 우선
+        // 검수 단위중량과 후보 단위중량 비율(0~1)이 큰 후보가 위
+        if (itemWeightG > 0) {
+          const aw = weightCloseness(candWeightOf(a))
+          const bw = weightCloseness(candWeightOf(b))
+          if (Math.abs(aw - bw) > 0.1) return bw - aw
+        }
+
+        // 5) 마지막 tiebreak — score
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       }
       if (sortMode === 'price') return (a.standard_price ?? 0) - (b.standard_price ?? 0)
@@ -1812,7 +1841,7 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef, itemTaxType])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef, itemTaxType, itemWeightG])
 
   // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
   const sortedSearchResults = useMemo(() => {
