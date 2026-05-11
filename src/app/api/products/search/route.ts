@@ -239,42 +239,51 @@ export async function GET(request: NextRequest) {
       // ILIKE 직접 쿼리 — RPC가 못 가져오는 substring 매칭 보강
       // 예: "수수" 검색 → trigram에서 "차수수 국내산" 누락 → ILIKE %수수%로 보강
       // (2026-05-11) 1자 한국어 식자재 (쌀/무/콩/팥/파)도 ILIKE fallback 허용
+      // (2026-05-11) synonym 동의어도 ILIKE 직접 검색 — '국물용멸치' → '국멸치/다시멸치' 정확 매칭
+      const ilikeTargets: string[] = []
       if (subjectTok && (subjectTok.length >= 2 || /^[가-힣]$/.test(subjectTok))) {
+        let coreSearch = subjectTok
+        for (const m of GENERIC_MODIFIERS) {
+          if (coreSearch.startsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(m.length)
+          if (coreSearch.endsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(0, coreSearch.length - m.length)
+        }
+        if (coreSearch.length >= 2 || /^[가-힣]$/.test(coreSearch)) ilikeTargets.push(coreSearch)
+      }
+      // synonym 동의어 ILIKE 추가 — 동의어 등록된 query는 각 동의어로도 직접 검색
+      for (const syn of synonymTerms) {
+        const sl = syn.toLowerCase()
+        if (sl !== forKeyword.toLowerCase() && (sl.length >= 2 || /^[가-힣]$/.test(sl)) && !ilikeTargets.includes(sl)) {
+          ilikeTargets.push(sl)
+        }
+      }
+      for (const ilikeKw of ilikeTargets) {
         try {
-          // GENERIC_MODIFIERS 제거된 핵심어로 ILIKE
-          let coreSearch = subjectTok
-          for (const m of GENERIC_MODIFIERS) {
-            if (coreSearch.startsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(m.length)
-            if (coreSearch.endsWith(m) && coreSearch.length > m.length + 1) coreSearch = coreSearch.slice(0, coreSearch.length - m.length)
-          }
-          if (coreSearch.length >= 2 || /^[가-힣]$/.test(coreSearch)) {
-            const { data: likeData } = await supabase
-              .from('products')
-              .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
-              .eq('supplier', supplier ?? 'SHINSEGAE')
-              .or('is_active.eq.true,is_active.is.null') // 단종 제외, 레거시 NULL은 통과
-              .or('is_food.eq.true,is_food.is.null') // 비식자재(용기/조리도구 등) 제외, NULL은 안전망 (2026-05-11)
-              .ilike('product_name', `%${coreSearch}%`)
-              .limit(100)
-            if (likeData && likeData.length > 0) {
-              const seen = new Set(results.map((p) => p.id))
-              const likeResults: RpcResult[] = likeData
-                .filter((p) => !seen.has(p.id as string))
-                .map((p) => ({
-                  id: p.id as string,
-                  product_name: p.product_name as string,
-                  standard_price: p.standard_price as number,
-                  unit_normalized: p.unit_normalized as string,
-                  spec_quantity: p.spec_quantity as number | null,
-                  spec_unit: p.spec_unit as string | null,
-                  supplier: p.supplier as string,
-                  match_score: 0.001, // 낮은 점수 — 토큰 sort로 평가
-                }))
-              results = [...results, ...likeResults]
-            }
+          const { data: likeData } = await supabase
+            .from('products')
+            .select('id, product_name, standard_price, unit_normalized, spec_quantity, spec_unit, supplier')
+            .eq('supplier', supplier ?? 'SHINSEGAE')
+            .or('is_active.eq.true,is_active.is.null')
+            .or('is_food.eq.true,is_food.is.null')
+            .ilike('product_name', `%${ilikeKw}%`)
+            .limit(40)
+          if (likeData && likeData.length > 0) {
+            const seen = new Set(results.map((p) => p.id))
+            const likeResults: RpcResult[] = likeData
+              .filter((p) => !seen.has(p.id as string))
+              .map((p) => ({
+                id: p.id as string,
+                product_name: p.product_name as string,
+                standard_price: p.standard_price as number,
+                unit_normalized: p.unit_normalized as string,
+                spec_quantity: p.spec_quantity as number | null,
+                spec_unit: p.spec_unit as string | null,
+                supplier: p.supplier as string,
+                match_score: 0.001,
+              }))
+            results = [...results, ...likeResults]
           }
         } catch (e) {
-          console.warn('ILIKE fallback 실패:', e)
+          console.warn(`ILIKE fallback "${ilikeKw}" 실패:`, e)
         }
       }
 
