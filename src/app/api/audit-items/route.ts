@@ -14,6 +14,7 @@ interface AddRowBody {
   source_file_name?: string
   extracted_name: string
   extracted_spec?: string
+  extracted_origin?: string
   extracted_unit?: string
   extracted_quantity: number
   extracted_unit_price: number
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
       source_file_name: body.source_file_name ?? null,
       extracted_name: body.extracted_name,
       extracted_spec: body.extracted_spec ?? null,
+      extracted_origin: body.extracted_origin ?? null,
       extracted_unit: body.extracted_unit ?? null,
       extracted_quantity: body.extracted_quantity,
       extracted_unit_price: body.extracted_unit_price,

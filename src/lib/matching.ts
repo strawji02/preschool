@@ -7,7 +7,7 @@ import { generateEmbedding } from '@/lib/embedding'
 import { matchWithFunnel } from '@/lib/funnel/funnel-matcher'
 import type { InvoiceItem } from '@/lib/funnel/excel-parser'
 import type { DBProduct } from '@/lib/funnel/price-cluster'
-import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO, normalizeOrigin } from '@/lib/token-match'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO, normalizeOrigin, recoverOrigin } from '@/lib/token-match'
 
 // Matching thresholds (legacy — used by findMatches; superseded by token-based validation in findComparisonMatches)
 const AUTO_MATCH_THRESHOLD = 0.8
@@ -1222,12 +1222,27 @@ export async function findComparisonMatches(
       }
     }
 
-    // ── 토큰 매칭 + 원산지 가중치 검증 (2026-05-04) ──
+    // ── 토큰 매칭 + 원산지 가중치 검증 (2026-05-04, 2026-05-11 origin 필드 우선) ──
     // hybrid score는 변별력 부족 (0.005~0.05). 토큰 + origin으로 의미있는 매칭 선택.
     // 콩나물 → 파인애플, 국내산 → 중국 같은 부적절 매칭 차단/후순위.
-    const itemOrigin = extractedItem
-      ? normalizeOrigin(`${extractedItem.name} ${extractedItem.spec ?? ''}`)
-      : 'UNKNOWN'
+    //
+    // origin 추출 우선순위 (graceful):
+    //   1) extractedItem.origin (OCR이 별도 필드로 추출 — 가장 정확)
+    //   2) recoverOrigin(name, spec) (fallback heuristic — spec/name 안 키워드 검색)
+    //   3) normalizeOrigin(name + spec) (legacy — 마지막 안전망)
+    let itemOrigin = 'UNKNOWN'
+    if (extractedItem) {
+      if (extractedItem.origin) {
+        itemOrigin = normalizeOrigin(extractedItem.origin)
+      }
+      if (itemOrigin === 'UNKNOWN') {
+        const recovered = recoverOrigin(extractedItem.name, extractedItem.spec)
+        if (recovered) itemOrigin = normalizeOrigin(recovered)
+      }
+      if (itemOrigin === 'UNKNOWN') {
+        itemOrigin = normalizeOrigin(`${extractedItem.name} ${extractedItem.spec ?? ''}`)
+      }
+    }
 
     // 토큰 + origin 가중치로 후보 재정렬
     const reorderByOrigin = (cands: SupplierMatch[]): SupplierMatch[] => {

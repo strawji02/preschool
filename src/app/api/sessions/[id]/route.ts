@@ -157,6 +157,7 @@ export async function GET(
         id: it.id,
         extracted_name: it.extracted_name ?? '',
         extracted_spec: it.extracted_spec ?? undefined,
+        extracted_origin: it.extracted_origin ?? undefined,
         extracted_unit: it.extracted_unit ?? undefined,
         extracted_quantity: Number(it.extracted_quantity ?? 0),
         extracted_unit_price: Number(it.extracted_unit_price ?? 0),

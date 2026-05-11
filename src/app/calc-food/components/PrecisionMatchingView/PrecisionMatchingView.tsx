@@ -25,7 +25,7 @@ import {
 } from '@/lib/unit-conversion'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
-  normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery,
+  normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -157,6 +157,16 @@ function candidateSavings(c: SupplierMatch, item: ComparisonItem, existingTotal:
 
 /** 기존 업체 품목의 원산지 추출 (extracted_name + extracted_spec 둘 다 검사) */
 function getItemOrigin(item: ComparisonItem): string {
+  // (2026-05-11) 우선순위 — extracted_origin > recoverOrigin > legacy 통합 텍스트
+  if (item.extracted_origin) {
+    const norm = normalizeOrigin(item.extracted_origin)
+    if (norm !== 'UNKNOWN') return norm
+  }
+  const recovered = recoverOrigin(item.extracted_name, item.extracted_spec)
+  if (recovered) {
+    const norm = normalizeOrigin(recovered)
+    if (norm !== 'UNKNOWN') return norm
+  }
   return normalizeOrigin(`${item.extracted_name ?? ''} ${item.extracted_spec ?? ''}`)
 }
 

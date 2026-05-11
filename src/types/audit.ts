@@ -45,6 +45,7 @@ export interface ComparisonItem {
   id: string
   extracted_name: string
   extracted_spec?: string
+  extracted_origin?: string          // 원산지 raw (2026-05-11) — 거래명세표 별도 컬럼/spec 합쳐짐/name 포함 모두 허용
   extracted_unit?: string            // 단위 (EA, KG, BOX 등) — 거래명세표 별도 컬럼
   extracted_quantity: number
   extracted_unit_price: number
@@ -123,6 +124,7 @@ export interface ComparisonPageResponse {
 export interface ExtractedItem {
   name: string
   spec?: string
+  origin?: string          // 원산지 raw 텍스트 (2026-05-11 신규). 거래명세표 별도 컬럼/spec 합쳐짐/name 포함/누락 모두 허용
   unit?: string            // 단위 (EA, KG, BOX 등)
   quantity: number
   unit_price: number
@@ -150,6 +152,7 @@ export interface AuditItem {
   file_id?: string
   extracted_name: string
   extracted_spec?: string
+  extracted_origin?: string  // 원산지 raw (2026-05-11 신규)
   extracted_quantity: number
   extracted_unit_price: number
   extracted_total_price?: number

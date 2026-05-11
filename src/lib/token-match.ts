@@ -316,21 +316,61 @@ export function getCommonTokens(...texts: (string | undefined | null)[]): Set<st
 export function normalizeOrigin(text: string | undefined | null): string {
   if (!text) return 'UNKNOWN'
   const t = text.toLowerCase()
-  if (/국내산|한국산|국산|한국|국내제조/.test(t)) return 'KR'
+  // (2026-05-11) "외국산" 체크를 한국 패턴보다 먼저 — "외국"의 "국"이 "한국" substring과 충돌하지 않도록
+  // 또한 구체적 국가는 일반 "수입/외국산"보다 우선 (캐나다 vs 외국산 동시 표기 시 캐나다 우선)
   if (/중국/.test(t)) return 'CN'
   if (/미국|usa/.test(t)) return 'US'
-  if (/호주|aus/.test(t)) return 'AU'
+  if (/호주|aus|오스트레일리아/.test(t)) return 'AU'
   if (/일본|일산/.test(t)) return 'JP'
   if (/러시아|러산/.test(t)) return 'RU'
-  if (/eu|유럽|네덜란드|독일|프랑스|스페인|이태리|이탈리아|벨기에/.test(t)) return 'EU'
+  if (/eu|유럽|네덜란드|독일|프랑스|스페인|이태리|이탈리아|벨기에|덴마크|폴란드/.test(t)) return 'EU'
   if (/베트남/.test(t)) return 'VN'
   if (/태국/.test(t)) return 'TH'
   if (/캐나다/.test(t)) return 'CA'
   if (/말레이시아/.test(t)) return 'MY'
   if (/페루/.test(t)) return 'PE'
   if (/칠레/.test(t)) return 'CL'
-  if (/외국산|수입/.test(t)) return 'IMPORT'
+  if (/뉴질랜드/.test(t)) return 'NZ'
+  if (/멕시코/.test(t)) return 'MX'
+  if (/외국산|수입산|수입/.test(t)) return 'IMPORT'
+  // 한국 체크는 마지막 (외국산/구체국가 패턴이 먼저 매칭)
+  if (/국내산|한국산|국산|국내제조|한국/.test(t)) return 'KR'
   return 'UNKNOWN'
+}
+
+
+/**
+ * 거래명세표 OCR에서 origin 필드가 누락된 경우 spec/name/extra 텍스트에서 origin 키워드 추출
+ * (2026-05-11) Layer 2 fallback heuristic
+ *
+ * @param texts 검사할 텍스트들 (예: [name, spec])
+ * @returns 발견된 origin raw 텍스트 또는 null
+ */
+export function recoverOrigin(...texts: (string | undefined | null)[]): string | null {
+  const combined = texts.filter(Boolean).join(' ').toLowerCase()
+  if (!combined) return null
+  // 우선순위 1: 한국Wn※... 특수 패턴
+  const wnMatch = combined.match(/한국wn\s*※[^\s,)]+/i)
+  if (wnMatch) return wnMatch[0]
+  // 우선순위 2: 구체 국가 (가장 구체적인 표기)
+  const countryPatterns = [
+    /중국산?/, /호주산?|오스트레일리아/, /미국산?|usa/, /캐나다산?/, /베트남산?/,
+    /태국산?/, /뉴질랜드산?/, /칠레산?/, /페루산?/, /일본산?|일산/,
+    /러시아산?|러산/, /스페인산?/, /이태리산?|이탈리아산?/, /프랑스산?/,
+    /독일산?/, /네덜란드산?/, /덴마크산?/, /폴란드산?/, /벨기에산?/,
+    /말레이시아산?/, /멕시코산?/,
+  ]
+  for (const p of countryPatterns) {
+    const m = combined.match(p)
+    if (m) return m[0]
+  }
+  // 우선순위 3: 일반 외국산/수입
+  const importMatch = combined.match(/외국산|수입산|수입/)
+  if (importMatch) return importMatch[0]
+  // 우선순위 4: 국내산/한국산 — 한국 substring 충돌 방지를 위해 가장 마지막
+  const krMatch = combined.match(/국내산|한국산|국내제조|국산/)
+  if (krMatch) return krMatch[0]
+  return null
 }
 
 /**

@@ -11,6 +11,7 @@ export const maxDuration = 60
 interface ExcelItem {
   name: string
   spec?: string
+  origin?: string
   unit?: string
   quantity: number
   unit_price: number
@@ -127,6 +128,7 @@ export async function POST(request: NextRequest) {
           session_id: body.session_id,
           extracted_name: item.name,
           extracted_spec: item.spec,
+          extracted_origin: item.origin,
           extracted_unit: item.unit,
           extracted_quantity: item.quantity,
           extracted_unit_price: item.unit_price,
@@ -181,6 +183,7 @@ export async function POST(request: NextRequest) {
       id: insertedItems?.[index]?.id || '',
       extracted_name: item.dbRecord.extracted_name,
       extracted_spec: item.dbRecord.extracted_spec,
+      extracted_origin: item.dbRecord.extracted_origin,
       extracted_unit: item.dbRecord.extracted_unit,
       extracted_quantity: item.dbRecord.extracted_quantity,
       extracted_unit_price: item.dbRecord.extracted_unit_price,
