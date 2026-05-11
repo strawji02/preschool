@@ -1329,8 +1329,9 @@ function ShinsegaeMatching({
             </h3>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-base">
               {matchDetail?.product_code && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-gray-700">
-                  <Tag size={14} /> {matchDetail.product_code}
+                /* (2026-05-11) 신세계 코드 강조 — 검수자가 3곳(좌측 리스트/매칭 자료/AI 추천)에서 동일 코드 즉시 인지 */
+                <span className="inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-100 px-2 py-0.5 font-mono text-base font-bold text-blue-700 shadow-sm">
+                  <Tag size={14} /> #{matchDetail.product_code}
                 </span>
               )}
               {/* 규격 — spec_raw 전체 우선 (예: "1KG, 1.5CM 슬라이스"), 없으면 spec_quantity+spec_unit fallback */}
@@ -2063,7 +2064,7 @@ function CandidateCard({
   if (candidate.category) {
     specParts.push(`· ${candidate.category}${candidate.subcategory ? ` / ${candidate.subcategory}` : ''}`)
   }
-  if (candidate.product_code) specParts.push(`· #${candidate.product_code}`)
+  // (2026-05-11) product_code는 chip 배지로 별도 표시 (specParts에서 제외)
   const specText = specParts.join(' ')
 
   return (
@@ -2090,6 +2091,19 @@ function CandidateCard({
               </h4>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1">
+              {/* (2026-05-11) 신세계 코드 강조 chip — 3곳에서 동일 스타일로 통일 */}
+              {candidate.product_code && (
+                <span
+                  className={cn(
+                    'inline-flex items-center rounded px-1.5 py-0 font-mono text-[11px] font-bold',
+                    isSelected
+                      ? 'bg-blue-600 text-white ring-1 ring-blue-700'
+                      : 'bg-blue-100 text-blue-700',
+                  )}
+                >
+                  #{candidate.product_code}
+                </span>
+              )}
               {isSelected && (
                 <span className="inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
                   현재 매칭
