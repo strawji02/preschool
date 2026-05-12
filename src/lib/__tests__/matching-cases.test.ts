@@ -250,3 +250,19 @@ describe('가공품 키워드 — 곡물/축산/수산/조미료', () => {
     expect(isProcessedProduct('양파분말')).toBe(true)
   })
 })
+
+describe('tax_type 가중치 — 면세 검수 vs 과세 후보 (간편브로컬리 케이스)', () => {
+  it('브로콜리 표준어에 브로컬리 동의어 등록됨 (사용자 보고)', () => {
+    // 신세계 DB는 '브로컬리' 표기(면세 채소)와 '브로콜리' 표기(과세 가공품) 혼재
+    // 검수 query 어느 표기든 모든 후보 매칭되어야
+    expect(expandWithSynonyms('브로콜리')).toContain('브로컬리')
+    expect(expandWithSynonyms('브로컬리')).toContain('브로콜리')
+  })
+
+  it('간편브로컬리 검수 — 면세 채소 브로컬리 후보 ratio 양호', () => {
+    const cleaned = cleanProductQuery('간편브로컬리(컷팅)')
+    // 면세 채소 후보 (브로컬리 표기)
+    expect(getTokenMatchRatio(cleaned, '브로컬리 국내산 실온(냉장 권장)')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '키즈 브로컬리 국내산 상온')).toBeGreaterThanOrEqual(1.0)
+  })
+})

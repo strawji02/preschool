@@ -1193,10 +1193,12 @@ export async function findComparisonMatches(
     if (allCandIds.length > 0) {
       const { data: extras } = await supabase
         .from('products')
-        .select('id, origin, origin_detail, spec_raw, unit_raw, storage_temp, product_code, subcategory, is_active, is_food')
+        .select('id, origin, origin_detail, spec_raw, unit_raw, storage_temp, product_code, subcategory, category, tax_type, is_active, is_food')
         .in('id', allCandIds)
       if (extras && extras.length > 0) {
-        const map = new Map<string, { origin?: string; origin_detail?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string }>()
+        // (2026-05-12) tax_type/category enrichment 추가 — 사용자 화면 sortedCandidates 정렬에서
+        // 면세/과세 가중치 적용을 위해 후보에 tax_type 노출
+        const map = new Map<string, { origin?: string; origin_detail?: string; spec_raw?: string; unit_raw?: string; storage_temp?: string; product_code?: string; subcategory?: string; category?: string; tax_type?: '과세' | '면세' }>()
         const blockedIds = new Set<string>()
         for (const e of extras) {
           if (e.is_active === false || e.is_food === false) {
@@ -1211,6 +1213,8 @@ export async function findComparisonMatches(
             storage_temp: e.storage_temp as string | undefined,
             product_code: e.product_code as string | undefined,
             subcategory: e.subcategory as string | undefined,
+            category: e.category as string | undefined,
+            tax_type: e.tax_type as '과세' | '면세' | undefined,
           })
         }
         cj_candidates = cj_candidates
