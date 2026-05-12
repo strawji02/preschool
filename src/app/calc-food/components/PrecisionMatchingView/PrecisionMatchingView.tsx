@@ -865,25 +865,40 @@ function ItemListPanel({
                   </span>
                   <span className="font-semibold text-gray-900">{formatCurrency(total)}</span>
                 </div>
-                {hasMatch && sav !== 0 && (
-                  <div className="mt-0.5 flex items-center justify-between text-[10px]">
-                    <span className="truncate text-gray-500">
-                      {/* (2026-05-11) 컨펌 완료 품목에 신세계 코드 배지 — 검수자가 한눈에 인지 */}
-                      {it.is_confirmed && it.ssg_match?.product_code && (
-                        <span className="mr-1 inline-flex items-center rounded bg-blue-100 px-1 py-0.5 font-mono text-[9px] font-bold text-blue-700">
-                          #{it.ssg_match.product_code}
-                        </span>
-                      )}
-                      {it.ssg_match?.product_name?.slice(0, 18) || '신세계 매칭'}
-                    </span>
+                {/* (2026-05-12) 매칭 배지 강조 — 신세계 코드+품목명 가독성 개선
+                   - 확정/미확정 모두 표시 (이전: 확정만 코드 배지)
+                   - 코드 배지: 진한 배경 + 흰색 텍스트로 대비 강화
+                   - 품목명: 잘림 18자 → CSS truncate (반응형), 폰트 ↑ */}
+                {hasMatch && it.ssg_match && (
+                  <div className="mt-1 flex items-center gap-1.5 rounded border-l-2 border-blue-400 bg-blue-50/70 px-1.5 py-1">
+                    {it.ssg_match.product_code && (
+                      <span
+                        className={cn(
+                          'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-mono text-[10px] font-bold shadow-sm',
+                          it.is_confirmed
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-amber-500 text-white',
+                        )}
+                      >
+                        #{it.ssg_match.product_code}
+                      </span>
+                    )}
                     <span
-                      className={cn(
-                        'rounded px-1 py-0.5 font-semibold',
-                        isSaving ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700',
-                      )}
+                      className="min-w-0 flex-1 truncate text-[12px] font-medium text-blue-900"
+                      title={it.ssg_match.product_name || ''}
                     >
-                      {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))}
+                      {it.ssg_match.product_name || '신세계 매칭'}
                     </span>
+                    {sav !== 0 && (
+                      <span
+                        className={cn(
+                          'shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold',
+                          isSaving ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700',
+                        )}
+                      >
+                        {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
