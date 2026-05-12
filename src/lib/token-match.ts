@@ -1,4 +1,7 @@
-import { expandWithSynonyms, getStandardTerm } from '@/lib/synonyms'
+import { expandWithSynonyms, getStandardTerm, FOOD_SYNONYMS } from '@/lib/synonyms'
+
+const isRegisteredStandard = (s: string): boolean =>
+  Object.prototype.hasOwnProperty.call(FOOD_SYNONYMS, s)
 
 /**
  * 공급사/브랜드 토큰 — 매칭 변별력 없음 (모든 제품에 등장).
@@ -32,6 +35,9 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
   '저당', '오리지널', '리얼', '담백한', '진한', '깊은', '특제',
   // 시대/스타일 (2026-05-12)
   '옛날', '전통', '수제', '가정식', '엄마손맛',
+  // 풍미/형용 (2026-05-12) — '유자담은' '치즈담은' 같은 검수 풍미 표기
+  '담은', '넣은', '올린', '뿌린', '입힌', '버무린',
+  '유자', '치즈맛', '매콤', '달콤', '매운', '단',
   // 등급/품질 (괄호 안 표기에 자주 등장)
   '1등급', '2등급', '특등급', '상등급', 'a등급',
   '상품', '특품', '대품', '소품', '중품', '하품',
@@ -100,6 +106,10 @@ export function cleanProductQuery(q: string): string {
   // (2026-05-12) '옛날' prefix 분리 + 단독 토큰화 — "옛날자른미역" → "옛날 자른미역"
   // '옛날'은 GENERIC_MODIFIERS 등록 — 식자재 분리 후 매칭 본질에서 제외
   s = s.replace(/옛날([가-힣]{2,})/g, '옛날 $1')
+  // (2026-05-12) 풍미/스타일 prefix 분리 — "유자담은순살" → "유자 담은 순살"
+  // 검수 풍미 표기 (유자/치즈/매콤/달콤 + 담은/넣은/올린) 분리
+  s = s.replace(/(유자|치즈|매콤|달콤|매운|단)([가-힣]{2,})/g, '$1 $2')
+  s = s.replace(/([가-힣]{2,})(담은|넣은|올린|뿌린|입힌|버무린)([가-힣]*)/g, '$1 $2 $3')
   s = s.replace(/\d+\s*%/g, ' ')                                // 100%, 50% 같은 비율 표기 제거
   s = s.replace(/[_]+/g, ' ')                                   // _ 구분자 (예: 국내산_100%)
   s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개
@@ -305,7 +315,8 @@ export function getTokenMatchRatio(
   // (2026-05-11) 1~2자 토큰은 word-boundary 매칭만 — substring 매칭이 "수수→옥수수" 잘못 매칭 유발
   // 3자 이상은 한국어 합성어 식별력 충분 → 일반 substring 허용
   const productTokensCached = tokenize(productName ?? '')
-  const tokenMatchesProduct = (sub: string): boolean => {
+  // strictSuffix: true → 2자 token-suffix 매칭 비활성 (회귀 보호 영역, 예: '전분'→'옥수수전분')
+  const tokenMatchesProduct = (sub: string, opts: { strictSuffix?: boolean } = {}): boolean => {
     if (!sub) return false
     if (sub.length >= 3) return includesPositive(n, sub)
     if (!includesPositive(n, sub)) return false
@@ -316,10 +327,16 @@ export function getTokenMatchRatio(
         (pt) => pt === sub || (pt.length > 1 && (pt.startsWith(sub) || pt.endsWith(sub))),
       )
     }
-    // 2자 토큰: token-exact 또는 token-prefix만 (token-suffix "옥수수→수수" 위험)
-    return productTokensCached.some(
-      (pt) => pt === sub || (pt.length > sub.length && pt.startsWith(sub)),
-    )
+    // 2자 토큰: token-exact + token-prefix + token-suffix 허용 (2026-05-12 강화)
+    // 어종/식자재 2자 명사가 합성어 안에 있는 경우 매칭 — '삼치' → '순살삼치'
+    // strictSuffix=true 영역 (합성어 suffix matching의 self syn 검사)에서는 token-suffix 비허용
+    return productTokensCached.some((pt) => {
+      if (pt === sub) return true
+      if (pt.length <= sub.length) return false
+      if (pt.startsWith(sub)) return true
+      if (opts.strictSuffix) return false
+      return pt.endsWith(sub)
+    })
   }
 
   let matched = 0
@@ -382,11 +399,14 @@ export function getTokenMatchRatio(
             // (2026-05-12) sub의 동의어가 product에 매칭되되 동일 standard term인 경우만 인정
             // 예: sub="고춧가루" → syn="고추분" → 둘 다 standard "고추가루" → 매칭 OK
             //     sub="전분" → syn="옥수수전분" → standard "전분" vs "옥수수전분" → 다름 → 차단
+            // (2026-05-12) self syn(synL === sub)은 strictSuffix=true로 매칭 — token-suffix 비활성화
+            //     '감자전분' suffix '전분' → self syn '전분' token-suffix 매칭 시 '옥수수전분'과 잘못 매칭 → 차단
             const subStandard = getStandardTerm(sub)
             for (const syn of subSyns) {
               const synL = syn.toLowerCase()
               if (synL.length < 2) continue
-              if (!tokenMatchesProduct(synL)) continue
+              const strictSuffix = synL === sub
+              if (!tokenMatchesProduct(synL, { strictSuffix })) continue
               if (getStandardTerm(syn) === subStandard) {
                 compoundSynMatched = true
                 break
