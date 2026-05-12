@@ -326,3 +326,34 @@ describe('민찌/다짐육 동의어 — 종 분리 (2026-05-12)', () => {
     expect(getTokenMatchRatio(cleaned, '카보트그라운드민찌 카보트')).toBeGreaterThanOrEqual(1.0)
   })
 })
+
+describe('종 prefix 매칭 — 돈민찌 검수 (사용자 보고 2026-05-12)', () => {
+  // 사용자 보고: SHINSEGAE 220776 '돈앞다리 국내산 냉동 1KG, 다짐육' 후보 누락
+  // 검수 '돈민찌' 표기 시 product_name에 동의어 없어 매칭 안 됨
+  // fix: t.length>=3 합성어 suffix matching + 종 prefix 충돌 차단
+  it('돈민찌 검수 — 돼지 다짐육 product 매칭 (220776)', () => {
+    const cleaned = cleanProductQuery('돈민찌 1kg')
+    // product name+spec 합쳐서 ratio 계산 (search route와 동일)
+    expect(getTokenMatchRatio(cleaned, '돈앞다리 국내산 냉동 1KG, 다짐육')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '돈뒷다리 국내산 냉동 1KG, 다짐육')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '돈지방 국내산 냉동 1KG, 다짐육')).toBeGreaterThanOrEqual(1.0)
+  })
+
+  it('돈민찌 검수 — cross-종 후보 차단 (한우/우/닭)', () => {
+    const cleaned = cleanProductQuery('돈민찌 1kg')
+    expect(getTokenMatchRatio(cleaned, '한우다짐육 국내산 냉동')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '우민찌 미국 냉동')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '우정육 호주 냉동 1KG, 다짐육')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '닭가슴살 국내산 1KG, 다짐육')).toBe(0)
+  })
+
+  it('한우다짐육 검수 — 한우 후보 매칭, 돼지 후보 무관', () => {
+    const cleaned = cleanProductQuery('한우다짐육 1kg')
+    expect(getTokenMatchRatio(cleaned, '한우다짐육 국내산 냉동')).toBeGreaterThanOrEqual(1.0)
+  })
+
+  it('닭다짐육 검수 — 닭 후보 매칭', () => {
+    const cleaned = cleanProductQuery('닭다짐육 1kg')
+    expect(getTokenMatchRatio(cleaned, '닭가슴살 국내산 1KG, 다짐육')).toBeGreaterThanOrEqual(1.0)
+  })
+})

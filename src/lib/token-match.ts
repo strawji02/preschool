@@ -316,33 +316,55 @@ export function getTokenMatchRatio(
     // 예: "햇살가득고춧가루" → suffix "고춧가루" → expand에 "고추분" → product에 "고추분" 매치
     //     "냉동참기름" → suffix "참기름" → 동일 식자재
     //     "미니크리스피핫도그" → suffix "핫도그" → product에 "핫도그" → full match
-    if (t.length >= 4) {
+    //     "돈민찌" (3자) → suffix "민찌" → expand standard "다짐육" → product '다짐육' 매칭
+    // 종 prefix 충돌 검사 (2026-05-12): 검수 t가 종특화(돈/돼지/우/한우/소/닭)일 때,
+    // product의 자체 표준어 token이 다른 종이면 차단 — '돈민찌' vs '한우다짐육' 회귀 방지
+    if (t.length >= 3) {
+      const getSpecies = (s: string): string | null => {
+        if (s.startsWith('한우')) return 'cow'
+        if (s.startsWith('돼지')) return 'pig'
+        if (s.startsWith('닭')) return 'chicken'
+        if (s.startsWith('돈')) return 'pig'
+        if (s.startsWith('우')) return 'cow'
+        if (s.startsWith('소')) return 'cow'
+        return null
+      }
+      const tSpecies = getSpecies(t)
+      // product에 종특화 token이 있고, t와 종이 다르면 cross-종 매칭 차단
+      // 예: t='돈민찌'(pig) vs product token '한우다짐육'/'우민찌'/'닭가슴살' → 차단
+      const hasConflictingSpecies =
+        tSpecies !== null &&
+        productTokensCached.some((pt) => {
+          if (pt.length < 2) return false
+          const ptSpecies = getSpecies(pt)
+          return ptSpecies !== null && ptSpecies !== tSpecies
+        })
+
       let compoundSynMatched = false
-      // suffix 우선 (식자재 본질은 보통 끝에 위치)
-      for (let len = Math.min(t.length - 1, 6); len >= 2; len--) {
-        const sub = t.slice(t.length - len)
-        if (sub.length < 2) continue
-        if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
-        const subSyns = expandWithSynonyms(sub)
-        if (subSyns.length > 1) {
-          // (2026-05-12) sub의 동의어가 product에 매칭되되 동일 standard term인 경우만 인정
-          // 예: sub="고춧가루" → syn="고추분" → 둘 다 standard "고추가루" → 매칭 OK
-          //     sub="전분" → syn="옥수수전분" → standard "전분" vs "옥수수전분" → 다름 → 차단
-          // 이유: '전분' 일반어 동의어 그룹에 구체 전분(감자/옥수수/고구마)이 포함되어
-          //       '감자전분' 검수가 '옥수수전분' product와 잘못 매칭되는 회귀 방지
-          const subStandard = getStandardTerm(sub)
-          for (const syn of subSyns) {
-            const synL = syn.toLowerCase()
-            if (synL.length < 2) continue
-            if (!tokenMatchesProduct(synL)) continue
-            // standard term이 같아야 동일 식자재로 인정
-            if (getStandardTerm(syn) === subStandard) {
-              compoundSynMatched = true
-              break
+      if (!hasConflictingSpecies) {
+        // suffix 우선 (식자재 본질은 보통 끝에 위치)
+        for (let len = Math.min(t.length - 1, 6); len >= 2; len--) {
+          const sub = t.slice(t.length - len)
+          if (sub.length < 2) continue
+          if (GENERIC_MODIFIERS.has(sub) || SUPPLIER_BRANDS.has(sub)) continue
+          const subSyns = expandWithSynonyms(sub)
+          if (subSyns.length > 1) {
+            // (2026-05-12) sub의 동의어가 product에 매칭되되 동일 standard term인 경우만 인정
+            // 예: sub="고춧가루" → syn="고추분" → 둘 다 standard "고추가루" → 매칭 OK
+            //     sub="전분" → syn="옥수수전분" → standard "전분" vs "옥수수전분" → 다름 → 차단
+            const subStandard = getStandardTerm(sub)
+            for (const syn of subSyns) {
+              const synL = syn.toLowerCase()
+              if (synL.length < 2) continue
+              if (!tokenMatchesProduct(synL)) continue
+              if (getStandardTerm(syn) === subStandard) {
+                compoundSynMatched = true
+                break
+              }
             }
           }
+          if (compoundSynMatched) break
         }
-        if (compoundSynMatched) break
       }
       if (compoundSynMatched) {
         matched += 1
