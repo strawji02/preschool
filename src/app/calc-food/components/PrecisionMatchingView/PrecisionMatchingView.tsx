@@ -1719,10 +1719,18 @@ function CandidatesAndSearchPanel({
       .then((data) => {
         if (cancelled) return
         if (data.success && Array.isArray(data.products)) {
-          const dbIds = new Set(dbCandsAtMount.map((c) => c.id))
           const fresh = data.products as SupplierMatch[]
-          // DB 후보 + 신선한 검색 결과 (중복 제거) → 토큰 정렬 1회로 안정
-          const merged = [...dbCandsAtMount, ...fresh.filter((p) => !dbIds.has(p.id))]
+          const freshMap = new Map(fresh.map((p) => [p.id, p]))
+          // (2026-05-12) DB 저장 후보를 fresh 결과로 enrich
+          // DB 저장 ssg_candidates는 이전 매칭 시점 — tax_type/origin/spec_raw 등 누락 가능
+          // fresh가 같은 id 후보를 갖고 있으면 fresh 데이터로 덮어써 누락 필드 보충
+          const dbIds = new Set(dbCandsAtMount.map((c) => c.id))
+          const enrichedDb = dbCandsAtMount.map((c) => {
+            const f = freshMap.get(c.id)
+            return f ? { ...c, ...f } : c
+          })
+          const newFresh = fresh.filter((p) => !dbIds.has(p.id))
+          const merged = [...enrichedDb, ...newFresh]
           setLiveCandidates(merged)
         } else {
           // API 실패 fallback — DB 후보라도 표시
