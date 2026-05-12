@@ -266,3 +266,63 @@ describe('tax_type 가중치 — 면세 검수 vs 과세 후보 (간편브로컬
     expect(getTokenMatchRatio(cleaned, '키즈 브로컬리 국내산 상온')).toBeGreaterThanOrEqual(1.0)
   })
 })
+
+describe('민찌/다짐육 동의어 — 종 분리 (2026-05-12)', () => {
+  it('돈민찌 표준어 동의어 — 돼지 전용 (일반어 분리)', () => {
+    const syns = expandWithSynonyms('돈민찌')
+    expect(syns).toContain('돈다짐육')
+    expect(syns).toContain('돼지다짐육')
+    expect(syns).toContain('돈육민찌')
+    // 일반어는 별도 표준어로 분리됨 — 종 cross 매칭 방지
+    expect(syns).not.toContain('다짐육')
+    expect(syns).not.toContain('한우다짐육')
+  })
+
+  it('다짐육 표준어 — 종 비특화 일반어', () => {
+    const syns = expandWithSynonyms('다짐육')
+    expect(syns).toContain('민찌')
+    expect(syns).toContain('민찌육')
+    expect(syns).toContain('간고기')
+    expect(syns).toContain('그라운드')
+  })
+
+  it('돈민찌 = 돈다짐육 = 돼지다짐육 (사용자 요청 케이스)', () => {
+    // 사용자: "돈민찌 = 돈다짐육 유사한 내용도 검증해줘"
+    // 셋 다 같은 표준어 '돈민찌'로 묶여야 동의어 매칭 작동
+    expect(expandWithSynonyms('돈민찌')).toEqual(expandWithSynonyms('돈다짐육'))
+    expect(expandWithSynonyms('돈민찌')).toEqual(expandWithSynonyms('돼지다짐육'))
+  })
+
+  it('민찌 = 다짐육 (사용자 요청 케이스)', () => {
+    // 사용자: "민찌, 다짐육은 동의어로 등록해줘"
+    expect(expandWithSynonyms('민찌')).toEqual(expandWithSynonyms('다짐육'))
+    expect(expandWithSynonyms('민찌')).toEqual(expandWithSynonyms('민찌육'))
+    expect(expandWithSynonyms('민찌')).toEqual(expandWithSynonyms('간고기'))
+  })
+
+  it('돈민찌 검수 — 한우다짐육 cross 매칭 차단 (회귀 보호)', () => {
+    // 이전 결함: 돈민찌 표준어에 일반어 '다짐육' 포함 → '한우다짐육' substring 매칭 → 1.5
+    // 수정 후: 종 분리로 동의어 매칭 0
+    const cleaned = cleanProductQuery('돈민찌 1kg')
+    expect(getTokenMatchRatio(cleaned, '한우다짐육 국내산 냉동')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '우민찌 미국 냉동')).toBe(0)
+  })
+
+  it('돈민찌 검수 — 돼지 후보는 정상 매칭', () => {
+    const cleaned = cleanProductQuery('돈민찌 1kg')
+    // 같은 표준어 동의어 매칭
+    expect(getTokenMatchRatio(cleaned, '돈육민찌 국내산')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '돼지다짐육 국내산')).toBeGreaterThanOrEqual(1.0)
+  })
+
+  it('한우 다짐육 검수 — 한우다짐육 substring 매칭', () => {
+    const cleaned = cleanProductQuery('한우 다짐육 냉동')
+    expect(getTokenMatchRatio(cleaned, '한우다짐육 국내산 냉동')).toBeGreaterThanOrEqual(1.0)
+  })
+
+  it('민찌 검수 — 카보트그라운드민찌 합성어 매칭 (그라운드 동의어)', () => {
+    // '그라운드' = 다짐육 동의어 등록 → 합성어 안의 '그라운드' 매칭으로 카보트그라운드민찌 포착
+    const cleaned = cleanProductQuery('민찌')
+    expect(getTokenMatchRatio(cleaned, '카보트그라운드민찌 카보트')).toBeGreaterThanOrEqual(1.0)
+  })
+})
