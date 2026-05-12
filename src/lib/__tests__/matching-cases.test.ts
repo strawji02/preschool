@@ -357,3 +357,28 @@ describe('종 prefix 매칭 — 돈민찌 검수 (사용자 보고 2026-05-12)',
     expect(getTokenMatchRatio(cleaned, '닭가슴살 국내산 1KG, 다짐육')).toBeGreaterThanOrEqual(1.0)
   })
 })
+
+describe('storage prefix 분리 — 냉장한우사태 (사용자 보고 2026-05-12)', () => {
+  // 사용자 보고: 검수 '냉장한우사태' (OCR/Excel 합성) → 추천 후보 전부 돈사태
+  // 원인: '냉장한우사태' 단일 토큰 → BM25 검색에서 '한우사태' product 미매칭
+  //       + species prefix 추출 실패 ('냉장'으로 시작) → 돈사태와 cross-매칭
+
+  it('cleanProductQuery — 냉장/냉동/실온 prefix 분리', () => {
+    expect(cleanProductQuery('냉장한우사태')).toBe('냉장 한우사태')
+    expect(cleanProductQuery('냉동한우사태')).toBe('냉동 한우사태')
+    expect(cleanProductQuery('실온우유')).toBe('실온 우유')
+  })
+
+  it('냉장한우사태 검수 — 한우사태 후보 매칭', () => {
+    const cleaned = cleanProductQuery('냉장한우사태')
+    expect(getTokenMatchRatio(cleaned, '한우사태 국내산 냉장 1KG')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '올바르고반듯한 한우사태 국내산 냉장')).toBeGreaterThanOrEqual(1.0)
+  })
+
+  it('냉장한우사태 검수 — 돈사태보다 한우사태 우선', () => {
+    const cleaned = cleanProductQuery('냉장한우사태')
+    const hanu = getTokenMatchRatio(cleaned, '한우사태 국내산 냉장 1KG')
+    const don = getTokenMatchRatio(cleaned, '돈사태 국내산 냉장 1KG')
+    expect(hanu).toBeGreaterThan(don)
+  })
+})

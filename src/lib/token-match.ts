@@ -70,6 +70,11 @@ export function cleanProductQuery(q: string): string {
   // (2026-05-11) origin 키워드 제거 — extracted_origin 별도 추출로 origin 정보는 보존됨
   // 매칭 ratio 계산에서 "국내산_100%" 같은 노이즈 토큰이 BM25를 망가뜨리는 문제 차단
   s = s.replace(/국내산|한국산|국산|국내제조|수입산|외국산|중국산|호주산|미국산|캐나다산|베트남산|태국산|뉴질랜드산|일본산|러시아산/g, ' ')
+  // (2026-05-12) storage temp prefix 분리 — "냉장한우사태" → "냉장 한우사태"
+  // 검수 OCR/Excel이 보관온도+품목명을 붙여 쓴 경우 단일 토큰이 되어
+  // BM25 검색에서 product의 분리 토큰('한우사태','냉장')과 매칭 안 되는 문제 해결
+  // 또한 합성 토큰의 species prefix 추출 실패 회귀 — '냉장한우사태' startsWith '냉장' → species null
+  s = s.replace(/(냉장|냉동|실온|상온|상태)([가-힣])/g, '$1 $2')
   s = s.replace(/\d+\s*%/g, ' ')                                // 100%, 50% 같은 비율 표기 제거
   s = s.replace(/[_]+/g, ' ')                                   // _ 구분자 (예: 국내산_100%)
   s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개
