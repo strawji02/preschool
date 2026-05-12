@@ -1759,10 +1759,22 @@ function CandidatesAndSearchPanel({
 
   // 토큰 매칭 비율 캐시 (정렬용 + UI 표시용)
   // 표시용은 원본 extracted_name 사용 (사용자가 본 OCR 텍스트와 동일), 정렬용은 cleaned
+  // (2026-05-12) spec_raw 통합 — 가공정보(다짐육/컷팅/슬라이스 등)가 spec_raw에만 있는 경우
+  //   '돈민찌' vs '돈앞다리 국내산 냉동 + spec=1KG, 다짐육' → name 단독 매칭 0이지만
+  //   name+spec 합치면 합성어 suffix matching으로 다짐육 후보 발굴 → ratio 1.0
   const candidateConfidences = useMemo(() => {
     const map = new Map<string, MatchConfidence>()
     for (const c of candidates) {
-      map.set(c.id, getMatchConfidence(cleanedItemName, c.product_name))
+      const name = c.product_name ?? ''
+      const spec = c.spec_raw ?? ''
+      const c1 = getMatchConfidence(cleanedItemName, name)
+      if (!spec) {
+        map.set(c.id, c1)
+        continue
+      }
+      const c2 = getMatchConfidence(cleanedItemName, `${name} ${spec}`)
+      // ratio 큰 쪽 우선
+      map.set(c.id, c2.matchRatio > c1.matchRatio ? c2 : c1)
     }
     return map
   }, [candidates, cleanedItemName])
