@@ -30,6 +30,8 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
   // 수식어
   '프리미엄', '신선한', '친환경', '무항생제', '유기농', '무첨가', '저염',
   '저당', '오리지널', '리얼', '담백한', '진한', '깊은', '특제',
+  // 시대/스타일 (2026-05-12)
+  '옛날', '전통', '수제', '가정식', '엄마손맛',
   // 등급/품질 (괄호 안 표기에 자주 등장)
   '1등급', '2등급', '특등급', '상등급', 'a등급',
   '상품', '특품', '대품', '소품', '중품', '하품',
@@ -92,6 +94,12 @@ export function cleanProductQuery(q: string): string {
   // (2026-05-12) 검수 메타 marker 제거 — DC(Discount Center/도매), VB(Vacuum Bag/진공포장)
   // 식자재명과 무관한 검수 표기. product의 'DC 컵라면' 같은 product line name에는 영향 없음 (cleanProductQuery는 검수 query만 처리)
   s = s.replace(/(^|\s)(DC|dc|VB|vb|D\.C\.|V\.B\.)(\s|$)/g, '$1 $3')
+  // (2026-05-12) 검수 카테고리 marker — "외 식" "외 식자재" (그 외 식자재 분류 표기) 제거
+  // '외'와 '식' 1자가 product의 '외국산'/'식재' substring과 잘못 매칭되어 조각과일 #1 회귀 방지
+  s = s.replace(/(^|\s)외\s+식(자재|품)?(\s|$)/g, '$1 $3')
+  // (2026-05-12) '옛날' prefix 분리 + 단독 토큰화 — "옛날자른미역" → "옛날 자른미역"
+  // '옛날'은 GENERIC_MODIFIERS 등록 — 식자재 분리 후 매칭 본질에서 제외
+  s = s.replace(/옛날([가-힣]{2,})/g, '옛날 $1')
   s = s.replace(/\d+\s*%/g, ' ')                                // 100%, 50% 같은 비율 표기 제거
   s = s.replace(/[_]+/g, ' ')                                   // _ 구분자 (예: 국내산_100%)
   s = s.replace(/\d+\s*~?\s*\d*\s*[gG][lL]?\s*\/?\s*[A-Za-z가-힣]*/g, ' ')  // 200g, 200~280g/개

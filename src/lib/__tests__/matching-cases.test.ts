@@ -444,3 +444,27 @@ describe('포장 suffix + DC/VB marker 분리 — 스팸캔,DC (사용자 보고
     expect(getTokenMatchRatio(cleaned, 'DC 짜파게티큰컵라면 농심')).toBe(0)
   })
 })
+
+describe('옛날 prefix + 외식 marker — 옛날자른미역,외 식 (사용자 보고 2026-05-12)', () => {
+  // 사용자 보고: 검수 '옛날자른미역,외 식' 50G/EA → 추천 후보 #1~#3 조각과일 (미역 무관)
+  // 원인: '옛날자른미역' 합성 + '외'/'식' 1자가 '외국산'/'식재' substring 매칭 → 조각과일 0.667 #1
+
+  it('cleanProductQuery — 옛날 prefix 분리', () => {
+    expect(cleanProductQuery('옛날자른미역')).toBe('옛날 자른미역')
+    expect(cleanProductQuery('옛날당면')).toBe('옛날 당면')
+  })
+
+  it('cleanProductQuery — 외 식 카테고리 marker 제거', () => {
+    expect(cleanProductQuery('옛날자른미역,외 식').trim()).toBe('옛날 자른미역')
+    expect(cleanProductQuery('미역 외 식자재').trim()).toBe('미역')
+  })
+
+  it('옛날자른미역,외 식 검수 — 자른미역 후보 매칭 (조각과일 차단)', () => {
+    const cleaned = cleanProductQuery('옛날자른미역,외 식')
+    expect(getTokenMatchRatio(cleaned, '완도 자른미역 국내산 상온 50G, 절단(단순)')).toBeGreaterThanOrEqual(1.0)
+    expect(getTokenMatchRatio(cleaned, '자른미역 국내산 건냉 500G')).toBeGreaterThanOrEqual(1.0)
+    // 조각과일은 매칭 0 — '외 식'/'옛날' modifier로 효과적 토큰에서 제외
+    expect(getTokenMatchRatio(cleaned, '식재 조각과일 오렌지 외국산 냉장 750G')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '식재 조각과일 사과 국내산 냉장 1.500KG')).toBe(0)
+  })
+})
