@@ -395,9 +395,33 @@ export async function GET(request: NextRequest) {
       const PROC_PENALTY = 0.3
       const adjusted = (name: string, baseRatio: number) =>
         !queryIsProcessed && isProcessedProduct(name) ? baseRatio - PROC_PENALTY : baseRatio
+      // (2026-05-12) spec_raw 통합 ratio — name 단독 + (name + spec_raw) 둘 다 계산, 큰 값 사용
+      // 배경: SHINSEGAE 220776 '돈앞다리 국내산 냉동' spec_raw='1KG, 다짐육' 같이
+      //       가공정보(다짐육/컷팅/슬라이스)가 spec_raw에만 있는 경우 ratio 0 → 후순위 누락
+      // sort 전에 spec_raw fetch — 기존 enrichment는 sort 이후라 사용 불가
+      const sortIds = results.map((p) => p.id).filter(Boolean)
+      const specForSort: Record<string, string | undefined> = {}
+      if (sortIds.length > 0) {
+        const { data: specData } = await supabase
+          .from('products')
+          .select('id, spec_raw')
+          .in('id', sortIds)
+        if (specData) {
+          for (const r of specData) {
+            specForSort[r.id as string] = r.spec_raw as string | undefined
+          }
+        }
+      }
+      const computeRatio = (p: { id: string; product_name?: string }) => {
+        const r1 = getTokenMatchRatio(cleanedQuery, p.product_name ?? '')
+        const spec = specForSort[p.id]
+        if (!spec) return r1
+        const r2 = getTokenMatchRatio(cleanedQuery, `${p.product_name ?? ''} ${spec}`)
+        return Math.max(r1, r2)
+      }
       results.sort((a, b) => {
-        const aR = adjusted(a.product_name, getTokenMatchRatio(cleanedQuery, a.product_name))
-        const bR = adjusted(b.product_name, getTokenMatchRatio(cleanedQuery, b.product_name))
+        const aR = adjusted(a.product_name, computeRatio(a))
+        const bR = adjusted(b.product_name, computeRatio(b))
         if (aR !== bR) return bR - aR
         return (b.match_score ?? 0) - (a.match_score ?? 0)
       })
