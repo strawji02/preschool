@@ -382,3 +382,35 @@ describe('storage prefix 분리 — 냉장한우사태 (사용자 보고 2026-05
     expect(hanu).toBeGreaterThan(don)
   })
 })
+
+describe('생/가공 suffix 분리 — 생오이피클슬라이스 (사용자 보고 2026-05-12)', () => {
+  // 사용자 보고: 검수 '생오이피클슬라이스(VB)' AI 추천 후보: 망고/홍피망/오리정육/생표고버섯슬라이스
+  // 원인: '생오이피클슬라이스' 단일 토큰 → 오이피클 후보(190971/200648) 매칭 안 됨
+  //       슬라이스만 공통인 무관 후보들과 ratio 동률 → 부정확한 정렬
+
+  it('cleanProductQuery — 생 prefix 분리 (3자 이상 식자재명)', () => {
+    expect(cleanProductQuery('생오이피클')).toBe('생 오이피클')
+    expect(cleanProductQuery('생오이피클슬라이스')).toBe('생 오이피클 슬라이스')
+    // 2자 합성어 보호 — '생강' '생수' '생면'
+    expect(cleanProductQuery('생강 즙')).toBe('생강 즙')
+  })
+
+  it('cleanProductQuery — 가공 suffix 분리 (슬라이스/커팅/다이스)', () => {
+    expect(cleanProductQuery('오이피클슬라이스')).toBe('오이피클 슬라이스')
+    expect(cleanProductQuery('감자다이스')).toBe('감자 다이스')
+  })
+
+  it('생오이피클슬라이스 검수 — 오이피클 후보 매칭', () => {
+    const cleaned = cleanProductQuery('생오이피클슬라이스(VB)')
+    expect(getTokenMatchRatio(cleaned, '오이피클 슬라이스캔 GOC 3KG')).toBeGreaterThanOrEqual(0.5)
+    expect(getTokenMatchRatio(cleaned, '후레쉬오이피클 아주쿡 3.100KG')).toBeGreaterThanOrEqual(0.5)
+  })
+
+  it('생오이피클슬라이스 검수 — 무관 슬라이스 후보 매칭 0', () => {
+    // 슬라이스만 공통인 망고/홍피망/유부 등은 매칭 0 (modifier로 제외)
+    const cleaned = cleanProductQuery('생오이피클슬라이스(VB)')
+    expect(getTokenMatchRatio(cleaned, '망고슬라이스 몬 565G')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '냉동홍피망슬라이스 중국 냉동 1KG')).toBe(0)
+    expect(getTokenMatchRatio(cleaned, '냉동유부슬라이스 한미 1KG')).toBe(0)
+  })
+})
