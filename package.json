@@ -10,7 +10,8 @@
     "seed": "tsx scripts/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:matching": "vitest run src/lib/__tests__/matching-cases.test.ts"
+    "test:matching": "vitest run src/lib/__tests__/matching-cases.test.ts",
+    "lint:migrations": "bash scripts/lint-migrations.sh"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

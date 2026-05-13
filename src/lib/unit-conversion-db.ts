@@ -2,7 +2,9 @@
  * 단위 환산 데이터베이스 연동
  */
 
-import { createClient } from '@/lib/supabase/server'
+// (2026-05-12) RLS enable 대응 — anon key는 default deny이므로 service_role 사용
+// 이 모듈은 모두 server-side 호출 (matching.ts, route.ts에서만 사용)
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export interface UnitConversion {
   id: number
@@ -29,7 +31,7 @@ export async function getConversionFactor(
   fromUnit: string,
   toUnit: string
 ): Promise<number | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // 1. 카테고리가 일치하는 규칙 우선 조회
   if (category) {
@@ -66,7 +68,7 @@ export async function getConversionFactor(
  * 모든 환산 규칙 조회
  */
 export async function getAllConversions(): Promise<UnitConversion[]> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from('unit_conversions')
@@ -88,7 +90,7 @@ export async function getAllConversions(): Promise<UnitConversion[]> {
 export async function createConversion(
   conversion: Omit<UnitConversion, 'id' | 'created_at' | 'updated_at'>
 ): Promise<UnitConversion | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from('unit_conversions')
@@ -111,7 +113,7 @@ export async function updateConversion(
   id: number,
   updates: Partial<Omit<UnitConversion, 'id' | 'created_at' | 'updated_at'>>
 ): Promise<UnitConversion | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from('unit_conversions')
@@ -132,7 +134,7 @@ export async function updateConversion(
  * 환산 규칙 삭제
  */
 export async function deleteConversion(id: number): Promise<boolean> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { error } = await supabase
     .from('unit_conversions')
