@@ -31,8 +31,9 @@ const LIMITS: Record<RateLimitTier, LimitConfig> = {
 }
 
 // Upstash가 있으면 distributed, 없으면 in-memory fallback
-const upstashUrl = process.env.UPSTASH_REDIS_REST_URL
-const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN
+// Vercel KV/Upstash 통합은 KV_REST_API_URL/TOKEN 변수 사용 (2026-05-12)
+const upstashUrl = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL
+const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN
 const useUpstash = Boolean(upstashUrl && upstashToken)
 
 let upstashRatelimits: Record<RateLimitTier, Ratelimit> | null = null
