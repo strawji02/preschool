@@ -18,6 +18,8 @@
     "@next/third-parties": "^16.0.1",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0",
     "@vercel/analytics": "^1.5.0",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",

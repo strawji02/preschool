@@ -20,6 +20,7 @@
  */
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { checkRateLimit, tierForPath } from '@/lib/ratelimit'
 
 // 허용 도메인 — production + Vercel preview
 // 환경변수로 추가 도메인 허용 가능 (콤마 구분)
@@ -53,7 +54,16 @@ function isAllowedOrigin(originOrReferer: string | null, currentHost: string | n
   }
 }
 
-export function middleware(request: NextRequest) {
+function getClientIp(request: NextRequest): string {
+  // Vercel/Cloudflare: x-forwarded-for의 첫 IP
+  const xff = request.headers.get('x-forwarded-for')
+  if (xff) return xff.split(',')[0].trim()
+  const realIp = request.headers.get('x-real-ip')
+  if (realIp) return realIp
+  return 'unknown'
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // /api/* 외 경로는 통과
@@ -61,36 +71,73 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // === Origin/Secret 검증 ===
   const secret = process.env.APP_SHARED_SECRET
+  let authPassed = false
 
   // 1) Server-to-server: X-App-Secret 헤더 일치
   if (secret) {
     const headerSecret = request.headers.get('x-app-secret')
     if (headerSecret && headerSecret === secret) {
-      return NextResponse.next()
+      authPassed = true
     }
   }
 
-  // 2) Browser: same-origin or 허용 도메인
-  const secFetchSite = request.headers.get('sec-fetch-site')
-  if (secFetchSite === 'same-origin') {
-    return NextResponse.next()
+  if (!authPassed) {
+    // 2) Browser: same-origin or 허용 도메인
+    const secFetchSite = request.headers.get('sec-fetch-site')
+    if (secFetchSite === 'same-origin') {
+      authPassed = true
+    } else {
+      const currentHost = request.headers.get('host')
+      const origin = request.headers.get('origin')
+      const referer = request.headers.get('referer')
+      if (isAllowedOrigin(origin, currentHost) || isAllowedOrigin(referer, currentHost)) {
+        authPassed = true
+      }
+    }
   }
 
-  // Sec-Fetch-Site가 없는 (older browser) 또는 cross-site일 때 Origin/Referer 검증
-  const currentHost = request.headers.get('host')
-  const origin = request.headers.get('origin')
-  const referer = request.headers.get('referer')
-
-  if (isAllowedOrigin(origin, currentHost) || isAllowedOrigin(referer, currentHost)) {
-    return NextResponse.next()
+  if (!authPassed) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized — missing or invalid origin' },
+      { status: 401 },
+    )
   }
 
-  // 3) 모두 실패 → 401
-  return NextResponse.json(
-    { success: false, error: 'Unauthorized — missing or invalid origin' },
-    { status: 401 },
-  )
+  // === Rate limit 검사 ===
+  // X-App-Secret으로 통과한 server-server 호출은 ratelimit 면제 (internal job)
+  const isServerCall = secret && request.headers.get('x-app-secret') === secret
+  if (!isServerCall) {
+    const ip = getClientIp(request)
+    const tier = tierForPath(pathname)
+    try {
+      const result = await checkRateLimit(ip, tier)
+      if (!result.success) {
+        const retryAfter = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000))
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Too many requests. Retry after ${retryAfter}s`,
+          },
+          {
+            status: 429,
+            headers: {
+              'Retry-After': String(retryAfter),
+              'X-RateLimit-Limit': String(result.limit),
+              'X-RateLimit-Remaining': String(result.remaining),
+              'X-RateLimit-Reset': String(result.reset),
+            },
+          },
+        )
+      }
+    } catch (err) {
+      // Ratelimit 실패 시 fail-open (서비스 가용성 우선)
+      console.error('[ratelimit]', err)
+    }
+  }
+
+  return NextResponse.next()
 }
 
 // /api/* 만 적용 (정적 리소스/페이지는 통과)
