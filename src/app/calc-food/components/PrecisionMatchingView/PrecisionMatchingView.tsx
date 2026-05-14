@@ -915,44 +915,52 @@ function ItemListPanel({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className={cn(
-                      'truncate text-sm font-semibold',
-                      isExcluded ? 'text-gray-500 line-through' : 'text-gray-900',
+                {/* (2026-05-12) 행 layout 재구성:
+                    상단 row — 좌: 품목명 + spec, 우: 수량·단가 / 금액
+                    하단 row — 매칭 배지 전체 너비 (신세계 코드 가독성 ↑) */}
+                <div className="flex items-start gap-2">
+                  {/* 좌측: 품목명 + spec */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className={cn(
+                          'truncate text-sm font-semibold',
+                          isExcluded ? 'text-gray-500 line-through' : 'text-gray-900',
+                        )}
+                        title={it.extracted_name}
+                      >
+                        {it.extracted_name}
+                      </div>
+                      {isExcluded && (
+                        <span className="shrink-0 rounded bg-gray-300 px-1.5 py-0.5 text-[9px] font-bold text-gray-700">
+                          비교불가
+                        </span>
+                      )}
+                    </div>
+                    {it.extracted_spec && (
+                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={it.extracted_spec}>
+                        {it.extracted_spec}
+                      </div>
                     )}
-                    title={it.extracted_name}
-                  >
-                    {it.extracted_name}
                   </div>
-                  {isExcluded && (
-                    <span className="shrink-0 rounded bg-gray-300 px-1.5 py-0.5 text-[9px] font-bold text-gray-700">
-                      비교불가
-                    </span>
-                  )}
-                </div>
-                {it.extracted_spec && (
-                  <div className="mt-0.5 truncate text-[11px] text-gray-500" title={it.extracted_spec}>
-                    {it.extracted_spec}
+                  {/* 우측 상단: 수량·단가 / 금액 (오른쪽 정렬) */}
+                  <div className="shrink-0 text-right">
+                    <div className="text-[11px] text-gray-600">
+                      {formatNumber(it.extracted_quantity)} {it.extracted_unit ?? 'EA'} ·{' '}
+                      {formatCurrency(it.extracted_unit_price)}
+                    </div>
+                    <div className="text-sm font-semibold text-gray-900">{formatCurrency(total)}</div>
                   </div>
-                )}
-                <div className="mt-1 flex items-center justify-between text-[11px]">
-                  <span className="text-gray-600">
-                    {formatNumber(it.extracted_quantity)} {it.extracted_unit ?? 'EA'} ·{' '}
-                    {formatCurrency(it.extracted_unit_price)}
-                  </span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(total)}</span>
                 </div>
-                {/* (2026-05-12) 매칭 배지 강조 — 신세계 코드+품목명 가독성 개선
-                   - 확정/미확정 모두 표시 (이전: 확정만 코드 배지)
-                   - 코드 배지: 진한 배경 + 흰색 텍스트로 대비 강화
-                   - 품목명: 잘림 18자 → CSS truncate (반응형), 폰트 ↑ */}
+                {/* (2026-05-12) 매칭 배지 — 행 전체 너비로 확장, 신세계 코드 가독성 ↑
+                   - 코드 배지: 더 큰 폰트 (10→11px) + 두꺼운 grid weight + tracking
+                   - 품목명: 12px → 13px, 더 넓은 영역 (수량·단가가 위로 이동해 확보된 여백 활용) */}
                 {hasMatch && it.ssg_match && (
-                  <div className="mt-1 flex items-center gap-1.5 rounded border-l-2 border-blue-400 bg-blue-50/70 px-1.5 py-1">
+                  <div className="mt-1.5 flex items-center gap-2 rounded-md border-l-[3px] border-blue-500 bg-blue-50/80 px-2 py-1.5">
                     {it.ssg_match.product_code && (
                       <span
                         className={cn(
-                          'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 font-mono text-[10px] font-bold shadow-sm',
+                          'inline-flex shrink-0 items-center rounded px-2 py-0.5 font-mono text-[11px] font-bold tracking-wider shadow-sm',
                           it.is_confirmed
                             ? 'bg-blue-600 text-white'
                             : 'bg-amber-500 text-white',
@@ -962,7 +970,7 @@ function ItemListPanel({
                       </span>
                     )}
                     <span
-                      className="min-w-0 flex-1 truncate text-[12px] font-medium text-blue-900"
+                      className="min-w-0 flex-1 truncate text-[13px] font-medium text-blue-900"
                       title={it.ssg_match.product_name || ''}
                     >
                       {it.ssg_match.product_name || '신세계 매칭'}
@@ -970,7 +978,7 @@ function ItemListPanel({
                     {sav !== 0 && (
                       <span
                         className={cn(
-                          'shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold',
+                          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold',
                           isSaving ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700',
                         )}
                       >
