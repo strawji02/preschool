@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { extractItemsFromImage } from '@/lib/gemini'
 import { findComparisonMatches, calculateComparisonSavings } from '@/lib/matching'
+import { validateImageBase64, imageTypeToMime } from '@/lib/file-validator'
 import type {
   AnalyzePageRequest,
   ComparisonPageResponse,
@@ -30,6 +31,21 @@ export async function POST(request: NextRequest) {
           error: 'Missing required fields: session_id, page_number, image',
         },
         { status: 400 }
+      )
+    }
+
+    // (2026-05-12) image base64 검증 — 크기 + magic byte
+    // H2: payload size + mime type spoofing 방지
+    const imageCheck = validateImageBase64(body.image)
+    if (!imageCheck.ok) {
+      return NextResponse.json<ComparisonPageResponse>(
+        {
+          success: false,
+          page_number: body.page_number,
+          items: [],
+          error: imageCheck.error,
+        },
+        { status: imageCheck.status }
       )
     }
 
@@ -72,13 +88,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Upload image to Storage
+    // (2026-05-12) validated buffer + dynamic mime type 사용 (H2 fix)
     const imagePath = `${body.session_id}/${body.page_number}.jpg`
-    const imageBuffer = Buffer.from(body.image, 'base64')
+    const imageBuffer = imageCheck.buffer
 
     const { error: uploadError } = await supabase.storage
       .from('invoice-images')
       .upload(imagePath, imageBuffer, {
-        contentType: 'image/jpeg',
+        contentType: imageTypeToMime(imageCheck.type),
         upsert: true,
       })
 
