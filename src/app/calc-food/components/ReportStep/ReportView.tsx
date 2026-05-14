@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FileText, ClipboardList } from 'lucide-react'
 import type { ComparisonItem, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { InvoiceViewer } from '../InvoiceViewer'
@@ -103,7 +102,7 @@ export function ReportView({
       </div>
 
       {/* 우측: 리포트 (50%) */}
-      <div className="relative flex w-1/2 flex-col overflow-hidden">
+      <div className="flex w-1/2 flex-col overflow-hidden">
         <ReportHeader
           fileName={fileName}
           supplierName={supplierName}
@@ -111,27 +110,9 @@ export function ReportView({
           items={items}
           onBackToMatching={onBackToMatching}
           onUpdateSupplierName={onUpdateSupplierName}
+          onOpenInvoiceReview={onOpenInvoiceReview}
+          onOpenProposal={() => setMode('proposal')}
         />
-        {/* 명세표 재확인 버튼 + 제안서 모드 진입 */}
-        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-          {onOpenInvoiceReview && (
-            <button
-              onClick={onOpenInvoiceReview}
-              className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 shadow-sm hover:bg-amber-100"
-              title="거래명세표 재확인 또는 수정"
-            >
-              📄 명세표 재확인
-            </button>
-          )}
-          <button
-            onClick={() => setMode('proposal')}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-blue-700"
-            title="고객 제출용 제안서 (인포그래픽 보고서)"
-          >
-            <ClipboardList size={16} />
-            제안서 보기
-          </button>
-        </div>
 
         <div className="flex-1 overflow-y-auto p-6">
           {/* 시나리오 비교 */}
