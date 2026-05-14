@@ -657,6 +657,8 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         // 이전: !item.cj_confirmed / !item.ssg_confirmed 로 toggle → 이미 확정된 품목 재Confirm 시 미확정으로 강등
         // 변경: 항상 true로 set (Confirm = "이 매칭/조정값으로 확정한다"는 멱등 명시적 동작)
         // 확정 해제는 별도 UI/액션이 필요 (현재 UI에 없음)
+        // (2026-05-12) is_excluded=false 자동 해제 — 비교불가 → 매칭으로 복원
+        //              사용자가 매칭 후보 선택 + Confirm = 비교 가능 상태로 의사표시
         if (action.supplier) {
           const updatedItem = { ...item, ...mergedAdjusted }
           if (action.supplier === 'CJ') {
@@ -666,6 +668,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
           }
           updatedItem.is_confirmed = true
           updatedItem.match_status = 'manual_matched' as const
+          updatedItem.is_excluded = false
           return updatedItem
         }
 
@@ -677,6 +680,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
           cj_confirmed: !!item.cj_match,
           ssg_confirmed: !!item.ssg_match,
           match_status: 'manual_matched' as const,
+          is_excluded: false,
         }
       })
 
@@ -1646,7 +1650,12 @@ export function useAuditSession() {
     ) => {
       dispatch({ type: 'CONFIRM_ITEM', itemId, supplier, adjustments })
       // DB 저장: 매칭 상태 + 정밀 검수 조정값 (있으면)
-      const body: Record<string, unknown> = { match_status: 'manual_matched' }
+      // (2026-05-12) is_excluded=false 자동 해제 — 사용자가 비교불가 처리한 품목을
+      //              다시 매칭으로 Confirm하면 비교 가능 상태로 복원 (제안서 정확도 ↑)
+      const body: Record<string, unknown> = {
+        match_status: 'manual_matched',
+        is_excluded: false,
+      }
       if (adjustments) {
         if (adjustments.adjusted_quantity !== undefined) body.adjusted_quantity = adjustments.adjusted_quantity
         if (adjustments.adjusted_unit_weight_g !== undefined) body.adjusted_unit_weight_g = adjustments.adjusted_unit_weight_g
