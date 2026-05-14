@@ -42,9 +42,18 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Session creation error:', error)
+      console.error('[session-init]', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
+      const clientMessage =
+        process.env.NODE_ENV === 'production'
+          ? 'Internal error (session-init)'
+          : `Database error: ${error.message}`
       return NextResponse.json<InitSessionResponse>(
-        { success: false, message: `Database error: ${error.message}` },
+        { success: false, message: clientMessage },
         { status: 500 }
       )
     }

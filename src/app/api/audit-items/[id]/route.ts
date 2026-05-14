@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PATCH /api/audit-items/[id]
@@ -51,12 +52,11 @@ export async function PATCH(
     const supabase = createAdminClient()
     const { error } = await supabase.from('audit_items').update(update).eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'audit-items-patch')
     }
     return NextResponse.json({ success: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'audit-items-patch')
   }
 }
 
@@ -73,11 +73,10 @@ export async function DELETE(
     const supabase = createAdminClient()
     const { error } = await supabase.from('audit_items').delete().eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'audit-items-delete')
     }
     return NextResponse.json({ success: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'audit-items-delete')
   }
 }

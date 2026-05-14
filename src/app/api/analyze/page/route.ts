@@ -250,15 +250,19 @@ export async function POST(request: NextRequest) {
       source_file_name: body.source_file_name,
     })
   } catch (error) {
-    console.error('Analyze page error:', error)
+    console.error('[analyze-page]', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const clientMessage =
+      process.env.NODE_ENV === 'production'
+        ? 'Internal error (analyze-page)'
+        : `Internal server error: ${errorMessage}`
 
     return NextResponse.json<ComparisonPageResponse>(
       {
         success: false,
         page_number: 0,
         items: [],
-        error: `Internal server error: ${errorMessage}`,
+        error: clientMessage,
       },
       { status: 500 }
     )

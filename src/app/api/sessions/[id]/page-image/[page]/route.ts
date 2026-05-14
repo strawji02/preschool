@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError, isValidUuid } from '@/lib/api-error'
 
 /**
  * GET /api/sessions/[id]/page-image/[page]
@@ -16,7 +17,9 @@ export async function GET(
   try {
     const { id, page } = await params
     const pageNum = Number(page)
-    if (!id || !Number.isFinite(pageNum) || pageNum < 1) {
+    // (2026-05-12) UUID 형식 강제 — storage path traversal/ID guessing 차단
+    // 추가: pageNum 상한 1000 — 비정상적 큰 값으로 path 폭주 방지
+    if (!isValidUuid(id) || !Number.isFinite(pageNum) || pageNum < 1 || pageNum > 1000) {
       return NextResponse.json(
         { success: false, error: 'Invalid session id or page number' },
         { status: 400 },
@@ -24,20 +27,26 @@ export async function GET(
     }
 
     const supabase = createAdminClient()
+    // 세션 존재 확인 — 임의 UUID로 storage 탐색 차단 (404 noise 줄임)
+    const { data: session } = await supabase
+      .from('audit_sessions')
+      .select('id')
+      .eq('id', id)
+      .maybeSingle()
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+    }
+
     const path = `${id}/${pageNum}.jpg`
     const { data, error } = await supabase.storage
       .from('invoice-images')
       .createSignedUrl(path, 3600)
 
     if (error || !data) {
-      return NextResponse.json(
-        { success: false, error: error?.message || 'Image not found' },
-        { status: 404 },
-      )
+      return NextResponse.json({ success: false, error: 'Image not found' }, { status: 404 })
     }
     return NextResponse.json({ success: true, url: data.signedUrl })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'page-image')
   }
 }

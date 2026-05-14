@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * GET /api/products/:id
@@ -24,14 +25,13 @@ export async function GET(
       .maybeSingle()
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'product-get')
     }
     if (!data) {
       return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     }
     return NextResponse.json({ success: true, product: data })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: msg }, { status: 500 })
+    return apiError(e, 500, 'product-get')
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * POST /api/session/page-totals
@@ -37,16 +38,11 @@ export async function POST(request: NextRequest) {
       .eq('id', body.session_id)
 
     if (error) {
-      console.error('Failed to save page_totals:', error)
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      )
+      return apiError(error, 500, 'session-page-totals')
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'session-page-totals')
   }
 }

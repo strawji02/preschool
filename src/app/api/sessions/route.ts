@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * GET /api/sessions
@@ -26,13 +27,11 @@ export async function GET(_request: NextRequest) {
       .limit(50)
 
     if (error) {
-      console.error('Sessions list error:', error)
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'sessions-list')
     }
 
     return NextResponse.json({ success: true, sessions: data ?? [] })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'sessions-list')
   }
 }

@@ -211,14 +211,18 @@ export async function POST(request: NextRequest) {
       items: responseItems,
     })
   } catch (error) {
-    console.error('Excel analyze error:', error)
+    console.error('[analyze-excel]', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const clientMessage =
+      process.env.NODE_ENV === 'production'
+        ? 'Internal error (analyze-excel)'
+        : `Internal server error: ${errorMessage}`
 
     return NextResponse.json<ExcelAnalyzeResponse>(
       {
         success: false,
         items: [],
-        error: `Internal server error: ${errorMessage}`,
+        error: clientMessage,
       },
       { status: 500 }
     )

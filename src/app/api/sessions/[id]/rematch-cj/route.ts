@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { findComparisonMatches } from '@/lib/matching'
 import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
+import { apiError } from '@/lib/api-error'
 
 /**
  * POST /api/sessions/:id/rematch-cj
@@ -41,7 +42,7 @@ export async function POST(
       .eq('session_id', id)
 
     if (fetchErr) {
-      return NextResponse.json({ success: false, error: fetchErr.message }, { status: 500 })
+      return apiError(fetchErr, 500, 'rematch-cj-fetch')
     }
 
     // 재매칭 대상 분류:
@@ -169,7 +170,6 @@ export async function POST(
       },
     })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: msg }, { status: 500 })
+    return apiError(e, 500, 'rematch-cj')
   }
 }

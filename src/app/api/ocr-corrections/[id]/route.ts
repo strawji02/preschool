@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * DELETE /api/ocr-corrections/[id]
@@ -20,12 +21,11 @@ export async function DELETE(
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'ocr-corrections-delete')
     }
     return NextResponse.json({ success: true })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(e, 500, 'ocr-corrections-delete')
   }
 }
 
@@ -44,11 +44,10 @@ export async function PATCH(
     const supabase = createAdminClient()
     const { error } = await supabase.from('ocr_corrections').update(update).eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'ocr-corrections-patch')
     }
     return NextResponse.json({ success: true })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(e, 500, 'ocr-corrections-patch')
   }
 }

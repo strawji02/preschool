@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import type { ComparisonItem, MatchStatus, SupplierMatch } from '@/types/audit'
 import { calculateComparisonSavings } from '@/lib/matching'
 import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
+import { apiError } from '@/lib/api-error'
 
 /**
  * GET /api/sessions/:id
@@ -192,8 +193,7 @@ export async function GET(
       lowConfidenceMatchCount,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'session-get')
   }
 }
 
@@ -225,12 +225,11 @@ export async function PATCH(
 
     const { error } = await supabase.from('audit_sessions').update(update).eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'session-patch')
     }
     return NextResponse.json({ success: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'session-patch')
   }
 }
 
@@ -251,11 +250,10 @@ export async function DELETE(
       .update({ is_archived: true, updated_at: new Date().toISOString() })
       .eq('id', id)
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'session-delete')
     }
     return NextResponse.json({ success: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'session-delete')
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * GET /api/ocr-corrections
@@ -18,12 +19,11 @@ export async function GET() {
       .eq('is_active', true)
       .order('updated_at', { ascending: false })
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      return apiError(error, 500, 'ocr-corrections-list')
     }
     return NextResponse.json({ success: true, corrections: data ?? [] })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(e, 500, 'ocr-corrections-list')
   }
 }
 
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', existing.id)
       if (error) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+        return apiError(error, 500, 'ocr-corrections-update')
       }
       return NextResponse.json({ success: true, id: existing.id, updated: true })
     }
@@ -90,14 +90,10 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single()
     if (error || !data) {
-      return NextResponse.json(
-        { success: false, error: error?.message || 'Insert failed' },
-        { status: 500 },
-      )
+      return apiError(error ?? new Error('Insert failed'), 500, 'ocr-corrections-create')
     }
     return NextResponse.json({ success: true, id: data.id, created: true })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(e, 500, 'ocr-corrections-create')
   }
 }

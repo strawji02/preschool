@@ -4,6 +4,7 @@ import { generateEmbedding } from '@/lib/embedding'
 import { expandWithSynonyms, FOOD_SYNONYMS } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
 import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery, tokenize } from '@/lib/token-match'
+import { sanitizeOrFilterValue } from '@/lib/api-error'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -155,9 +156,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (error) {
-      console.error('Search RPC error:', error)
+      console.error('[products-search]', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
+      const clientMessage =
+        process.env.NODE_ENV === 'production'
+          ? 'Search failed'
+          : `Search failed: ${error.message}`
       return NextResponse.json<SearchProductsResponse>(
-        { success: false, products: [], error: `Search failed: ${error.message}` },
+        { success: false, products: [], error: clientMessage },
         { status: 500 }
       )
     }
@@ -343,8 +353,12 @@ export async function GET(request: NextRequest) {
               }
             }
           }
-          for (const bq of broadTargets) {
-            if (bq.length < 2 && !/^[가-힣]$/.test(bq)) continue
+          for (const bqRaw of broadTargets) {
+            if (bqRaw.length < 2 && !/^[가-힣]$/.test(bqRaw)) continue
+            // (2026-05-12) PostgREST .or() injection 차단 — 콤마/괄호/와일드카드 제거
+            // 사용자 q에 'foo,supplier.eq.CJ' 같이 보내면 추가 조건이 해석되는 문제
+            const bq = sanitizeOrFilterValue(bqRaw)
+            if (!bq) continue
             // broad=true (manual search)이면 다중 필드 ILIKE, 아니면 product_name만 (성능)
             const orFilter = broad
               ? `product_name.ilike.%${bq}%,spec_raw.ilike.%${bq}%,origin.ilike.%${bq}%,origin_detail.ilike.%${bq}%,category.ilike.%${bq}%,subcategory.ilike.%${bq}%,supplier_partner.ilike.%${bq}%`

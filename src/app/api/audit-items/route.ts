@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { apiError } from '@/lib/api-error'
 
 /**
  * POST /api/audit-items
@@ -69,14 +70,10 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single()
     if (error || !data) {
-      return NextResponse.json(
-        { success: false, error: error?.message || 'Insert failed' },
-        { status: 500 },
-      )
+      return apiError(error ?? new Error('Insert failed'), 500, 'audit-items-create')
     }
     return NextResponse.json({ success: true, item_id: data.id })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    return apiError(error, 500, 'audit-items-create')
   }
 }
