@@ -68,7 +68,7 @@ interface ProductDetail {
 
 const PACK_UNITS = ['EA', 'BAG', 'BOX', 'PAC', '봉', 'KG', 'L'] as const
 type SortMode = 'match' | 'price' | 'per_kg' | 'savings'
-type FilterMode = 'all' | 'unconfirmed' | 'unmatched'
+type FilterMode = 'all' | 'unconfirmed' | 'unmatched' | 'excluded'
 
 const SORT_LABEL: Record<SortMode, string> = {
   match: '일치율 높은 순',
@@ -81,6 +81,7 @@ const FILTER_LABEL: Record<FilterMode, string> = {
   all: '전체',
   unconfirmed: '미확정만',
   unmatched: '매칭 없는 것만',
+  excluded: '비교불가만',
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -332,15 +333,37 @@ export function PrecisionMatchingView({
 
   const currentItem = items[selectedIndex] ?? null
 
-  // KPI 계산
+  // KPI 계산 (2026-05-12 통일) — 비교불가 (is_excluded) 품목 분리 처리
+  // 사용자가 명시적으로 제외한 품목(특수 가공/외식 등)은 비교 의미 없음 → 절감 산출에서 제외
+  // 보고서(ReportView)와 동일 패턴 — 검수자 화면 일관성 확보
   const kpi = useMemo(() => {
-    const existingTotal = items.reduce((sum, i) => sum + getExistingTotal(i), 0)
-    const ssgEstimate = items.reduce((sum, i) => sum + estimateSsgTotal(i), 0)
-    const totalSavings = existingTotal - ssgEstimate
-    const savingPercent = existingTotal > 0 ? (totalSavings / existingTotal) * 100 : 0
-    const confirmed = items.filter((i) => i.is_confirmed).length
+    const included = items.filter((i) => !i.is_excluded)
+    const excluded = items.filter((i) => i.is_excluded)
+
+    // 비교 가능 (77건) — 절감 분석 대상
+    const includedExisting = included.reduce((sum, i) => sum + getExistingTotal(i), 0)
+    // 비교불가 (20건) — 거래명세표에는 있으나 비교 의미 없음 (별도 표시용)
+    const excludedExisting = excluded.reduce((sum, i) => sum + getExistingTotal(i), 0)
+    // 거래명세표 원본 합계 (97건) — 사용자가 실제 발주한 총 금액
+    const grandTotal = includedExisting + excludedExisting
+
+    // 신세계 견적은 비교 가능 품목만 (excluded 품목은 ssg_match 있어도 비교 의미 없음)
+    const ssgEstimate = included.reduce((sum, i) => sum + estimateSsgTotal(i), 0)
+    const totalSavings = includedExisting - ssgEstimate
+    const savingPercent = includedExisting > 0 ? (totalSavings / includedExisting) * 100 : 0
+
+    // 확정 카운트도 비교 가능 품목 기준 (excluded는 검수 완료이지만 매칭 확정과 다른 결정)
+    const confirmed = included.filter((i) => i.is_confirmed).length
     return {
-      existingTotal,
+      // 원본 합계 (모든 97건)
+      grandTotal,
+      // 비교 가능 (77건)
+      includedExisting,
+      includedCount: included.length,
+      // 비교불가 (20건)
+      excludedExisting,
+      excludedCount: excluded.length,
+      // 신세계 비교 분석
       ssgEstimate,
       totalSavings,
       savingPercent,
@@ -353,8 +376,10 @@ export function PrecisionMatchingView({
     return items
       .map((it, idx) => ({ it, idx }))
       .filter(({ it }) => {
-        if (filterMode === 'unconfirmed') return !it.is_confirmed
-        if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match
+        // (2026-05-12) 'all' 외 필터에서는 비교불가 자동 제외 (검수자가 작업 대상 외)
+        if (filterMode === 'unconfirmed') return !it.is_confirmed && !it.is_excluded
+        if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match && !it.is_excluded
+        if (filterMode === 'excluded') return it.is_excluded === true
         return true
       })
       .map(({ idx }) => idx)
@@ -632,7 +657,11 @@ function KpiDashboard({
   supplierName,
 }: {
   kpi: {
-    existingTotal: number
+    grandTotal: number
+    includedExisting: number
+    includedCount: number
+    excludedExisting: number
+    excludedCount: number
     ssgEstimate: number
     totalSavings: number
     savingPercent: number
@@ -642,15 +671,42 @@ function KpiDashboard({
   supplierName: string
 }) {
   const isSaving = kpi.totalSavings > 0
+  const hasExcluded = kpi.excludedCount > 0
   return (
     <div className="grid grid-cols-4 gap-3 border-b bg-white px-4 py-3">
-      <KpiCard label="거래명세표 합계" value={formatCurrency(kpi.existingTotal)} sub={supplierName} />
+      {/* 거래명세표 합계 — 원본 97건 (사용자 실제 발주 금액) */}
+      <KpiCard
+        label="거래명세표 합계"
+        value={formatCurrency(kpi.grandTotal)}
+        sub={
+          hasExcluded ? (
+            <span className="text-gray-600">
+              비교 <span className="font-semibold text-gray-800">{formatCurrency(kpi.includedExisting)}</span>
+              {' · '}
+              비교불가 <span className="font-semibold text-gray-500">{formatCurrency(kpi.excludedExisting)}</span>
+            </span>
+          ) : (
+            supplierName
+          )
+        }
+      />
+      {/* 비교 품목 수 — 비교 가능 / 전체 (비교불가 별도 표시) */}
       <KpiCard
         label="비교 품목 수"
-        value={`${kpi.total} EA`}
-        sub={`${kpi.confirmed}개 확정 (${kpi.total > 0 ? Math.round((kpi.confirmed / kpi.total) * 100) : 0}%)`}
+        value={`${kpi.includedCount} / ${kpi.total} EA`}
+        sub={
+          hasExcluded
+            ? `비교불가 ${kpi.excludedCount}건 (${Math.round((kpi.excludedCount / kpi.total) * 100)}%)`
+            : `${kpi.confirmed}개 확정 (${kpi.includedCount > 0 ? Math.round((kpi.confirmed / kpi.includedCount) * 100) : 0}%)`
+        }
       />
-      <KpiCard label="예상 신세계 견적" value={formatCurrency(kpi.ssgEstimate)} sub="환산 단가 기준" />
+      {/* 신세계 견적 — 비교 가능 품목만 */}
+      <KpiCard
+        label="예상 신세계 견적"
+        value={formatCurrency(kpi.ssgEstimate)}
+        sub={hasExcluded ? `비교 가능 ${kpi.includedCount}건 기준` : '환산 단가 기준'}
+      />
+      {/* 총 절감액 — 비교 가능 품목 기준 (보고서와 일치) */}
       <KpiCard
         label="총 절감액"
         value={formatCurrency(Math.abs(kpi.totalSavings))}
@@ -728,10 +784,11 @@ function ItemListPanel({
 
   const filtered = useMemo(() => {
     let list = items.map((it, idx) => ({ it, idx }))
-    // 1) 상위 필터 (filterMode)
+    // 1) 상위 필터 (filterMode) — visibleIndices와 동일 로직
     list = list.filter(({ it }) => {
-      if (filterMode === 'unconfirmed') return !it.is_confirmed
-      if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match
+      if (filterMode === 'unconfirmed') return !it.is_confirmed && !it.is_excluded
+      if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match && !it.is_excluded
+      if (filterMode === 'excluded') return it.is_excluded === true
       return true
     })
     // 2) 품목명 검색 (extracted_name + extracted_spec 부분 매칭)
@@ -820,6 +877,8 @@ function ItemListPanel({
           const sav = total - ssgEst
           const isSaving = sav > 0
           const hasMatch = !!(it.cj_match || it.ssg_match)
+          // (2026-05-12) 비교불가(is_excluded) — 시각 명확화
+          const isExcluded = it.is_excluded === true
           return (
             <button
               key={it.id}
@@ -829,6 +888,8 @@ function ItemListPanel({
                 'flex w-full items-stretch gap-2 border-b border-gray-100 px-3 py-2.5 text-left transition',
                 isSelected
                   ? 'border-l-4 border-l-blue-500 bg-blue-50'
+                  : isExcluded
+                  ? 'border-l-4 border-l-gray-300 bg-gray-50 opacity-70 hover:bg-gray-100'
                   : 'border-l-4 border-l-transparent hover:bg-gray-50',
               )}
             >
@@ -836,12 +897,16 @@ function ItemListPanel({
                 <span
                   className={cn(
                     'text-[10px] font-bold',
-                    isSelected ? 'text-blue-600' : 'text-gray-400',
+                    isSelected ? 'text-blue-600' : isExcluded ? 'text-gray-400' : 'text-gray-400',
                   )}
                 >
                   #{idx + 1}
                 </span>
-                {it.is_confirmed ? (
+                {isExcluded ? (
+                  <span className="mt-1 text-[10px] font-bold text-gray-400" title="비교불가">
+                    ⊘
+                  </span>
+                ) : it.is_confirmed ? (
                   <CheckCircle size={14} className="mt-1 text-green-500" />
                 ) : hasMatch ? (
                   <span className="mt-1 text-[10px] text-amber-500">●</span>
@@ -850,8 +915,21 @@ function ItemListPanel({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-gray-900" title={it.extracted_name}>
-                  {it.extracted_name}
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={cn(
+                      'truncate text-sm font-semibold',
+                      isExcluded ? 'text-gray-500 line-through' : 'text-gray-900',
+                    )}
+                    title={it.extracted_name}
+                  >
+                    {it.extracted_name}
+                  </div>
+                  {isExcluded && (
+                    <span className="shrink-0 rounded bg-gray-300 px-1.5 py-0.5 text-[9px] font-bold text-gray-700">
+                      비교불가
+                    </span>
+                  )}
                 </div>
                 {it.extracted_spec && (
                   <div className="mt-0.5 truncate text-[11px] text-gray-500" title={it.extracted_spec}>
