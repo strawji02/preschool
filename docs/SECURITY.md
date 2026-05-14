@@ -84,7 +84,46 @@ ERROR 0건이어야 함. WARN은 검토 후 결정.
 npm run lint:migrations
 ```
 
+## API 인증 (Origin guard + shared secret)
+
+**위치**: `middleware.ts` (root)
+
+모든 `/api/*` 경로는 다음 중 하나를 만족해야 통과:
+
+1. **Browser 요청**: `Sec-Fetch-Site: same-origin` OR Origin/Referer가 `firstconsulting.site` / Vercel preview
+2. **Server-to-server**: `X-App-Secret` 헤더가 `APP_SHARED_SECRET` env와 일치
+
+차단 효과:
+- 자동화 봇/스크래퍼 (Origin 누락) → 401
+- 직접 curl/script 호출 (secret 없음) → 401
+- 일반 브라우저 사용자 → 자동 same-origin 통과 (UX 영향 0)
+
+### 환경변수 설정
+
+**Vercel Dashboard → Settings → Environment Variables**:
+- `APP_SHARED_SECRET`: 32자 이상 random string (예: `openssl rand -hex 32`)
+- (선택) `ALLOWED_HOSTS`: 콤마 구분 추가 허용 도메인
+
+**로컬 (.env.local)**: 동일 키 추가 (선택)
+
+### 서버-서버 호출 시
+
+curl/script로 API 테스트 시:
+```bash
+curl -H "X-App-Secret: ${APP_SHARED_SECRET}" "https://firstconsulting.site/api/sessions"
+```
+
 ## 인시던트 이력
+
+- **2026-05-12 Phase 2**: API 인증 layer 추가 (옵션 A — shared secret + origin guard)
+  - 원인: 모든 mutation API가 인증 없이 노출 — DELETE/PATCH 무단 호출 가능
+  - 해결: `middleware.ts` — same-origin/X-App-Secret 검증
+  - 영향: 일반 사용자 UX 0, 봇 90%+ 차단
+
+- **2026-05-12 Phase 1**: Critical/High 보안 fix (C2/C3/H4)
+  - C2: PostgREST `.or()` injection — `sanitizeOrFilterValue` 적용
+  - C3: Storage path traversal — `isValidUuid` + 세션 존재 확인
+  - H4: Error message leakage — `apiError` wrapper 21개 위치
 
 - **2026-05-11**: Supabase advisor 보안 알림 (RLS Disabled in Public × 6, Sensitive Columns Exposed × 2, Function Search Path Mutable × 9)
   - 원인: 초기 setup에서 RLS 미설정
