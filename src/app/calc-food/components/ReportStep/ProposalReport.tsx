@@ -77,6 +77,8 @@ interface ProposalReportProps {
   ssgScenario: SupplierScenario
   supplierName?: string | null  // 유치원명 (편집 가능)
   initialExtras?: ProposalExtras
+  /** 공급율 (2026-05-16) — 신세계 견적 배율. 카테고리별 통계에 적용 */
+  supplyRate?: number
 }
 
 interface CategoryTopItem {
@@ -95,7 +97,7 @@ interface CategoryStat {
   topItems: CategoryTopItem[]
 }
 
-function computeCategoryStats(items: ComparisonItem[]): CategoryStat[] {
+function computeCategoryStats(items: ComparisonItem[], supplyRate: number = 1): CategoryStat[] {
   const map = new Map<FoodCategory, CategoryStat>()
   // 카테고리별 항목별 절감액 트래킹 (top3 추출용)
   const itemsByCategory = new Map<FoodCategory, CategoryTopItem[]>()
@@ -111,7 +113,8 @@ function computeCategoryStats(items: ComparisonItem[]): CategoryStat[] {
     const qty = item.extracted_quantity || 0
     const ourTotal = item.extracted_total_price ?? item.extracted_unit_price * qty
     // 정밀 환산 (KPI/엑셀과 통일) — 단순 standard_price × qty 가 아닌 ppk × 단위중량 환산
-    const ssgTotal = item.ssg_match ? estimateSsgTotal(item) : ourTotal
+    // (2026-05-16) supplyRate 적용 — 변경 절감액 = 기존 - (신세계 × supplyRate)
+    const ssgTotal = item.ssg_match ? estimateSsgTotal(item) * supplyRate : ourTotal
     stat.itemCount += 1
     stat.ourCost += ourTotal
     stat.ssgCost += ssgTotal
@@ -139,6 +142,7 @@ export function ProposalReport({
   ssgScenario,
   supplierName,
   initialExtras,
+  supplyRate = 1,
 }: ProposalReportProps) {
   // 부가서비스 state
   const [extras, setExtras] = useState<ExtraItem[]>(() => {
@@ -208,7 +212,7 @@ export function ProposalReport({
   )
 
   // 카테고리별 통계 (메모이즈)
-  const categoryStats = useMemo(() => computeCategoryStats(items), [items])
+  const categoryStats = useMemo(() => computeCategoryStats(items, supplyRate), [items, supplyRate])
 
   // 메인 합계
   const monthlyOurCost = ssgScenario.totalOurCost

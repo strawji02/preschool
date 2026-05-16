@@ -13,6 +13,9 @@ interface ItemBreakdownTableProps {
   items: ComparisonItem[]
   onAdjustedSavingsChange?: (adjustedSavings: { cj: number; ssg: number }) => void
   onToggleExclude?: (itemId: string, reason?: string) => void  // 2026-04-21 비교 제외 토글
+  /** 공급율 — 신세계 견적에 일괄 적용되는 배율 (2026-05-16, 기본 1.0)
+   *  변경 절감액 = 기존 - (신세계 × supplyRate) */
+  supplyRate?: number
 }
 
 type SortField = 'name' | 'our_price' | 'cj_price' | 'ssg_price' | 'max_savings'
@@ -27,7 +30,7 @@ interface AdjustedPrices {
   }
 }
 
-export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExclude }: ItemBreakdownTableProps) {
+export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExclude, supplyRate = 1 }: ItemBreakdownTableProps) {
   const [sortField, setSortField] = useState<SortField>('max_savings')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
@@ -97,8 +100,9 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExc
   const getEffectiveSsgPrice = (item: ComparisonItem): number | undefined => {
     if (!item.ssg_match) return undefined
     const adj = adjustedPrices[item.id]
-    if (adj && adj.ssgMultiplier !== 1) return adj.ssgAdjustedPrice
-    return item.ssg_match.standard_price
+    // (2026-05-16) supplyRate 적용 — 신세계 견적에 일괄 배율 (보고서 단계 사용자 입력)
+    const base = adj && adj.ssgMultiplier !== 1 ? adj.ssgAdjustedPrice : item.ssg_match.standard_price
+    return base * supplyRate
   }
 
   // Calculate adjusted savings for an item
@@ -314,7 +318,7 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExc
                   </div>
                 )}
 
-                {/* 신세계 단가 */}
+                {/* 신세계 단가 — supplyRate 적용 (2026-05-16) */}
                 <div className="px-4 text-right text-sm">
                   {item.ssg_match ? (
                     <div>
@@ -322,9 +326,9 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExc
                         'font-medium',
                         bestSupplier === 'SHINSEGAE' && 'text-purple-600'
                       )}>
-                        {hasSsgAdjustment ? (
+                        {(hasSsgAdjustment || supplyRate !== 1) ? (
                           <>
-                            {formatCurrency(ssgAdj.ssgAdjustedPrice)}
+                            {formatCurrency(getEffectiveSsgPrice(item) ?? 0)}
                             <span className="block text-xs text-gray-400 line-through">
                               {formatCurrency(item.ssg_match.standard_price)}
                             </span>
@@ -333,11 +337,14 @@ export function ItemBreakdownTable({ items, onAdjustedSavingsChange, onToggleExc
                           formatCurrency(item.ssg_match.standard_price)
                         )}
                       </span>
-                      {item.ssg_match.unit_normalized && !hasSsgAdjustment && (
+                      {item.ssg_match.unit_normalized && !hasSsgAdjustment && supplyRate === 1 && (
                         <span className="text-gray-500 font-normal">/{item.ssg_match.unit_normalized}</span>
                       )}
                       {hasSsgAdjustment && (
                         <span className="block text-xs text-purple-500">x{ssgAdj.ssgMultiplier}</span>
+                      )}
+                      {supplyRate !== 1 && !hasSsgAdjustment && (
+                        <span className="block text-xs text-blue-500">공급율 ×{supplyRate}</span>
                       )}
                     </div>
                   ) : (

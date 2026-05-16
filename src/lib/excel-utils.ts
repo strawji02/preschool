@@ -29,6 +29,8 @@ interface SheetRow {
   '신세계_수량': number | string
   '신세계_단가': number | string
   '신세계_금액': number | string
+  // (2026-05-16) 공급율 적용 — 변경 절감액 = 기존 - (신세계 × 공급율)
+  '공급율_적용_금액': number | string
   '절감액': number | string
 }
 
@@ -45,14 +47,16 @@ function shinsegaeSpec(item: ComparisonItem): string {
   return ''
 }
 
-function itemRow(item: ComparisonItem, index: number): SheetRow {
+function itemRow(item: ComparisonItem, index: number, supplyRate: number): SheetRow {
   const ourAmount = existingTotal(item)
   const m = item.ssg_match
 
   const ssgAmount = m ? estimateSsgTotal(item) : 0
   const ssgQty = item.adjusted_quantity ?? item.extracted_quantity
   const ssgPrice = m && ssgQty > 0 ? Math.round(ssgAmount / ssgQty) : 0
-  const savings = m ? ourAmount - ssgAmount : 0
+  // (2026-05-16) 공급율 적용 변경 절감액
+  const appliedAmount = m ? Math.round(ssgAmount * supplyRate) : 0
+  const savings = m ? ourAmount - appliedAmount : 0
 
   return {
     No: index + 1,
@@ -66,30 +70,34 @@ function itemRow(item: ComparisonItem, index: number): SheetRow {
     '신세계_수량': m ? ssgQty : '',
     '신세계_단가': m ? ssgPrice : '',
     '신세계_금액': m ? ssgAmount : '',
+    '공급율_적용_금액': m ? appliedAmount : '',
     '절감액': m ? savings : '',
   }
 }
 
-function buildAOA(rows: SheetRow[]): (string | number)[][] {
-  // Row 1: merged group header
-  const groupHeader = ['No', '기존 업체 품목', '', '', '', '', '신세계 제안 품목', '', '', '', '', '절감액']
-  // Row 2: column header
-  const colHeader = ['', '품명', '규격', '수량', '단가(동행)', '금액(동행)', '품명', '규격', '수량', '단가(신세계)', '금액(신세계)', '']
+function buildAOA(rows: SheetRow[], supplyRate: number): (string | number)[][] {
+  // Row 1: merged group header — 공급율/절감액 컬럼 추가 (2026-05-16)
+  const groupHeader = ['No', '기존 업체 품목', '', '', '', '', '신세계 제안 품목', '', '', '', '', '공급율', '절감액']
+  // Row 2: column header (공급율 값은 row 2 col 11에 표시 — 기존 업체 파일 양식 호환)
+  const colHeader = ['', '품명', '규격', '수량', '단가(동행)', '금액(동행)', '품명', '규격', '수량', '단가(신세계)', '금액(신세계)', supplyRate, '']
 
   const dataRows = rows.map((r) => [
     r.No,
     r['기존_품명'], r['기존_규격'], r['기존_수량'], r['기존_단가'], r['기존_금액'],
     r['신세계_품명'], r['신세계_규격'], r['신세계_수량'], r['신세계_단가'], r['신세계_금액'],
+    r['공급율_적용_금액'],
     r['절감액'],
   ])
 
   // Summary row
   const sumExisting = rows.reduce<number>((s, r) => s + (typeof r['기존_금액'] === 'number' ? r['기존_금액'] : 0), 0)
   const sumSsg = rows.reduce<number>((s, r) => s + (typeof r['신세계_금액'] === 'number' ? r['신세계_금액'] : 0), 0)
+  const sumApplied = rows.reduce<number>((s, r) => s + (typeof r['공급율_적용_금액'] === 'number' ? r['공급율_적용_금액'] : 0), 0)
   const sumSavings = rows.reduce<number>((s, r) => s + (typeof r['절감액'] === 'number' ? r['절감액'] : 0), 0)
   const summaryRow = [
     '합계', '', '', '', '', sumExisting,
     '', '', '', '', sumSsg,
+    sumApplied,
     sumSavings,
   ]
 
@@ -99,23 +107,25 @@ function buildAOA(rows: SheetRow[]): (string | number)[][] {
 export function downloadReportAsExcel(
   items: ComparisonItem[],
   fileName: string = '가격비교_보고서',
+  supplyRate: number = 1.0,
 ) {
   if (items.length === 0) {
     alert('다운로드할 데이터가 없습니다.')
     return
   }
 
-  const rows = items.map((it, i) => itemRow(it, i))
-  const aoa = buildAOA(rows)
+  const rows = items.map((it, i) => itemRow(it, i, supplyRate))
+  const aoa = buildAOA(rows, supplyRate)
 
   const ws = XLSX.utils.aoa_to_sheet(aoa)
 
-  // Merge: A1 (No 세로 2칸), B1:F1 (기존), G1:K1 (신세계), L1 (절감액 세로 2칸)
+  // Merge: A1 (No 세로 2칸), B1:F1 (기존), G1:K1 (신세계), L1 (공급율), M1 (절감액 세로 2칸)
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },   // A1:A2 No
     { s: { r: 0, c: 1 }, e: { r: 0, c: 5 } },   // B1:F1 기존 업체 품목
     { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },  // G1:K1 신세계 제안 품목
-    { s: { r: 0, c: 11 }, e: { r: 1, c: 11 } }, // L1:L2 절감액
+    { s: { r: 0, c: 11 }, e: { r: 0, c: 11 } }, // L1 공급율 (값은 row 2 — 사용자 업로드 양식 호환)
+    { s: { r: 0, c: 12 }, e: { r: 1, c: 12 } }, // M1:M2 절감액
   ]
 
   // Column widths
@@ -131,12 +141,13 @@ export function downloadReportAsExcel(
     { wch: 7 },   // 신세계 수량
     { wch: 11 },  // 신세계 단가
     { wch: 13 },  // 신세계 금액
+    { wch: 13 },  // 공급율 적용 금액 (2026-05-16)
     { wch: 13 },  // 절감액
   ]
 
   // Header style + summary highlight + savings color
   const lastRowIdx = aoa.length - 1
-  for (let c = 0; c < 12; c++) {
+  for (let c = 0; c < 13; c++) {
     for (let r = 0; r < 2; r++) {
       const ref = XLSX.utils.encode_cell({ r, c })
       if (ws[ref]) {
@@ -164,9 +175,9 @@ export function downloadReportAsExcel(
     }
   }
 
-  // 절감액 색상 (양수=녹색, 음수=빨강)
+  // 절감액 색상 (양수=녹색, 음수=빨강) — col 12로 이동 (공급율 컬럼 추가에 따른 shift)
   for (let r = 2; r <= lastRowIdx; r++) {
-    const ref = XLSX.utils.encode_cell({ r, c: 11 })
+    const ref = XLSX.utils.encode_cell({ r, c: 12 })
     if (ws[ref] && typeof ws[ref].v === 'number') {
       const v = ws[ref].v as number
       if (v > 0) {
@@ -187,9 +198,9 @@ export function downloadReportAsExcel(
     }
   }
 
-  // Number format (천단위 콤마)
+  // Number format (천단위 콤마) — 공급율 컬럼(11) + 절감액(12) 포함
   for (let r = 2; r <= lastRowIdx; r++) {
-    for (const c of [3, 4, 5, 8, 9, 10, 11]) {
+    for (const c of [3, 4, 5, 8, 9, 10, 11, 12]) {
       const ref = XLSX.utils.encode_cell({ r, c })
       if (ws[ref] && typeof ws[ref].v === 'number') {
         ws[ref].z = '#,##0'

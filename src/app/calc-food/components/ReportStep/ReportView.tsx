@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ComparisonItem, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { InvoiceViewer } from '../InvoiceViewer'
@@ -51,17 +51,39 @@ export function ReportView({
 
   // 세션 진입 시 저장된 proposal_extras 로드
   const [initialExtras, setInitialExtras] = useState<Record<string, unknown> | null>(null)
+  // (2026-05-16) 공급율 — 신세계 견적에 곱하는 배율 (1.0 = 원가, 1.25 = 25% 마진 등)
+  // 변경 절감액 = 기존 - (신세계 × supplyRate)
+  const [supplyRate, setSupplyRate] = useState<number>(1.0)
   useEffect(() => {
     if (!sessionId) return
     fetch(`/api/sessions/${sessionId}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.success && data.session?.proposal_extras) {
-          setInitialExtras(data.session.proposal_extras)
+          const extras = data.session.proposal_extras as Record<string, unknown>
+          setInitialExtras(extras)
+          // 공급율 복원
+          const sr = typeof extras.supply_rate === 'number' ? extras.supply_rate : 1.0
+          setSupplyRate(sr > 0 ? sr : 1.0)
         }
       })
       .catch((e) => console.warn('proposal_extras 로드 실패:', e))
   }, [sessionId])
+
+  // 공급율 변경 시 DB 저장 (debounce)
+  useEffect(() => {
+    if (!sessionId) return
+    if (supplyRate === 1.0 && !initialExtras) return  // 초기 1.0은 저장 X
+    const t = setTimeout(() => {
+      const nextExtras = { ...(initialExtras ?? {}), supply_rate: supplyRate }
+      fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposal_extras: nextExtras }),
+      }).catch((e) => console.warn('supply_rate 저장 실패:', e))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [supplyRate, sessionId, initialExtras])
 
   const excludedItems = items.filter(i => i.is_excluded)
   const includedItems = items.filter(i => !i.is_excluded)
@@ -71,6 +93,25 @@ export function ReportView({
   const excludedTotal = excludedItems.reduce((s, i) => s + itemBilled(i), 0)
   const includedTotal = includedItems.reduce((s, i) => s + itemBilled(i), 0)
   const grandTotal = excludedTotal + includedTotal
+
+  // (2026-05-16) 공급율 적용 scenarios — 변경 절감액 = 기존 - (신세계 × supplyRate)
+  const adjustedScenarios = useMemo(() => {
+    const adjust = (s: SupplierScenario): SupplierScenario => {
+      const adjustedSupplierCost = s.totalSupplierCost * supplyRate
+      const adjustedSavings = s.totalOurCost - adjustedSupplierCost
+      const adjustedPercent = s.totalOurCost > 0 ? (adjustedSavings / s.totalOurCost) * 100 : 0
+      return {
+        ...s,
+        totalSupplierCost: adjustedSupplierCost,
+        totalSavings: adjustedSavings,
+        savingsPercent: adjustedPercent,
+      }
+    }
+    return {
+      cj: adjust(scenarios.cj),
+      ssg: adjust(scenarios.ssg),
+    }
+  }, [scenarios, supplyRate])
 
   // 제안서 모드: 풀스크린 인포그래픽
   if (mode === 'proposal') {
@@ -86,9 +127,10 @@ export function ReportView({
         <ProposalReport
           sessionId={sessionId}
           items={items}
-          ssgScenario={scenarios.ssg}
+          ssgScenario={adjustedScenarios.ssg}
           supplierName={supplierName}
           initialExtras={initialExtras as never}
+          supplyRate={supplyRate}
         />
       </div>
     )
@@ -112,13 +154,24 @@ export function ReportView({
           onUpdateSupplierName={onUpdateSupplierName}
           onOpenInvoiceReview={onOpenInvoiceReview}
           onOpenProposal={() => setMode('proposal')}
+          supplyRate={supplyRate}
         />
 
         <div className="flex-1 overflow-y-auto p-6">
-          {/* 시나리오 비교 */}
+          {/* (2026-05-16) 공급율 입력 — 신세계 견적에 배율 적용 */}
+          <SupplyRateInput supplyRate={supplyRate} onChange={setSupplyRate} />
+
+          {/* 시나리오 비교 — supplyRate 적용된 adjustedScenarios 사용 */}
           <section className="mb-8">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">신세계 도입 시 절감액</h3>
-            <ScenarioComparison cjScenario={scenarios.cj} ssgScenario={scenarios.ssg} />
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">
+              신세계 도입 시 절감액
+              {supplyRate !== 1 && (
+                <span className="ml-2 text-sm font-normal text-blue-600">
+                  (공급율 ×{supplyRate} 적용)
+                </span>
+              )}
+            </h3>
+            <ScenarioComparison cjScenario={adjustedScenarios.cj} ssgScenario={adjustedScenarios.ssg} />
           </section>
 
           {/* 품목별 상세 */}
@@ -132,6 +185,7 @@ export function ReportView({
             <ItemBreakdownTable
               items={includedItems}
               onToggleExclude={onToggleExclude}
+              supplyRate={supplyRate}
             />
           </section>
 
@@ -147,6 +201,7 @@ export function ReportView({
               <ItemBreakdownTable
                 items={excludedItems}
                 onToggleExclude={onToggleExclude}
+                supplyRate={supplyRate}
               />
             </section>
           )}
@@ -177,5 +232,79 @@ export function ReportView({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * 공급율 입력 컴포넌트 (2026-05-16)
+ *
+ * 신세계 견적에 일괄 적용되는 배율 (예: 1.25 = 25% 마진 추가).
+ * 변경 절감액 = 기존 - (신세계 × supplyRate)
+ *
+ * 0.5 ~ 2.0 범위, 0.01 step. proposal_extras.supply_rate에 저장.
+ */
+function SupplyRateInput({
+  supplyRate,
+  onChange,
+}: {
+  supplyRate: number
+  onChange: (rate: number) => void
+}) {
+  const [draft, setDraft] = useState(supplyRate.toFixed(2))
+  useEffect(() => {
+    setDraft(supplyRate.toFixed(2))
+  }, [supplyRate])
+  return (
+    <section className="mb-6 rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-gray-900">공급율 (신세계 견적 배율)</h3>
+          <p className="mt-0.5 text-xs text-gray-600">
+            모든 신세계 단가에 곱하는 배율 — 변경 절감액 = 기존 − (신세계 × 공급율)
+          </p>
+          <p className="mt-0.5 text-[11px] text-gray-500">
+            예) 1.00 = 원가 그대로 · 1.25 = 25% 마진 · 0.95 = 5% 추가 할인
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            type="number"
+            step="0.01"
+            min="0.5"
+            max="2"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              const n = parseFloat(draft)
+              if (Number.isFinite(n) && n >= 0.5 && n <= 2) {
+                onChange(Number(n.toFixed(2)))
+              } else {
+                setDraft(supplyRate.toFixed(2))
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                (e.target as HTMLInputElement).blur()
+              }
+            }}
+            className={cn(
+              'w-24 rounded-md border bg-white px-3 py-1.5 text-right text-sm font-semibold focus:outline-none focus:ring-2',
+              supplyRate === 1
+                ? 'border-gray-300 text-gray-700 focus:border-blue-500 focus:ring-blue-200'
+                : 'border-blue-400 text-blue-700 focus:border-blue-500 focus:ring-blue-200',
+            )}
+          />
+          {supplyRate !== 1 && (
+            <button
+              onClick={() => onChange(1.0)}
+              className="rounded-md border border-gray-300 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
+              title="공급율 초기화 (1.0)"
+            >
+              초기화
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }

@@ -17,6 +17,8 @@ interface ReportHeaderProps {
   onOpenInvoiceReview?: () => void
   /** 제안서 모드 진입 (2026-05-12) */
   onOpenProposal?: () => void
+  /** 공급율 (2026-05-16) — 엑셀 다운로드에 적용 */
+  supplyRate?: number
 }
 
 export function ReportHeader({
@@ -28,6 +30,7 @@ export function ReportHeader({
   onUpdateSupplierName,
   onOpenInvoiceReview,
   onOpenProposal,
+  supplyRate = 1,
 }: ReportHeaderProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(supplierName ?? '')
@@ -135,7 +138,7 @@ export function ReportHeader({
           <button
             className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
             onClick={() => {
-              downloadReportAsExcel(items, (supplierName || fileName).replace(/\.[^/.]+$/, ''))
+              downloadReportAsExcel(items, (supplierName || fileName).replace(/\.[^/.]+$/, ''), supplyRate)
             }}
           >
             <Download size={13} />
