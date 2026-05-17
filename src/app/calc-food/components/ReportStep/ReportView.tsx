@@ -161,27 +161,28 @@ export function ReportView({
           {/* (2026-05-16) 공급율 입력 — 신세계 견적에 배율 적용 */}
           <SupplyRateInput supplyRate={supplyRate} onChange={setSupplyRate} />
 
-          {/* 시나리오 비교 — supplyRate 적용된 adjustedScenarios 사용 */}
-          <section className="mb-8">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">
-              신세계 도입 시 절감액
-              {supplyRate !== 1 && (
-                <span className="ml-2 text-sm font-normal text-blue-600">
-                  (공급율 ×{supplyRate} 적용)
-                </span>
-              )}
-            </h3>
+          {/* 시나리오 비교 — supplyRate 적용된 adjustedScenarios 사용
+             (2026-05-16) ScenarioComparison hero가 절감액 강조 — 별도 h3 제거 (중복 해소) */}
+          <section className="mb-6">
+            {supplyRate !== 1 && (
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                공급율 ×{supplyRate} 적용
+              </div>
+            )}
             <ScenarioComparison cjScenario={adjustedScenarios.cj} ssgScenario={adjustedScenarios.ssg} />
           </section>
 
-          {/* 품목별 상세 */}
-          <section className="mb-8">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">
-              비교 가능 품목 ({formatNumber(includedItems.length)}개)
-              <span className="ml-2 text-sm font-normal text-gray-500">
-                — 👁️ 버튼으로 제외 가능
-              </span>
-            </h3>
+          {/* 품목별 상세 (2026-05-16 — 헤더 콤팩트화) */}
+          <section className="mb-6">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">
+                비교 가능 품목
+                <span className="ml-1.5 text-xs font-normal text-gray-500">
+                  ({formatNumber(includedItems.length)}개)
+                </span>
+              </h3>
+              <span className="text-[11px] text-gray-500">👁️ 클릭으로 제외</span>
+            </div>
             <ItemBreakdownTable
               items={includedItems}
               onToggleExclude={onToggleExclude}
@@ -189,14 +190,20 @@ export function ReportView({
             />
           </section>
 
-          {/* 비교 불가 품목 별지 (제외된 품목) */}
+          {/* 비교 불가 품목 별지 (제외된 품목) — 콤팩트 헤더 */}
           {excludedItems.length > 0 && (
-            <section className="mb-8">
-              <h3 className="mb-2 text-lg font-semibold text-gray-900">
-                비교 불가 품목 별지 ({formatNumber(excludedItems.length)}개)
-              </h3>
-              <p className="mb-4 text-xs text-gray-600">
-                신세계 DB에 매칭 없음 또는 담당자가 제외 — 기존 업체 그대로 유지되며 절감액 계산에서 제외됩니다.
+            <section className="mb-6">
+              <div className="mb-2 flex items-baseline justify-between">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  비교 불가 품목 별지
+                  <span className="ml-1.5 text-xs font-normal text-gray-500">
+                    ({formatNumber(excludedItems.length)}개)
+                  </span>
+                </h3>
+                <span className="text-[11px] text-gray-500">절감 계산 제외</span>
+              </div>
+              <p className="mb-3 text-[11px] text-gray-500">
+                매칭 없음 또는 담당자 제외 — 기존 업체 그대로 유지
               </p>
               <ItemBreakdownTable
                 items={excludedItems}
@@ -206,28 +213,30 @@ export function ReportView({
             </section>
           )}
 
-          {/* 총액 검증 */}
-          <section className="rounded-xl border-2 border-gray-300 bg-gray-50 p-5">
-            <h3 className="mb-3 text-base font-semibold text-gray-900">총액 검증</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">비교 가능 품목 총액</span>
-                <span className="font-medium">{formatCurrency(includedTotal)}</span>
+          {/* 총액 검증 — 콤팩트 (3행 inline) */}
+          <section className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs">
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                총액 검증
+              </span>
+              <span className="text-[11px] text-green-700">✓ 원장 일치</span>
+            </div>
+            <div className="space-y-1 tabular-nums">
+              <div className="flex justify-between text-gray-600">
+                <span>비교 가능 ({formatNumber(includedItems.length)}개)</span>
+                <span className="font-medium text-gray-800">{formatCurrency(includedTotal)}</span>
               </div>
               {excludedItems.length > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-gray-600">비교 불가 품목 총액</span>
-                  <span className="font-medium">{formatCurrency(excludedTotal)}</span>
+                <div className="flex justify-between text-gray-600">
+                  <span>비교 불가 ({formatNumber(excludedItems.length)}개)</span>
+                  <span className="font-medium text-gray-500">{formatCurrency(excludedTotal)}</span>
                 </div>
               )}
-              <div className="flex justify-between border-t border-gray-300 pt-2 font-bold text-gray-900">
-                <span>기존 업체 거래명세표 총액</span>
+              <div className="flex justify-between border-t border-gray-300 pt-1.5 font-bold text-gray-900">
+                <span>거래명세표 총액</span>
                 <span>{formatCurrency(grandTotal)}</span>
               </div>
             </div>
-            <p className="mt-2 text-xs text-green-700">
-              ✓ 비교 가능 + 비교 불가 = 기존 총액 (원장 일치)
-            </p>
           </section>
         </div>
       </div>
@@ -254,56 +263,54 @@ function SupplyRateInput({
   useEffect(() => {
     setDraft(supplyRate.toFixed(2))
   }, [supplyRate])
+  const active = supplyRate !== 1
   return (
-    <section className="mb-6 rounded-xl border border-blue-200 bg-blue-50/40 p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-gray-900">공급율 (신세계 견적 배율)</h3>
-          <p className="mt-0.5 text-xs text-gray-600">
-            모든 신세계 단가에 곱하는 배율 — 변경 절감액 = 기존 − (신세계 × 공급율)
-          </p>
-          <p className="mt-0.5 text-[11px] text-gray-500">
-            예) 1.00 = 원가 그대로 · 1.25 = 25% 마진 · 0.95 = 5% 추가 할인
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <input
-            type="number"
-            step="0.01"
-            min="0.5"
-            max="2"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => {
-              const n = parseFloat(draft)
-              if (Number.isFinite(n) && n >= 0.5 && n <= 2) {
-                onChange(Number(n.toFixed(2)))
-              } else {
-                setDraft(supplyRate.toFixed(2))
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                (e.target as HTMLInputElement).blur()
-              }
-            }}
-            className={cn(
-              'w-24 rounded-md border bg-white px-3 py-1.5 text-right text-sm font-semibold focus:outline-none focus:ring-2',
-              supplyRate === 1
-                ? 'border-gray-300 text-gray-700 focus:border-blue-500 focus:ring-blue-200'
-                : 'border-blue-400 text-blue-700 focus:border-blue-500 focus:ring-blue-200',
-            )}
-          />
-          {supplyRate !== 1 && (
-            <button
-              onClick={() => onChange(1.0)}
-              className="rounded-md border border-gray-300 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
-              title="공급율 초기화 (1.0)"
-            >
-              초기화
-            </button>
+    <section className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+          공급율
+        </span>
+        <span className="truncate text-[11px] text-gray-500" title="모든 신세계 단가에 곱하는 배율">
+          신세계 단가 ×N (예: 1.25 = 25% 마진)
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <input
+          type="number"
+          step="0.01"
+          min="0.5"
+          max="2"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            const n = parseFloat(draft)
+            if (Number.isFinite(n) && n >= 0.5 && n <= 2) {
+              onChange(Number(n.toFixed(2)))
+            } else {
+              setDraft(supplyRate.toFixed(2))
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur()
+            }
+          }}
+          className={cn(
+            'w-20 rounded-md border px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-2',
+            active
+              ? 'border-blue-400 bg-blue-50 text-blue-700 focus:border-blue-500 focus:ring-blue-200'
+              : 'border-gray-300 bg-white text-gray-700 focus:border-blue-500 focus:ring-blue-200',
           )}
-        </div>
+        />
+        {active && (
+          <button
+            onClick={() => onChange(1.0)}
+            className="rounded-md border border-gray-300 px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
+            title="공급율 초기화 (1.0)"
+          >
+            ↺
+          </button>
+        )}
       </div>
     </section>
   )
