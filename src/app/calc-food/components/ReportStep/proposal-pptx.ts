@@ -52,6 +52,8 @@ export interface ProposalPptxData {
   extras: (ExtraItem & { perRound: number; annualAmount: number })[]
   totalExtrasAnnual: number
   childrenCount: number
+  /** 신세계 DB 단가 기준 연월 (예: '2026년 5월') — 푸터 표시용 (2026-05-17) */
+  ssgPeriod?: string
 }
 
 // PDF/화면과 동일한 컬러 팔레트
@@ -364,9 +366,10 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     })
   })
 
-  // 푸터 (카테고리 끝 7.10 아래)
-  s1.addText(`본 제안서는 ${data.period} 거래명세표 기준으로 작성되었습니다.`, {
-    x: CARD_X, y: 7.20, w: CAT_W, h: 0.20,
+  // 푸터 (2026-05-17 Slide 1/2 위치 통일 + 텍스트 '신세계 단가 기준')
+  const footerText = `본 제안서는 ${data.ssgPeriod ?? data.period} 신세계 단가 기준으로 작성되었습니다.`
+  s1.addText(footerText, {
+    x: 0.50, y: 7.20, w: 12.33, h: 0.20,
     fontSize: 9, color: C.gray400, align: 'center',
   })
   s1.addText('1 / 2', {
@@ -523,13 +526,14 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     })
   })
 
-  // 푸터
-  s2.addText(`본 제안서는 ${data.period} 거래명세표 기준으로 작성되었습니다.`, {
-    x: 0.50, y: 7.05, w: 11.00, h: 0.22,
+  // 푸터 (2026-05-17 Slide 1과 동일 위치 — x 0.50 y 7.20 w 12.33)
+  const footerText2 = `본 제안서는 ${data.ssgPeriod ?? data.period} 신세계 단가 기준으로 작성되었습니다.`
+  s2.addText(footerText2, {
+    x: 0.50, y: 7.20, w: 12.33, h: 0.20,
     fontSize: 9, color: C.gray400, align: 'center',
   })
   s2.addText('2 / 2', {
-    x: 12.20, y: 7.20, w: 1.00, h: 0.20,
+    x: 12.20, y: 7.25, w: 1.00, h: 0.18,
     fontSize: 8, color: C.gray400, align: 'right',
   })
 

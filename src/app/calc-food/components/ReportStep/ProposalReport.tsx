@@ -301,6 +301,17 @@ export function ProposalReport({
     window.print()
   }
 
+  // 신세계 DB 최종 sync 연월 — 푸터 '{X년 Y월} 신세계 단가 기준' 표시용 (2026-05-17)
+  const [ssgPeriod, setSsgPeriod] = useState<string | null>(null)
+  useEffect(() => {
+    fetch('/api/products/last-sync')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && d.period) setSsgPeriod(d.period as string)
+      })
+      .catch((e) => console.warn('신세계 sync 날짜 조회 실패:', e))
+  }, [])
+
   // PPT 다운로드 (영업자 편집 가능 — 텍스트/도형/색상 그대로)
   const [pptxLoading, setPptxLoading] = useState(false)
   const handleDownloadPptx = async () => {
@@ -320,6 +331,7 @@ export function ProposalReport({
         extras: extrasComputed,
         totalExtrasAnnual,
         childrenCount,
+        ssgPeriod: ssgPeriod ?? undefined,
       })
     } catch (e) {
       console.error('PPT 다운로드 실패:', e)
