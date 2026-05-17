@@ -126,6 +126,10 @@ function computeCategoryStats(items: ComparisonItem[], supplyRate: number = 1): 
     }
   }
   for (const stat of map.values()) {
+    // (2026-05-16) 표시/산식 정합성 — 각 카테고리 cost를 round한 후 차감
+    // raw float 그대로 두면 표시(반올림) ≠ 합산(raw) 불일치 발생
+    stat.ourCost = Math.round(stat.ourCost)
+    stat.ssgCost = Math.round(stat.ssgCost)
     stat.savings = Math.max(0, stat.ourCost - stat.ssgCost)
     stat.savingsPercent = stat.ourCost > 0 ? (stat.savings / stat.ourCost) * 100 : 0
     // 상위 3건만 (절감액 큰 순)
@@ -214,10 +218,14 @@ export function ProposalReport({
   // 카테고리별 통계 (메모이즈)
   const categoryStats = useMemo(() => computeCategoryStats(items, supplyRate), [items, supplyRate])
 
-  // 메인 합계
-  const monthlyOurCost = ssgScenario.totalOurCost
-  const monthlySsgCost = ssgScenario.totalSupplierCost
-  const monthlySavings = ssgScenario.totalSavings
+  // 메인 합계 (2026-05-16) — 표시/산식 완전 정합성 보장
+  // categoryStats(이미 round됨)를 single source로 사용:
+  //   카테고리 합 = 월합 = 연합/12 (모든 화면에서 정확히 일치)
+  // 이전 결함: ssgScenario.totalSupplierCost(raw float)에 ×12 → 표시(반올림) 불일치
+  // 예) 표시 ₩4,738,072 × 12 ≠ 표시 ₩56,856,858 (6원 차이)
+  const monthlyOurCost = categoryStats.reduce((s, c) => s + c.ourCost, 0)
+  const monthlySsgCost = categoryStats.reduce((s, c) => s + c.ssgCost, 0)
+  const monthlySavings = monthlyOurCost - monthlySsgCost
   const annualOurCost = monthlyOurCost * 12
   const annualSsgCost = monthlySsgCost * 12
   const annualSavings = monthlySavings * 12
