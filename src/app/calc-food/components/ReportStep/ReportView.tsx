@@ -96,6 +96,9 @@ export function ReportView({
   const grandTotal = excludedTotal + includedTotal
 
   // (2026-05-16) 공급율 적용 scenarios — 변경 절감액 = 기존 - (신세계 × supplyRate)
+  // (2026-05-17) ssg는 categoryStats 합(round per-category)을 single source로 override —
+  //   ScenarioComparison hero와 CategoryBreakdownCards 합계가 반올림 손실로 어긋나는 문제 fix.
+  //   ProposalReport와 동일한 fix (해당 파일 line 222-226 주석 참조).
   const adjustedScenarios = useMemo(() => {
     const adjust = (s: SupplierScenario): SupplierScenario => {
       const adjustedSupplierCost = s.totalSupplierCost * supplyRate
@@ -108,11 +111,24 @@ export function ReportView({
         savingsPercent: adjustedPercent,
       }
     }
+    const adjustedSsg = adjust(scenarios.ssg)
+    // ssg만 category-stats 합으로 정밀 일치 (CJ는 카테고리 분석 X)
+    const ssgStats = computeCategoryStats(includedItems, supplyRate)
+    const sumOur = ssgStats.reduce((s, c) => s + c.ourCost, 0)
+    const sumSsg = ssgStats.reduce((s, c) => s + c.ssgCost, 0)
+    const sumSavings = sumOur - sumSsg
+    const sumPct = sumOur > 0 ? (sumSavings / sumOur) * 100 : 0
     return {
       cj: adjust(scenarios.cj),
-      ssg: adjust(scenarios.ssg),
+      ssg: {
+        ...adjustedSsg,
+        totalOurCost: sumOur,
+        totalSupplierCost: sumSsg,
+        totalSavings: sumSavings,
+        savingsPercent: sumPct,
+      },
     }
-  }, [scenarios, supplyRate])
+  }, [scenarios, supplyRate, includedItems])
 
   // 제안서 모드: 풀스크린 인포그래픽
   if (mode === 'proposal') {
