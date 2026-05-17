@@ -476,7 +476,7 @@ export function ProposalReport({
               공급망 최적화를 통한 직접 비용 절감
             </span>
             <span className="text-sm font-bold text-blue-700 print:text-xs">
-              월 평균 {formatCurrency(monthlySavings)} 절감 · 총 절감액: {savingsPercent.toFixed(1)}%
+              월 평균 {formatCurrency(monthlySavings)} 절감 · 절감율 : {savingsPercent.toFixed(1)}%
             </span>
           </div>
         </section>

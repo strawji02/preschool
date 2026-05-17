@@ -291,7 +291,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     x: CARD_X + 0.25, y: compY + 0.98, w: 7.00, h: 0.25,
     fontSize: 10, color: C.gray500,
   })
-  s1.addText(`월 평균 ${formatCurrency(data.monthlySavings)} 절감  ·  총 절감액: ${data.savingsPercent.toFixed(1)}%`, {
+  s1.addText(`월 평균 ${formatCurrency(data.monthlySavings)} 절감  ·  절감율 : ${data.savingsPercent.toFixed(1)}%`, {
     x: CARD_X + COMP_W - 4.85, y: compY + 0.98, w: 4.60, h: 0.25,
     fontSize: 11, bold: true, color: '2D43A8', align: 'right',
   })
