@@ -113,23 +113,20 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   const s1 = pptx.addSlide()
   s1.background = { color: C.white }
 
-  // ── 공통 layout 상수 (2026-05-17 — 위→아래 가로 점진 확장) ──
-  //   상위 카드는 좁고, 아래로 갈수록 넓어지는 시각적 위계 (피라미드 역방향)
-  //   슬라이드 폭 13.333, 모든 카드 중앙 정렬 (x = (13.333 - w) / 2)
+  // ── 공통 layout 상수 (2026-05-17 — A안: 좌측 정렬 + 상위 폭 최대 축소) ──
+  //   모든 카드 좌측 동일 (CARD_X = 0.60) — 좌측 anchor 안정
+  //   상위 3 섹션은 폭 최대 축소 (사용자 요청 "비용효율도 너무 길다")
+  //   카테고리만 풀폭 (12.13) — 정보량 많아 풀폭 필요
   //
-  //   HERO       w 8.80 (가장 좁음) — 핵심 메시지만
-  //   3카드      w 10.40 (중간)
-  //   비용효율   w 11.70 (넓음)
-  //   카테고리   w 12.13 (가장 넓음, 풀폭에 가까움)
-  const SLIDE_W = 13.333
-  const HERO_W = 8.80
-  const CARD3_W = 10.40
-  const COMP_W = 11.70
+  //   HERO       w 6.50 (가장 좁음)
+  //   3카드      w 8.50 (중간)
+  //   비용효율   w 9.50 (축소)
+  //   카테고리   w 12.13 (풀폭)
+  const CARD_X = 0.60
+  const HERO_W = 6.50
+  const CARD3_W = 8.50
+  const COMP_W = 9.50
   const CAT_W = 12.13
-  const HERO_X = (SLIDE_W - HERO_W) / 2  // 2.27
-  const CARD3_X = (SLIDE_W - CARD3_W) / 2  // 1.47
-  const COMP_X = (SLIDE_W - COMP_W) / 2  // 0.82
-  const CAT_X = (SLIDE_W - CAT_W) / 2  // 0.60
   const BORDER_GRAY = 'CBD5E1' // slate-300
   const BORDER_W = 1.75
 
@@ -147,28 +144,28 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   const heroY = 1.10
   const heroH = 1.20
   s1.addShape('roundRect', {
-    x: HERO_X, y: heroY, w: HERO_W, h: heroH,
+    x: CARD_X, y: heroY, w: HERO_W, h: heroH,
     fill: { color: C.blueHero }, line: { type: 'none' }, rectRadius: 0.12,
   })
   s1.addText('연간 절감 효과', {
-    x: HERO_X + 0.25, y: heroY + 0.15, w: 4.50, h: 0.25,
+    x: CARD_X + 0.25, y: heroY + 0.15, w: 4.50, h: 0.25,
     fontSize: 11, bold: true, color: 'BFDBFE', charSpacing: 2,
   })
   s1.addText(formatCurrency(data.annualSavings), {
-    x: HERO_X + 0.25, y: heroY + 0.40, w: HERO_W - 2.50, h: 0.55,
+    x: CARD_X + 0.25, y: heroY + 0.40, w: HERO_W - 2.50, h: 0.55,
     fontSize: 30, bold: true, color: C.white, fontFace: 'Pretendard',
   })
   s1.addText(`월 평균 ${formatCurrency(data.monthlySavings)} 절감`, {
-    x: HERO_X + 0.25, y: heroY + 0.95, w: HERO_W - 2.50, h: 0.22,
+    x: CARD_X + 0.25, y: heroY + 0.95, w: HERO_W - 2.50, h: 0.22,
     fontSize: 11, color: 'BFDBFE',
   })
   // ▼ % 배지 (우상)
   s1.addShape('roundRect', {
-    x: HERO_X + HERO_W - 2.10, y: heroY + 0.40, w: 1.85, h: 0.50,
+    x: CARD_X + HERO_W - 2.10, y: heroY + 0.40, w: 1.85, h: 0.50,
     fill: { color: 'FBBF24' }, line: { type: 'none' }, rectRadius: 0.25,
   })
   s1.addText(`▼ ${data.savingsPercent.toFixed(1)}%`, {
-    x: HERO_X + HERO_W - 2.10, y: heroY + 0.40, w: 1.85, h: 0.50,
+    x: CARD_X + HERO_W - 2.10, y: heroY + 0.40, w: 1.85, h: 0.50,
     fontSize: 18, bold: true, color: C.blueDark, align: 'center', valign: 'middle',
   })
 
@@ -179,24 +176,24 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   const card3W = (CARD3_W - card3Gap * 2) / 3  // 약 3.35
   // 현 거래처 (흰색)
   s1.addShape('roundRect', {
-    x: CARD3_X, y: card3Y, w: card3W, h: card3H,
+    x: CARD_X, y: card3Y, w: card3W, h: card3H,
     fill: { color: C.white }, line: { color: BORDER_GRAY, width: BORDER_W },
     rectRadius: 0.10,
   })
   s1.addText('현 거래처 (월)', {
-    x: CARD3_X + 0.20, y: card3Y + 0.13, w: card3W - 0.40, h: 0.22,
+    x: CARD_X + 0.20, y: card3Y + 0.13, w: card3W - 0.40, h: 0.22,
     fontSize: 10, bold: true, color: C.gray500,
   })
   s1.addText(formatCurrency(data.monthlyOurCost), {
-    x: CARD3_X + 0.20, y: card3Y + 0.37, w: card3W - 0.40, h: 0.42,
+    x: CARD_X + 0.20, y: card3Y + 0.37, w: card3W - 0.40, h: 0.42,
     fontSize: 19, bold: true, color: C.gray700,
   })
   s1.addText(`연간 ${formatCurrency(data.annualOurCost)}`, {
-    x: CARD3_X + 0.20, y: card3Y + 0.80, w: card3W - 0.40, h: 0.20,
+    x: CARD_X + 0.20, y: card3Y + 0.80, w: card3W - 0.40, h: 0.20,
     fontSize: 9, color: C.gray500,
   })
   // 신세계푸드 (연한 청색)
-  const card3X2 = CARD3_X + card3W + card3Gap
+  const card3X2 = CARD_X + card3W + card3Gap
   s1.addShape('roundRect', {
     x: card3X2, y: card3Y, w: card3W, h: card3H,
     fill: { color: C.blueLight }, line: { color: '60A5FA', width: BORDER_W },
@@ -239,17 +236,17 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   const compH = 1.30
   const ssgPct = 100 - data.savingsPercent
   s1.addShape('roundRect', {
-    x: COMP_X, y: compY, w: COMP_W, h: compH,
+    x: CARD_X, y: compY, w: COMP_W, h: compH,
     fill: { color: C.white }, line: { color: BORDER_GRAY, width: BORDER_W },
     rectRadius: 0.12,
   })
   s1.addText('비용 효율 비교', {
-    x: COMP_X + 0.25, y: compY + 0.18, w: 5.00, h: 0.28,
+    x: CARD_X + 0.25, y: compY + 0.18, w: 5.00, h: 0.28,
     fontSize: 13, bold: true, color: C.gray900,
   })
   // 범례 (우상)
   const legendY = compY + 0.22
-  const legendRightEnd = COMP_X + COMP_W - 0.25
+  const legendRightEnd = CARD_X + COMP_W - 0.25
   s1.addShape('ellipse', {
     x: legendRightEnd - 4.10, y: legendY + 0.08, w: 0.14, h: 0.14,
     fill: { color: C.gray400 }, line: { type: 'none' },
@@ -267,7 +264,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 9, bold: true, color: '2D43A8',
   })
   // 가로 막대 (배경 + 신세계 채움)
-  const barX = COMP_X + 0.25
+  const barX = CARD_X + 0.25
   const barW = COMP_W - 0.50
   const barY = compY + 0.58
   const barH = 0.34
@@ -289,11 +286,11 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   })
   // 하단 — 메시지 + 절감 강조
   s1.addText('공급망 최적화를 통한 직접 비용 절감', {
-    x: COMP_X + 0.25, y: compY + 0.98, w: 7.00, h: 0.25,
+    x: CARD_X + 0.25, y: compY + 0.98, w: 7.00, h: 0.25,
     fontSize: 10, color: C.gray500,
   })
   s1.addText(`월 평균 ${formatCurrency(data.monthlySavings)} 절감  ·  총 절감액: ${data.savingsPercent.toFixed(1)}%`, {
-    x: COMP_X + COMP_W - 4.85, y: compY + 0.98, w: 4.60, h: 0.25,
+    x: CARD_X + COMP_W - 4.85, y: compY + 0.98, w: 4.60, h: 0.25,
     fontSize: 11, bold: true, color: '2D43A8', align: 'right',
   })
 
@@ -305,7 +302,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   const cardW = (CAT_W - catGap * 3) / 4
   data.categoryStats.forEach((stat, i) => {
     const meta = CATEGORY_META[stat.category]
-    const x = CAT_X + i * (cardW + catGap)
+    const x = CARD_X + i * (cardW + catGap)
     const isSaving = stat.savings > 0
     const topItems = stat.topItems.slice(0, 3)
     const hasMore = stat.topItems.length > 3
@@ -369,7 +366,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
 
   // 푸터 (카테고리 끝 7.10 아래)
   s1.addText(`본 제안서는 ${data.period} 거래명세표 기준으로 작성되었습니다.`, {
-    x: CAT_X, y: 7.20, w: CAT_W, h: 0.20,
+    x: CARD_X, y: 7.20, w: CAT_W, h: 0.20,
     fontSize: 9, color: C.gray400, align: 'center',
   })
   s1.addText('1 / 2', {
