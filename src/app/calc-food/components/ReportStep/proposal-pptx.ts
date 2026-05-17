@@ -271,9 +271,13 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 11, bold: true, color: '2D43A8', align: 'right',
   })
 
-  // ── (5) 카테고리 4 카드 (1x4 가로 그리드) ──
-  const catY = 5.35
-  const catH = 1.55
+  // ── (5) 카테고리 4 카드 (1x4 가로, 2026-05-17 사용자 디자인 반영) ──
+  // Layout:
+  //   상단: [좌] 아이콘 + 절감률 배지  /  [우] 현 거래처 + 큰 절감액(빨강)
+  //   중간: 카테고리명 (좌측, bold)
+  //   하단: 주요 품목 3개 (좌측 정렬, 각 줄)
+  const catY = 5.20
+  const catH = 1.85
   const totalCatW = 12.53
   const catGap = 0.18
   const cardW = (totalCatW - catGap * 3) / 4
@@ -281,6 +285,8 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     const meta = CATEGORY_META[stat.category]
     const x = 0.40 + i * (cardW + catGap)
     const isSaving = stat.savings > 0
+    const topItems = stat.topItems.slice(0, 3)
+    const hasMore = stat.topItems.length > 3
 
     // 카드 배경
     s1.addShape('roundRect', {
@@ -288,52 +294,54 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
       fill: { color: C.white }, line: { color: C.gray200, width: 0.75 },
       rectRadius: 0.10,
     })
-    // 좌상 아이콘
+    // [좌상] 아이콘 (0.45 x 0.45)
     s1.addShape('roundRect', {
-      x: x + 0.20, y: catY + 0.22, w: 0.50, h: 0.50,
+      x: x + 0.18, y: catY + 0.18, w: 0.45, h: 0.45,
       fill: { color: C.blueSoft }, line: { type: 'none' }, rectRadius: 0.08,
     })
     s1.addText(meta.emoji, {
-      x: x + 0.20, y: catY + 0.22, w: 0.50, h: 0.50,
-      fontSize: 18, align: 'center', valign: 'middle',
+      x: x + 0.18, y: catY + 0.18, w: 0.45, h: 0.45,
+      fontSize: 16, align: 'center', valign: 'middle',
     })
-    // 우상 절감률 배지 (회색)
+    // [좌상 옆] 절감률 회색 배지
     s1.addShape('roundRect', {
-      x: x + cardW - 1.05, y: catY + 0.27, w: 0.85, h: 0.32,
-      fill: { color: C.gray100 }, line: { type: 'none' }, rectRadius: 0.16,
+      x: x + 0.70, y: catY + 0.25, w: 0.78, h: 0.30,
+      fill: { color: C.gray100 }, line: { type: 'none' }, rectRadius: 0.15,
     })
     s1.addText(`${isSaving ? '▼' : '▲'} ${stat.savingsPercent.toFixed(1)}%`, {
-      x: x + cardW - 1.05, y: catY + 0.27, w: 0.85, h: 0.32,
-      fontSize: 9, bold: true, color: C.gray700, align: 'center', valign: 'middle',
+      x: x + 0.70, y: catY + 0.25, w: 0.78, h: 0.30,
+      fontSize: 8, bold: true, color: C.gray700, align: 'center', valign: 'middle',
     })
-    // 카테고리명 + (English)
-    s1.addText(`${stat.category} `, {
-      x: x + 0.20, y: catY + 0.80, w: cardW - 0.40, h: 0.30,
-      fontSize: 13, bold: true, color: C.gray900,
+    // [우상] 현 거래처 비용 (작은 회색)
+    s1.addText(`현 거래처 ${formatCurrency(stat.ourCost)}`, {
+      x: x + cardW - 2.00, y: catY + 0.18, w: 1.82, h: 0.22,
+      fontSize: 8, color: C.gray500, align: 'right',
     })
-    s1.addText(`(${meta.en})`, {
-      x: x + 1.05, y: catY + 0.85, w: cardW - 1.20, h: 0.25,
-      fontSize: 9, color: C.gray500,
-    })
-    // 주요 품목
-    const topNames = stat.topItems
-      .slice(0, 3)
-      .map((it) => `${shortName(it.name)} -₩${shortKRW(it.savings)}`)
-      .join(', ')
-    if (topNames) {
-      s1.addText(topNames, {
-        x: x + 0.20, y: catY + 1.08, w: cardW - 0.40, h: 0.20,
-        fontSize: 8, color: '4B5563',
-      })
-    }
-    // 비용 + 절감액
-    s1.addText(`비용 ${formatCurrency(stat.ourCost)}`, {
-      x: x + 0.20, y: catY + 1.28, w: cardW - 0.40, h: 0.22,
-      fontSize: 9, color: C.gray500,
-    })
+    // [우상 두번째 줄] 큰 절감액 (빨강 bold)
     s1.addText(`${isSaving ? '−' : '+'} ${formatCurrency(Math.abs(stat.savings))}`, {
-      x: x + 0.20, y: catY + 1.30, w: cardW - 0.40, h: 0.22,
-      fontSize: 14, bold: true, color: '2D43A8', align: 'right',
+      x: x + cardW - 2.00, y: catY + 0.40, w: 1.82, h: 0.32,
+      fontSize: 14, bold: true, color: 'DC2626', align: 'right',
+    })
+    // [좌중] 카테고리명 (큰 bold)
+    s1.addText(stat.category, {
+      x: x + 0.18, y: catY + 0.78, w: cardW - 0.36, h: 0.32,
+      fontSize: 14, bold: true, color: C.gray900,
+    })
+    // [좌하] 주요 품목 3개 (각 줄, 좌측 정렬)
+    topItems.forEach((it, idx) => {
+      const isLast = idx === topItems.length - 1
+      const suffix = isLast && hasMore ? '  외...' : ''
+      s1.addText(
+        [
+          { text: `${shortName(it.name, 10)} `, options: { color: C.gray700 } },
+          { text: `-₩${shortKRW(it.savings)}`, options: { color: 'DC2626' } },
+          ...(suffix ? [{ text: suffix, options: { color: C.gray400 } }] : []),
+        ],
+        {
+          x: x + 0.18, y: catY + 1.13 + idx * 0.22, w: cardW - 0.36, h: 0.22,
+          fontSize: 8,
+        },
+      )
     })
   })
 
