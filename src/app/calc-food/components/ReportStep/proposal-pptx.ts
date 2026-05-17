@@ -408,15 +408,19 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     x: 5.47, y: a1Y + 0.88, w: 4.50, h: 0.55,
     fontSize: 22, bold: true, color: C.white,
   })
-  // 연간 절감 강조 (좌하)
-  s2.addText('연간 절감', {
-    x: 1.10, y: a1Y + 1.53, w: 1.99, h: 0.20,
-    fontSize: 10, color: 'FCD34D', charSpacing: 1,
-  })
-  s2.addText(formatCurrency(data.annualSavings), {
-    x: 1.10, y: a1Y + 1.49, w: 8.00, h: 0.50,
-    fontSize: 30, bold: true, color: 'FBBF24',
-  })
+  // 연간 절감 강조 (좌하) — 2026-05-17 inline layout (라벨 + 금액 한 줄, baseline 정렬)
+  // 이전: 두 텍스트 박스가 겹침/카드 boundary 초과
+  // 변경: PptxGenJS text-run으로 한 박스에 두 스타일 — vertical 중앙 정렬
+  s2.addText(
+    [
+      { text: '연간 절감   ', options: { fontSize: 11, color: 'FCD34D', charSpacing: 1 } },
+      { text: formatCurrency(data.annualSavings), options: { fontSize: 26, bold: true, color: 'FBBF24' } },
+    ],
+    {
+      x: 1.10, y: a1Y + 1.55, w: 8.00, h: 0.45,
+      valign: 'middle',
+    },
+  )
   // amber 배지 ▼ %
   s2.addShape('roundRect', {
     x: 7.97, y: a1Y + 0.76, w: 1.80, h: 0.40,
@@ -457,16 +461,26 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 16, bold: true, color: 'FFFBEB', align: 'right',
   })
 
-  // 부가서비스 항목 (체크된 것만) — 2열 그리드
+  // 부가서비스 항목 (체크된 것만) — 2열 그리드 (2026-05-17 정렬 수정)
+  // 이전: ix=0.93 + col*(5.95+0.20) → 우측 column end 13.03 > amber 우측 boundary 12.64
+  // 변경: amber 카드 좌우 padding 0.20씩 → grid 영역 0.90 ~ 12.44 (w 11.54)
+  //       itW = (11.54 - gap) / 2 = 5.67, 좌우 column이 정확히 amber 안에 fit
   const checked = data.extras.filter((e) => e.checked && e.annualAmount > 0)
   const itY0 = a2Y + 1.17
   const itH = 0.55
   const itGap = 0.08
-  const itW = 5.95
+  // amber 카드 boundary 안에 정확히 fit:
+  //   카드 x 0.70 ~ 12.64 (w 11.94)
+  //   좌우 padding 0.20 → grid 영역 0.90 ~ 12.44 (w 11.54)
+  //   2col + gap 0.20: itW = (11.54 - 0.20) / 2 = 5.67
+  const colGap = 0.20
+  const gridX = 0.90
+  const gridW = 11.54
+  const itW = (gridW - colGap) / 2  // 5.67
   checked.forEach((e, i) => {
     const col = i % 2
     const row = Math.floor(i / 2)
-    const ix = 0.93 + col * (itW + 0.20)
+    const ix = gridX + col * (itW + colGap)
     const iy = itY0 + row * (itH + itGap)
     if (iy + itH > a2Y + a2H - 0.10) return // overflow 가드
 
