@@ -112,10 +112,14 @@ export function computeCategoryStats(items: ComparisonItem[], supplyRate: number
     const cat = classifyItem(item.extracted_name, item.extracted_spec, item.ssg_match?.category)
     const stat = map.get(cat)!
     const qty = item.extracted_quantity || 0
-    const ourTotal = item.extracted_total_price ?? item.extracted_unit_price * qty
+    // (2026-05-17) per-item Math.round — 엑셀 SUM(F/L/M) per-row 합산과 정합성 유지
+    //   Excel: SUM(F)=Σround(item), SUM(L)=Σround(ssg*rate)
+    //   화면: stat.ourCost=Σround(item), stat.ssgCost=Σround(ssg*rate)
+    //   둘 다 동일한 per-item 반올림 → 모든 표시 위치 합계 일치 (0원 차이)
+    const ourTotal = Math.round(item.extracted_total_price ?? item.extracted_unit_price * qty)
     // 정밀 환산 (KPI/엑셀과 통일) — 단순 standard_price × qty 가 아닌 ppk × 단위중량 환산
     // (2026-05-16) supplyRate 적용 — 변경 절감액 = 기존 - (신세계 × supplyRate)
-    const ssgTotal = item.ssg_match ? estimateSsgTotal(item) * supplyRate : ourTotal
+    const ssgTotal = item.ssg_match ? Math.round(estimateSsgTotal(item) * supplyRate) : ourTotal
     stat.itemCount += 1
     stat.ourCost += ourTotal
     stat.ssgCost += ssgTotal
@@ -127,10 +131,7 @@ export function computeCategoryStats(items: ComparisonItem[], supplyRate: number
     }
   }
   for (const stat of map.values()) {
-    // (2026-05-16) 표시/산식 정합성 — 각 카테고리 cost를 round한 후 차감
-    // raw float 그대로 두면 표시(반올림) ≠ 합산(raw) 불일치 발생
-    stat.ourCost = Math.round(stat.ourCost)
-    stat.ssgCost = Math.round(stat.ssgCost)
+    // (2026-05-17) per-item round 후 정수 합 — 추가 round 불필요
     stat.savings = Math.max(0, stat.ourCost - stat.ssgCost)
     stat.savingsPercent = stat.ourCost > 0 ? (stat.savings / stat.ourCost) * 100 : 0
     // 상위 3건만 (절감액 큰 순)

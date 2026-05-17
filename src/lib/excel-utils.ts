@@ -27,7 +27,8 @@ import { estimateSsgTotal } from './unit-conversion'
  */
 
 function existingTotal(item: ComparisonItem): number {
-  return item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity
+  // (2026-05-17) per-row Math.round — 화면 categoryStats와 합계 정합성 (per-item round)
+  return Math.round(item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity)
 }
 
 function shinsegaeSpec(item: ComparisonItem): string {
@@ -113,12 +114,12 @@ export function downloadReportAsExcel(
   for (let i = 0; i < items.length; i++) {
     const r = firstDataRow + i
     const ssg = shinsegaePriceAmount(items[i])
-    // L 셀 (공급율 적용 금액)
+    // L 셀 (공급율 적용 금액) — (2026-05-17) INT → ROUND 변경 (per-item round 통일)
     const lRef = `L${r}`
     if (ssg) {
       ws[lRef] = {
         t: 'n',
-        f: `INT($L$2*K${r})`,
+        f: `ROUND($L$2*K${r},0)`,
         v: Math.round(ssg.amount * supplyRate),
         z: '#,##0',
       }
@@ -140,12 +141,18 @@ export function downloadReportAsExcel(
   }
 
   // 합계 행: F = SUM(F3:F_n), K = SUM(K3:K_n), L = SUM(L), M = SUM(M)
+  // (2026-05-17) per-row 합산 — F/L 모두 per-item round 되어 있으므로
+  //   화면 monthlyOurCost/monthlySsgCost와 정확히 일치
   const sumExisting = items.reduce((s, it) => s + existingTotal(it), 0)
   const sumSsg = items.reduce((s, it) => {
     const x = shinsegaePriceAmount(it)
     return s + (x ? x.amount : 0)
   }, 0)
-  const sumApplied = Math.round(sumSsg * supplyRate)
+  // per-row L 합 = Σ Math.round(ssg.amount * supplyRate)  (Excel ROUND과 동일)
+  const sumApplied = items.reduce((s, it) => {
+    const x = shinsegaePriceAmount(it)
+    return s + (x ? Math.round(x.amount * supplyRate) : 0)
+  }, 0)
   const sumSavings = sumExisting - sumApplied
 
   ws[`F${summaryRowNum}`] = {
