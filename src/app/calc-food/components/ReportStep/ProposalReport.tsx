@@ -86,7 +86,7 @@ interface CategoryTopItem {
   savings: number
 }
 
-interface CategoryStat {
+export interface CategoryStat {
   category: FoodCategory
   itemCount: number
   ourCost: number      // 현 거래처 합계 (월)
@@ -97,7 +97,7 @@ interface CategoryStat {
   topItems: CategoryTopItem[]
 }
 
-function computeCategoryStats(items: ComparisonItem[], supplyRate: number = 1): CategoryStat[] {
+export function computeCategoryStats(items: ComparisonItem[], supplyRate: number = 1): CategoryStat[] {
   const map = new Map<FoodCategory, CategoryStat>()
   // 카테고리별 항목별 절감액 트래킹 (top3 추출용)
   const itemsByCategory = new Map<FoodCategory, CategoryTopItem[]>()

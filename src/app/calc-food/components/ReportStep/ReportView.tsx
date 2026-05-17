@@ -7,7 +7,8 @@ import { InvoiceViewer } from '../InvoiceViewer'
 import { ReportHeader } from './ReportHeader'
 import { ScenarioComparison } from './ScenarioComparison'
 import { ItemBreakdownTable } from './ItemBreakdownTable'
-import { ProposalReport } from './ProposalReport'
+import { ProposalReport, computeCategoryStats } from './ProposalReport'
+import { CategoryBreakdownCards } from './CategoryBreakdownCards'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
@@ -171,6 +172,20 @@ export function ReportView({
             )}
             <ScenarioComparison cjScenario={adjustedScenarios.cj} ssgScenario={adjustedScenarios.ssg} />
           </section>
+
+          {/* 카테고리별 절감 카드 그리드 (2026-05-16 — PPTX 디자인 컨셉)
+             좌 아이콘 + 우상 절감률 배지 + 카테고리(영문) + 주요 품목 + 큰 절감액 */}
+          {includedItems.length > 0 && (
+            <section className="mb-6">
+              <div className="mb-3 flex items-baseline gap-1.5">
+                <h3 className="text-sm font-semibold text-gray-900">카테고리별 절감</h3>
+                <span className="text-[11px] text-gray-500">(월 기준)</span>
+              </div>
+              <CategoryBreakdownCards
+                stats={computeCategoryStats(includedItems, supplyRate)}
+              />
+            </section>
+          )}
 
           {/* 품목별 상세 (2026-05-16 — 헤더 콤팩트화) */}
           <section className="mb-6">
