@@ -22,6 +22,7 @@ import {
   type FoodCategory,
 } from '@/lib/category-classifier'
 import { estimateSsgTotal } from '@/lib/unit-conversion'
+import { CategoryBreakdownCards } from './CategoryBreakdownCards'
 import type { ComparisonItem, SupplierScenario } from '@/types/audit'
 
 /** 절감액을 K/M 약식으로 — 정밀 단가 노출 방지 (예: 37,000 → 37K) */
@@ -423,79 +424,56 @@ export function ProposalReport({
           </div>
         </section>
 
-        {/* ─── 카테고리별 절감 (메인) ─── */}
-        <section className="mb-10 print:mb-0">
-          <h2 className="mb-4 text-xl font-bold text-gray-900 print:mb-1 print:text-sm">카테고리별 절감 (월 기준)</h2>
-          <div className="space-y-3 print:space-y-1">
-            {categoryStats.map((stat) => {
-              const style = CATEGORY_STYLE[stat.category]
-              const barPct = monthlyOurCost > 0 ? (stat.ourCost / monthlyOurCost) * 100 : 0
-              return (
-                <div
-                  key={stat.category}
-                  className={cn(
-                    'rounded-xl border-2 p-4 transition print:p-3 print:break-inside-avoid',
-                    style.bg,
-                    style.ring,
-                  )}
-                >
-                  {/* 3열 grid — 좌(카테고리) / 중(진행바+주요품목) / 우(금액) */}
-                  <div className="grid grid-cols-[1.3fr_2fr_1.3fr] items-center gap-4 print:gap-3">
-                    {/* 좌: 카테고리 정보 */}
-                    <div className="flex items-center gap-3 print:gap-2">
-                      <span className="text-3xl print:text-2xl">{style.emoji}</span>
-                      <div>
-                        <div className={cn('text-base font-bold print:text-sm', style.text)}>{stat.category}</div>
-                        <div className="text-[11px] text-gray-500 print:text-[10px]">
-                          {formatNumber(stat.itemCount)}개 품목 · 전체의 {barPct.toFixed(1)}%
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 중: 진행 바 + 주요 절감 품목 */}
-                    <div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-white/70 print:h-1">
-                        <div
-                          className={cn(
-                            'h-full rounded-full',
-                            stat.category === '농산' ? 'bg-emerald-500' :
-                            stat.category === '축산' ? 'bg-rose-500' :
-                            stat.category === '수산' ? 'bg-sky-500' : 'bg-amber-500'
-                          )}
-                          style={{ width: `${Math.min(100, barPct)}%` }}
-                        />
-                      </div>
-                      {/* 주요 절감 품목 — 농산/축산/수산만 (가공·기타 제외) */}
-                      {stat.category !== '가공·기타' && stat.topItems.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] print:mt-1 print:text-[10px]">
-                          <span className="font-semibold text-gray-500">주요</span>
-                          {stat.topItems.map((it, i) => (
-                            <span key={i} className="text-gray-600">
-                              <span className={cn('font-medium', style.text)}>{shortItemName(it.name)}</span>
-                              <span className="ml-1 font-mono font-semibold text-green-700">-₩{formatShortKRW(it.savings)}</span>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 우: 금액 */}
-                    <div className="text-right">
-                      <div className="text-sm text-gray-500 line-through print:text-[11px]">
-                        {formatCurrency(stat.ourCost)}
-                      </div>
-                      <div className={cn('text-lg font-bold print:text-base', style.text)}>
-                        {formatCurrency(stat.ssgCost)}
-                      </div>
-                      <div className="mt-0.5 text-xs font-semibold text-green-700 print:mt-0 print:text-[10px]">
-                        ▼ {formatCurrency(stat.savings)} ({stat.savingsPercent.toFixed(1)}%)
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+        {/* ─── 비용 효율 비교 (PDF 디자인 반영, 2026-05-16) ─── */}
+        <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm print:mb-2 print:p-3 print:break-inside-avoid">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-gray-900 print:text-sm">비용 효율 비교</h2>
+            <div className="flex items-center gap-4 text-[11px] print:text-[10px]">
+              <span className="inline-flex items-center gap-1.5 text-gray-600">
+                <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+                현재 공급사 (100%)
+              </span>
+              <span className="inline-flex items-center gap-1.5 font-bold text-blue-700">
+                <span className="inline-block h-2 w-2 rounded-full bg-blue-700" />
+                신세계푸드 ({(100 - savingsPercent).toFixed(1)}%)
+              </span>
+            </div>
           </div>
+          {/* 가로 막대 */}
+          <div className="relative mt-3 h-8 overflow-hidden rounded-full bg-gray-100 print:h-6">
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-blue-700 transition-all"
+              style={{ width: `${Math.min(100, 100 - savingsPercent)}%` }}
+            />
+            {/* 신세계 % 라벨 (막대 끝) */}
+            <span
+              className="absolute inset-y-0 flex items-center text-xs font-bold text-white print:text-[10px]"
+              style={{ left: `calc(${Math.min(100, 100 - savingsPercent)}% - 3rem)` }}
+            >
+              {(100 - savingsPercent).toFixed(1)}%
+            </span>
+            <span className="absolute inset-y-0 right-3 flex items-center text-[11px] text-gray-500 print:text-[10px]">
+              100%
+            </span>
+          </div>
+          {/* 하단 — 메시지 + 절감 강조 */}
+          <div className="mt-3 flex items-baseline justify-between">
+            <span className="text-xs text-gray-500 print:text-[10px]">
+              공급망 최적화를 통한 직접 비용 절감
+            </span>
+            <span className="text-sm font-bold text-blue-700 print:text-xs">
+              월 평균 {formatCurrency(monthlySavings)} 절감 · 총 절감액: {savingsPercent.toFixed(1)}%
+            </span>
+          </div>
+        </section>
+
+        {/* ─── 카테고리별 절감 (PDF 디자인 — 1x4 가로 그리드) ─── */}
+        <section className="mb-8 print:mb-2">
+          <div className="mb-3 flex items-baseline gap-2 print:mb-1">
+            <h2 className="text-base font-bold text-gray-900 print:text-sm">카테고리별 절감</h2>
+            <span className="text-xs text-gray-500 print:text-[10px]">(월 기준)</span>
+          </div>
+          <CategoryBreakdownCards stats={categoryStats} cols={4} />
         </section>
 
         {/* ─── 2페이지 시작 — 콘텐츠 적어 수직 중앙 정렬 + 좌우 적절한 padding ─── */}

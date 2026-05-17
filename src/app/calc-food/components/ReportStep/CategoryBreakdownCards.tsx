@@ -33,10 +33,22 @@ function shortName(name: string, max = 8): string {
   return stripped.length > max ? `${stripped.slice(0, max)}…` : stripped
 }
 
-export function CategoryBreakdownCards({ stats }: { stats: CategoryStat[] }) {
+export function CategoryBreakdownCards({
+  stats,
+  cols = 2,
+}: {
+  stats: CategoryStat[]
+  /** 그리드 열 수 — 2(분석화면 50% 폭) 또는 4(제안서 풀스크린) */
+  cols?: 2 | 4
+}) {
   if (stats.length === 0) return null
   return (
-    <div className="grid grid-cols-2 gap-2.5">
+    <div
+      className={cn(
+        'grid gap-2.5',
+        cols === 4 ? 'grid-cols-4' : 'grid-cols-2',
+      )}
+    >
       {stats.map((stat) => (
         <CategoryCard key={stat.category} stat={stat} />
       ))}
