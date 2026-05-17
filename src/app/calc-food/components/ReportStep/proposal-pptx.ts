@@ -315,40 +315,45 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
       fill: { color: C.white }, line: { color: BORDER_GRAY, width: BORDER_W },
       rectRadius: 0.10,
     })
-    // [좌상] 아이콘 (0.45 x 0.45)
+    // [좌상] 아이콘 (0.40 × 0.40)
     s1.addShape('roundRect', {
-      x: x + 0.18, y: catY + 0.18, w: 0.45, h: 0.45,
+      x: x + 0.15, y: catY + 0.18, w: 0.40, h: 0.40,
       fill: { color: C.blueSoft }, line: { type: 'none' }, rectRadius: 0.08,
     })
     s1.addText(meta.emoji, {
-      x: x + 0.18, y: catY + 0.18, w: 0.45, h: 0.45,
-      fontSize: 16, align: 'center', valign: 'middle',
+      x: x + 0.15, y: catY + 0.18, w: 0.40, h: 0.40,
+      fontSize: 14, align: 'center', valign: 'middle',
     })
-    // [좌상 옆] 절감률 회색 배지
-    s1.addShape('roundRect', {
-      x: x + 0.70, y: catY + 0.25, w: 0.78, h: 0.30,
-      fill: { color: C.gray100 }, line: { type: 'none' }, rectRadius: 0.15,
-    })
-    s1.addText(`${isSaving ? '▼' : '▲'} ${stat.savingsPercent.toFixed(1)}%`, {
-      x: x + 0.70, y: catY + 0.25, w: 0.78, h: 0.30,
-      fontSize: 8, bold: true, color: C.gray700, align: 'center', valign: 'middle',
+    // [좌상 옆] 카테고리명 (인라인 — 우측 stack과 분리)
+    s1.addText(stat.category, {
+      x: x + 0.60, y: catY + 0.22, w: 1.20, h: 0.32,
+      fontSize: 13, bold: true, color: C.gray900, valign: 'middle',
     })
     // [우상] 현 거래처 비용 (작은 회색)
     s1.addText(`현 거래처 ${formatCurrency(stat.ourCost)}`, {
-      x: x + cardW - 2.00, y: catY + 0.18, w: 1.82, h: 0.22,
+      x: x + cardW - 1.95, y: catY + 0.16, w: 1.80, h: 0.20,
       fontSize: 8, color: C.gray500, align: 'right',
     })
-    // [우상 두번째 줄] 큰 절감액 (빨강 bold)
+    // [우중] 절감율 배지 (비용과 절감액 중간)
+    s1.addShape('roundRect', {
+      x: x + cardW - 1.05, y: catY + 0.40, w: 0.90, h: 0.26,
+      fill: { color: C.gray100 }, line: { type: 'none' }, rectRadius: 0.13,
+    })
+    s1.addText(`${isSaving ? '▼' : '▲'} ${stat.savingsPercent.toFixed(1)}%`, {
+      x: x + cardW - 1.05, y: catY + 0.40, w: 0.90, h: 0.26,
+      fontSize: 8, bold: true, color: C.gray700, align: 'center', valign: 'middle',
+    })
+    // [우하] 큰 절감액 (빨강 bold)
     s1.addText(`${isSaving ? '−' : '+'} ${formatCurrency(Math.abs(stat.savings))}`, {
-      x: x + cardW - 2.00, y: catY + 0.40, w: 1.82, h: 0.32,
-      fontSize: 14, bold: true, color: 'DC2626', align: 'right',
+      x: x + cardW - 1.95, y: catY + 0.70, w: 1.80, h: 0.30,
+      fontSize: 13, bold: true, color: 'DC2626', align: 'right',
     })
-    // [좌중] 카테고리명 (큰 bold)
-    s1.addText(stat.category, {
-      x: x + 0.18, y: catY + 0.78, w: cardW - 0.36, h: 0.32,
-      fontSize: 14, bold: true, color: C.gray900,
+    // [좌하] 주요 품목 3개 — 카드 하단 풀폭, 상단 분리선 (border-t)
+    // 분리선 (얇은 회색 가로 라인)
+    s1.addShape('line', {
+      x: x + 0.15, y: catY + 1.10, w: cardW - 0.30, h: 0,
+      line: { color: C.gray100, width: 0.5 },
     })
-    // [좌하] 주요 품목 3개 (각 줄, 좌측 정렬)
     topItems.forEach((it, idx) => {
       const isLast = idx === topItems.length - 1
       const suffix = isLast && hasMore ? '  외...' : ''
@@ -359,7 +364,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
           ...(suffix ? [{ text: suffix, options: { color: C.gray400 } }] : []),
         ],
         {
-          x: x + 0.18, y: catY + 1.13 + idx * 0.22, w: cardW - 0.36, h: 0.22,
+          x: x + 0.15, y: catY + 1.18 + idx * 0.21, w: cardW - 0.30, h: 0.20,
           fontSize: 8,
         },
       )
