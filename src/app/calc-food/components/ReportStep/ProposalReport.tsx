@@ -365,8 +365,10 @@ export function ProposalReport({
 
       {/* 보고서 본체 (인쇄 영역)
           PDF: A4 landscape (267mm 가로 — 15mm 마진 차감) — max-w로 좌우 자연 여백
-          2페이지(연간환산+부가서비스)는 콘텐츠 적어 수직 중앙 정렬 */}
-      <div className="mx-auto max-w-4xl bg-white p-8 shadow-lg print:max-w-[260mm] print:p-0 print:shadow-none">
+          2페이지(연간환산+부가서비스)는 콘텐츠 적어 수직 중앙 정렬
+          (2026-05-17) 좌우 padding 확대 px-14 — 모든 카드 우측 라인 좌측 안쪽으로
+          헤더는 풀폭 (border-b) 유지, 카드는 좁은 grid로 시각 강조 */}
+      <div className="mx-auto max-w-4xl bg-white px-14 py-8 shadow-lg print:max-w-[260mm] print:px-6 print:py-0 print:shadow-none">
         {/* ─── 헤더 ─── */}
         <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-2 print:pb-2">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
