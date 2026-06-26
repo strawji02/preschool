@@ -1454,8 +1454,11 @@ export function useAuditSession() {
         }
       }
 
-      // 재시도 라운드: 실패한 페이지만 더 긴 지연으로 재처리 (최대 3 라운드)
-      const MAX_RETRY_ROUNDS = 3
+      // 재시도 라운드: 실패한 페이지만 더 긴 지연으로 재처리 (2026-06-26: 3→1로 단축)
+      // - 무료 티어 rate limit은 한 라운드 재시도로 대부분 회복됨
+      // - 풀무원 PDF처럼 페이지당 행이 많아 maxDuration(60s) timeout인 경우, 재시도해도 같은 결과
+      //   → 3 라운드 반복은 15~20분 헛수고 + 사용자 답답함. fallback 안내(BigPdfFallbackBanner)로 유도.
+      const MAX_RETRY_ROUNDS = 1
       let remaining = [...failedIndexes]
       for (let round = 1; round <= MAX_RETRY_ROUNDS && remaining.length > 0; round++) {
         dispatch({ type: 'SET_RETRY_ROUND', round, failedCount: remaining.length })
