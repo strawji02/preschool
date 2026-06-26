@@ -25,6 +25,7 @@ import type { ComparisonItem } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import type { PageTotal } from '../hooks/useAuditSession'
 import { PageImageViewer } from './PageImageViewer'
+import { BigPdfFallbackBanner } from './BigPdfFallbackBanner'
 
 interface ImagePreviewProps {
   items: ComparisonItem[]
@@ -201,6 +202,12 @@ export function ImagePreview({
   const filesInvolved = new Set(pageSourceFiles.filter(Boolean)).size || 1
   const reviewedCount = pageVerifyResults.filter((r) => r.reviewed).length
   const allReviewed = reviewedCount === allPageNumbers.length && allPageNumbers.length > 0
+
+  // OCR이 0 items로 들어온 페이지 — Vercel function timeout(maxDuration 60s) 의심
+  // 큰 PDF(페이지당 행 ↑)에서 매칭 단계가 60초를 넘기면 빈 응답이 옴 (2026-06-26 추가)
+  const failedPages = pageVerifyResults
+    .filter((r) => r.items.length === 0)
+    .map((r) => r.page)
 
   // Phase 3: 빠른 네비게이션 — 다음 불일치/미검수 페이지로 스크롤 (2026-04-26)
   const scrollToPage = (pageNum: number) => {
@@ -426,6 +433,9 @@ export function ImagePreview({
           )}
         </div>
       </div>
+
+      {/* 큰 PDF fallback 안내 — items=0 페이지가 있을 때만 표시 (2026-06-26) */}
+      <BigPdfFallbackBanner failedPages={failedPages} totalPages={allPageNumbers.length} />
 
       {/* OCR 안내 */}
       <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Upload, FileText, Image, Table } from 'lucide-react'
+import { Upload, FileText, Image, Table, Info } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 interface UploadZoneProps {
@@ -126,6 +126,18 @@ export function UploadZone({ onFileSelect }: UploadZoneProps) {
             <Table size={16} />
             <span>Excel</span>
           </div>
+        </div>
+
+        <div
+          className="mt-6 flex max-w-xl items-start gap-2 rounded-lg bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900"
+          onClick={(e) => e.preventDefault()}
+        >
+          <Info size={14} className="mt-0.5 shrink-0 text-amber-700" />
+          <span>
+            <strong>한 페이지에 행이 많은 PDF</strong>(15행 이상)는 처리 한도(60초)에 걸려 일부 페이지가
+            누락될 수 있습니다. 가능하면 공급사에 <strong>엑셀 파일</strong>로 요청하시거나, PDF를 작은
+            단위로 분할해서 올려주세요.
+          </span>
         </div>
       </label>
     </div>
