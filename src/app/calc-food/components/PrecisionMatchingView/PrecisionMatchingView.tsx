@@ -459,7 +459,7 @@ export function PrecisionMatchingView({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">필터:</span>
-          {(['all', 'unconfirmed', 'unmatched'] as FilterMode[]).map((m) => (
+          {(['all', 'unconfirmed', 'unmatched', 'excluded'] as FilterMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setFilterMode(m)}
