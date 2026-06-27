@@ -70,12 +70,18 @@ const C = {
   amber: 'F59E0B',
   amberLight: 'FBBF24',
   amberSoft: 'FEF3C7',
-  // (2026-06-27) slate 톤 추가 — 2페이지 부가서비스 카드 색상 차별화 (파란/황색 아닌)
+  // (2026-06-27 v2) slate 톤 — 부가서비스 카드 (파란/황색 아닌 차분 톤)
+  // v1 slate-800 너무 어두움 피드백 → v2 slate-500/600으로 한 단계 밝게
   slate900: '0F172A',
   slate800: '1E293B',
   slate700: '334155',
+  slate600: '475569',
+  slate500: '64748B',
+  slate200: 'E2E8F0',
+  slate100: 'F1F5F9',
   slate300: 'CBD5E1',
   emerald500: '10B981',
+  emerald400: '34D399',
   emerald300: '6EE7B7',
   white: 'FFFFFF',
   gray900: '111827',
@@ -405,29 +411,30 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 18, bold: true, color: C.white, fontFace: 'Pretendard',
   })
 
-  // (2) 연간 환산 navy 카드
+  // (2) 연간 환산 카드 — 1페이지 HERO와 동일한 밝은 blue (2026-06-27, 사용자 요청)
+  // 이전: C.navy (1A2B5C 짙은 navy) → 사용자 피드백: "1페이지 파란색으로"
   const a1Y = 1.20
   const a1H = 2.05
   s2.addShape('roundRect', {
     x: 0.70, y: a1Y, w: 9.87, h: a1H,
-    fill: { color: C.navy }, line: { type: 'none' }, rectRadius: 0.15,
+    fill: { color: C.blueHero }, line: { type: 'none' }, rectRadius: 0.15,
   })
   s2.addText('연간 환산 (월 합계 × 12)', {
     x: 1.10, y: a1Y + 0.21, w: 9.07, h: 0.30,
-    fontSize: 11, bold: true, color: '93C5FD', charSpacing: 2,
+    fontSize: 11, bold: true, color: C.blueLight, charSpacing: 2,
   })
-  // 현재 박스
+  // 현재 박스 — 반투명 흰색 (밝은 blue 위 대비 확보)
   s2.addShape('roundRect', {
     x: 1.10, y: a1Y + 0.56, w: 3.89, h: 0.85,
-    fill: { color: C.navyDeep }, line: { type: 'none' }, rectRadius: 0.08,
+    fill: { color: C.white, transparency: 85 }, line: { type: 'none' }, rectRadius: 0.08,
   })
   s2.addText('현재', {
     x: 1.30, y: a1Y + 0.66, w: 3.50, h: 0.22,
-    fontSize: 9, color: '93C5FD', charSpacing: 1,
+    fontSize: 9, color: C.blueLight, charSpacing: 1,
   })
   s2.addText(formatCurrency(data.annualOurCost), {
     x: 1.30, y: a1Y + 0.88, w: 3.50, h: 0.55,
-    fontSize: 22, bold: true, color: 'BFDBFE',
+    fontSize: 22, bold: true, color: C.white,
   })
   // 신세계 박스 (반투명)
   s2.addShape('roundRect', {
@@ -471,25 +478,26 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 12, bold: true, color: C.slate700, align: 'center',
   })
 
-  // (4) 부가서비스 slate 카드 — 2026-06-27 색상 차별화 (파란/황색 아닌 차분한 차콜)
+  // (4) 부가서비스 slate 카드 — 2026-06-27 v2 (slate-800 → slate-500 한 단계 밝게)
+  // 사용자 피드백: "너무 어둡고 무거워" → slate-500/600 채택 (가독성 ↑, 무거움 ↓)
   const a2Y = 3.86
   const a2H = 3.19
   s2.addShape('roundRect', {
     x: 0.70, y: a2Y, w: 11.94, h: a2H,
-    fill: { color: C.slate800 }, line: { type: 'none' }, rectRadius: 0.15,
+    fill: { color: C.slate500 }, line: { type: 'none' }, rectRadius: 0.15,
   })
   s2.addText('유치원 제안 부가서비스 (연간)', {
     x: 0.90, y: a2Y + 0.16, w: 7.00, h: 0.30,
-    fontSize: 11, bold: true, color: C.slate300, charSpacing: 2,
+    fontSize: 11, bold: true, color: C.slate100, charSpacing: 2,
   })
   s2.addText(formatCurrency(data.totalExtrasAnnual), {
     x: 0.90, y: a2Y + 0.46, w: 6.00, h: 0.65,
     fontSize: 32, bold: true, color: C.white,
   })
-  // emerald "▲ 환원" 배지 (절감→환원 의미 강조)
+  // emerald "▲ 환원" 배지 (절감→환원 의미 강조) — v2 emerald-400 약간 밝게
   s2.addShape('roundRect', {
     x: 6.95, y: a2Y + 0.62, w: 1.00, h: 0.34,
-    fill: { color: C.emerald500 }, line: { type: 'none' }, rectRadius: 0.17,
+    fill: { color: C.emerald400 }, line: { type: 'none' }, rectRadius: 0.17,
   })
   s2.addText('▲ 환원', {
     x: 6.95, y: a2Y + 0.62, w: 1.00, h: 0.34,
@@ -497,7 +505,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
   })
   s2.addText('참고 · 연간 절감액', {
     x: 8.72, y: a2Y + 0.20, w: 3.30, h: 0.22,
-    fontSize: 9, color: C.slate300, align: 'right', charSpacing: 1,
+    fontSize: 9, color: C.slate100, align: 'right', charSpacing: 1,
   })
   s2.addText(formatCurrency(data.annualSavings), {
     x: 8.72, y: a2Y + 0.45, w: 3.30, h: 0.40,
@@ -539,7 +547,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     const detail = `${e.count ?? 0}회 × ${formatNumber(e.perRound)}원${e.note ? ` · ${e.note}` : ''}`
     s2.addText(detail, {
       x: ix + 0.20, y: iy + 0.28, w: itW - 2.50, h: 0.22,
-      fontSize: 9, color: C.slate300,  // amber-soft → slate-300 (2026-06-27)
+      fontSize: 9, color: C.slate100,  // v2 slate-300 → slate-100 (밝은 배경 위 더 옅은 톤)
     })
     s2.addText(formatCurrency(e.annualAmount), {
       x: ix + itW - 2.30, y: iy + 0.13, w: 2.10, h: 0.35,

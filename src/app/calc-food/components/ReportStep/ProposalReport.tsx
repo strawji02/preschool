@@ -295,12 +295,14 @@ export function ProposalReport({
   }, [extras, proposedTo, period, childrenCount, sessionId, extrasReady])
 
   // 인쇄/PDF 출력 시 가로 방향 (A4 landscape)
+  // (2026-06-27) 좌측 정렬 + 우측 여백: 우측 마진 50mm로 자연스러운 우측 공간 확보
+  //   사용자 화면 결과 기준 — A4 landscape 297mm 가로의 약 17%를 우측 여백으로
   // ProposalReport가 마운트된 동안만 적용 — 다른 페이지 인쇄에는 영향 없음
   useEffect(() => {
     const style = document.createElement('style')
     style.textContent = `
       @media print {
-        @page { size: A4 landscape; margin: 15mm; }
+        @page { size: A4 landscape; margin: 15mm 50mm 15mm 15mm; }
       }
     `
     document.head.appendChild(style)
@@ -495,8 +497,11 @@ export function ProposalReport({
           </div>
         </section>
 
-        {/* ─── 카테고리별 절감 (PDF 디자인 — 1x4 가로 그리드) ─── */}
-        <section className="mb-8 print:mb-2">
+        {/* ─── 카테고리별 절감 (PDF 디자인 — 1x4 가로 그리드)
+              (2026-06-27) 1페이지 강제 break-after-page + 자체 break-inside-avoid
+              · 1페이지 콘텐츠가 두 페이지로 분할되어 총 3+ 페이지로 늘어나는 문제 fix
+              · PPT처럼 정확히 2페이지(1p: 헤더+HERO+비교+카테고리 / 2p: 연간환산+부가서비스) */}
+        <section className="mb-8 print:mb-0 print:break-inside-avoid print:break-after-page">
           <div className="mb-3 flex items-baseline gap-2 print:mb-1">
             <h2 className="text-base font-bold text-gray-900 print:text-sm">카테고리별 절감</h2>
             <span className="text-xs text-gray-500 print:text-[10px]">(월 기준)</span>
@@ -505,7 +510,7 @@ export function ProposalReport({
         </section>
 
         {/* ─── 2페이지 시작 — 콘텐츠 적어 수직 중앙 정렬 + 좌우 적절한 padding ─── */}
-        <div className="print:break-before-page print:flex print:min-h-[180mm] print:flex-col print:justify-center">
+        <div className="print:flex print:min-h-[180mm] print:flex-col print:justify-center print:break-before-page">
         {/* ─── 연간 환산 — 1페이지 HERO와 톤 통일 (2026-06-27)
               · 짙은 navy → 밝은 blue (from-blue-600 to-blue-700)
               · 노란 큰 글자 제거 → 흰 글자 + 황색 ▼% pill (HERO 동일 패턴) ─── */}
@@ -670,32 +675,32 @@ export function ProposalReport({
           </div>
           {/* /입력 표 영역 (print:hidden) */}
 
-          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 색상 차별화)
-                · 사용자 요청: 파란/황색 아닌 색으로 — 차분한 slate(차콜) 톤 적용
-                · slate-800 → slate-900 그라데이션으로 시각적 무게 + 신뢰감
-                · 합계 강조는 emerald pill (절감→환원 의미)
-                · 항목 카드는 white/12 backdrop으로 분리감 */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 v2 밝게)
+                · 사용자 피드백: "차콜이 너무 어둡고 무거워" → slate-800/900 → slate-500/600 한 단계 밝게
+                · slate-500 to slate-600 — 차분하지만 밝은 톤, 가독성 ↑
+                · emerald pill/text 유지 (절감→환원 의미)
+                · 항목 카드 ring/backdrop 강도 ↑ */}
           {(() => {
             const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
-              <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white shadow-lg print:bg-slate-800 print:break-inside-avoid">
+              <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-500 to-slate-600 p-6 text-white shadow-lg print:bg-slate-500 print:break-inside-avoid">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+                    <div className="text-xs font-semibold uppercase tracking-widest text-slate-100">
                       유치원 제안 부가서비스 (연간)
                     </div>
                     <div className="mt-1 flex items-baseline gap-3">
                       <div className="text-4xl font-extrabold leading-none tabular-nums">
                         {formatCurrency(totalExtrasAnnual)}
                       </div>
-                      <div className="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[11px] font-bold text-white shadow-sm">
+                      <div className="rounded-full bg-emerald-400 px-2.5 py-0.5 text-[11px] font-bold text-emerald-950 shadow-sm">
                         ▲ 환원
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-widest text-slate-300">참고 · 연간 절감액</div>
-                    <div className="text-base font-semibold text-emerald-300 tabular-nums">{formatCurrency(annualSavings)}</div>
+                    <div className="text-[11px] uppercase tracking-widest text-slate-100">참고 · 연간 절감액</div>
+                    <div className="text-base font-semibold text-emerald-200 tabular-nums">{formatCurrency(annualSavings)}</div>
                   </div>
                 </div>
 
@@ -705,11 +710,11 @@ export function ProposalReport({
                     {checkedItems.map((e) => (
                       <div
                         key={e.key}
-                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 backdrop-blur-sm ring-1 ring-white/5"
+                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/15 px-3 py-2 backdrop-blur-sm ring-1 ring-white/10"
                       >
                         <div className="min-w-0">
                           <div className="truncate text-sm font-bold text-white">{e.label}</div>
-                          <div className="text-[11px] text-slate-300 tabular-nums">
+                          <div className="text-[11px] text-slate-100 tabular-nums">
                             {e.count ?? 0}회 × {formatNumber(e.perRound)}원
                             {e.note && <span className="ml-1 opacity-80">· {e.note}</span>}
                           </div>
@@ -721,7 +726,7 @@ export function ProposalReport({
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-lg bg-white/5 px-3 py-2 text-sm text-slate-400">
+                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-slate-200">
                     체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
                   </div>
                 )}
