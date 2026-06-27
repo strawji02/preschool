@@ -131,25 +131,19 @@ export function ReportView({
   }, [scenarios, supplyRate, includedItems])
 
   // 제안서 모드: 풀스크린 인포그래픽
+  // (2026-06-27) fixed left-4 top-20 버튼 제거 — print:hidden인데도 PDF에 잡혀 RSS 같은 빨간 점 표시되는 버그
+  //   대신 ProposalReport의 sticky toolbar 안에 통합 (onBackToAnalysis prop)
   if (mode === 'proposal') {
     return (
-      <div className="relative">
-        {/* 모드 전환 버튼 (인쇄 시 숨김) */}
-        <button
-          onClick={() => setMode('analysis')}
-          className="fixed left-4 top-20 z-20 flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow hover:bg-gray-50 print:hidden"
-        >
-          ← 분석 화면
-        </button>
-        <ProposalReport
-          sessionId={sessionId}
-          items={items}
-          ssgScenario={adjustedScenarios.ssg}
-          supplierName={supplierName}
-          initialExtras={initialExtras as never}
-          supplyRate={supplyRate}
-        />
-      </div>
+      <ProposalReport
+        sessionId={sessionId}
+        items={items}
+        ssgScenario={adjustedScenarios.ssg}
+        supplierName={supplierName}
+        initialExtras={initialExtras as never}
+        supplyRate={supplyRate}
+        onBackToAnalysis={() => setMode('analysis')}
+      />
     )
   }
 

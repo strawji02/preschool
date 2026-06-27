@@ -11,7 +11,7 @@
  * - PDF 출력: window.print() + @media print
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Printer, Loader2, Save, FileText } from 'lucide-react'
+import { Printer, Loader2, Save, FileText, ArrowLeft } from 'lucide-react'
 import { downloadProposalPptx } from './proposal-pptx'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -83,6 +83,9 @@ interface ProposalReportProps {
   initialExtras?: ProposalExtras
   /** 공급율 (2026-05-16) — 신세계 견적 배율. 카테고리별 통계에 적용 */
   supplyRate?: number
+  /** 분석 화면으로 돌아가기 (2026-06-27) — fixed 버튼을 sticky toolbar 안으로 통합
+   *  이전: ReportView의 fixed left-4 top-20 버튼이 print:hidden인데도 PDF에 잡힘 */
+  onBackToAnalysis?: () => void
 }
 
 interface CategoryTopItem {
@@ -152,6 +155,7 @@ export function ProposalReport({
   supplierName,
   initialExtras,
   supplyRate = 1,
+  onBackToAnalysis,
 }: ProposalReportProps) {
   // 부가서비스 state
   const [extras, setExtras] = useState<ExtraItem[]>(() => {
@@ -295,14 +299,15 @@ export function ProposalReport({
   }, [extras, proposedTo, period, childrenCount, sessionId, extrasReady])
 
   // 인쇄/PDF 출력 시 가로 방향 (A4 landscape)
-  // (2026-06-27) 좌측 정렬 + 우측 여백: 우측 마진 50mm로 자연스러운 우측 공간 확보
-  //   사용자 화면 결과 기준 — A4 landscape 297mm 가로의 약 17%를 우측 여백으로
-  // ProposalReport가 마운트된 동안만 적용 — 다른 페이지 인쇄에는 영향 없음
+  // (2026-06-27 v2) @page margin 15mm 균등 + ProposalReport 컨테이너의 print:max-w-[230mm]가
+  //   좌측 정렬을 실제로 만든다. v1의 margin-right 50mm는 max-w-[260mm]가 가득 채워서 효과 없었음.
+  //   현재: A4 landscape 297mm - margin 30mm = 267mm 영역 / max-w-[230mm] 콘텐츠 좌측 정렬
+  //   → 우측 자연 여백 약 37mm (약 14%)
   useEffect(() => {
     const style = document.createElement('style')
     style.textContent = `
       @media print {
-        @page { size: A4 landscape; margin: 15mm 50mm 15mm 15mm; }
+        @page { size: A4 landscape; margin: 15mm; }
       }
     `
     document.head.appendChild(style)
@@ -361,6 +366,15 @@ export function ProposalReport({
       {/* 인쇄 시 숨김: 액션 툴바 */}
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-white px-6 py-3 shadow-sm print:hidden">
         <div className="flex items-center gap-2 text-sm text-gray-600">
+          {onBackToAnalysis && (
+            <button
+              onClick={onBackToAnalysis}
+              className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+              title="분석 화면으로 돌아가기"
+            >
+              <ArrowLeft size={14} /> 분석 화면
+            </button>
+          )}
           <span>제안서 미리보기</span>
           {sessionId && (
             <span className="text-xs text-gray-400">
@@ -392,11 +406,11 @@ export function ProposalReport({
 
       {/* 보고서 본체 (인쇄 영역)
           PDF: A4 landscape (267mm 가로 — 15mm 마진 차감)
-          (2026-06-27) 화면 표시: 좌측 정렬(mr-auto) + 우측 여백 — 사용자 요청
-            · max-w-4xl 유지하면서 mx-auto → ml-0/mr-auto 로 변경
-            · 화면 폭이 더 크면 자연스럽게 우측에 여백 생김
-            · 인쇄 시(print:max-w-[260mm]) A4 landscape에 적합한 폭 유지 */}
-      <div className="ml-0 mr-auto max-w-4xl bg-white px-14 py-8 shadow-lg print:max-w-[260mm] print:px-6 print:py-0 print:shadow-none">
+          (2026-06-27 v2) 좌측 정렬 + 우측 여백 — print:max-w-[230mm]가 실효
+            · 화면: max-w-4xl + ml-0/mr-auto = 좌측 정렬, 우측 자연 여백
+            · PDF: print:max-w-[230mm] (이전 260mm 대비 -30mm) → 우측 37mm 여백
+            · ml-0 mr-auto가 print에도 적용되어 PDF 좌측 정렬 */}
+      <div className="ml-0 mr-auto max-w-4xl bg-white px-14 py-8 shadow-lg print:max-w-[230mm] print:px-5 print:py-0 print:shadow-none">
         {/* ─── 헤더 ─── */}
         <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-2 print:pb-2">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
@@ -734,13 +748,13 @@ export function ProposalReport({
             )
           })()}
         </section>
-        </div>
-        {/* /2페이지 묶음 */}
 
-        {/* ─── 푸터 ─── */}
-        <footer className="mt-10 border-t pt-4 text-center text-xs text-gray-400 print:mt-4">
+        {/* ─── 푸터 — 2페이지 안에 통합 (2026-06-27) — 별도 3페이지 발생 방지 ─── */}
+        <footer className="mt-6 border-t pt-3 text-center text-xs text-gray-400 print:mt-3 print:pt-2">
           본 제안서는 {period} 거래명세표 기준으로 작성되었습니다.
         </footer>
+        </div>
+        {/* /2페이지 묶음 (footer 포함) */}
       </div>
     </div>
   )
