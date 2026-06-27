@@ -408,66 +408,34 @@ export function ProposalReport({
           </div>
         </header>
 
-        {/* ─── HERO: 연간 절감액 강조 (2026-06-27 가독성 개선)
-              · 큰 색 면적 → 작은 강조 색으로
-              · 흰 카드 + 좌측 navy strip + 절감액 green (의미별 색) ─── */}
-        <section className="mb-10 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:mb-2 print:rounded-xl print:break-inside-avoid">
-          <div className="flex items-stretch">
-            {/* 좌측 navy strip — 작은 강조색 */}
-            <div className="w-1.5 bg-blue-700 print:w-1" />
-            <div className="flex-1 px-7 py-6 print:px-4 print:py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
-                연간 절감 효과
-              </div>
-              <div className="mt-2 flex items-baseline gap-4 print:mt-1">
-                <div className="text-[44px] font-extrabold leading-none tracking-tight text-emerald-600 tabular-nums print:text-3xl">
-                  {formatCurrency(annualSavings)}
-                </div>
-                <div className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-base font-bold text-emerald-700 ring-1 ring-emerald-200 print:text-sm">
-                  ▼ {savingsPercent.toFixed(1)}%
-                </div>
-              </div>
-              <div className="mt-3 text-sm text-slate-500 print:mt-1 print:text-xs">
-                월 평균 <strong className="font-bold text-slate-900 tabular-nums">{formatCurrency(monthlySavings)}</strong> 절감
-              </div>
-            </div>
+        {/* ─── HERO: 연간 절감액 강조 ─── */}
+        <section className="mb-10 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-8 text-white shadow-lg print:mb-2 print:p-3 print:bg-blue-700 print:break-inside-avoid">
+          <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">연간 절감 효과</div>
+          <div className="mt-2 flex items-baseline gap-3 print:mt-0.5">
+            <div className="text-5xl font-bold print:text-3xl">{formatCurrency(annualSavings)}</div>
+            <div className="text-2xl font-semibold text-blue-100 print:text-lg">▼ {savingsPercent.toFixed(1)}%</div>
+          </div>
+          <div className="mt-3 text-sm text-blue-100 print:mt-0.5 print:text-xs">
+            월 평균 <strong className="text-white">{formatCurrency(monthlySavings)}</strong> 절감
           </div>
         </section>
 
-        {/* ─── 월/연간 비교 카드 — 흰 카드 + 좌측 의미 색 strip (2026-06-27) ─── */}
+        {/* ─── 월/연간 비교 카드 ─── */}
         <section className="mb-10 grid grid-cols-3 gap-4 print:mb-2 print:gap-2">
-          {/* 현 거래처 — 회색 (비교 기준) */}
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white print:rounded-lg">
-            <div className="flex items-stretch">
-              <div className="w-1 bg-slate-400" />
-              <div className="flex-1 px-4 py-4 print:px-2 print:py-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">현 거래처 · 월</div>
-                <div className="mt-1.5 text-2xl font-bold text-slate-800 tabular-nums print:text-base">{formatCurrency(monthlyOurCost)}</div>
-                <div className="mt-1.5 text-[11px] text-slate-400 tabular-nums print:mt-0 print:text-[10px]">연간 {formatCurrency(annualOurCost)}</div>
-              </div>
-            </div>
+          <div className="rounded-xl border-2 border-gray-200 bg-white p-5 print:p-2">
+            <div className="mb-1 text-xs font-medium text-gray-500">현 거래처 (월)</div>
+            <div className="text-2xl font-bold text-gray-700 print:text-base">{formatCurrency(monthlyOurCost)}</div>
+            <div className="mt-2 text-xs text-gray-400 print:mt-0 print:text-[10px]">연간 {formatCurrency(annualOurCost)}</div>
           </div>
-          {/* 신세계푸드 — 블루 (전환 후) */}
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white print:rounded-lg">
-            <div className="flex items-stretch">
-              <div className="w-1 bg-blue-700" />
-              <div className="flex-1 px-4 py-4 print:px-2 print:py-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">신세계푸드 · 월</div>
-                <div className="mt-1.5 text-2xl font-bold text-slate-900 tabular-nums print:text-base">{formatCurrency(monthlySsgCost)}</div>
-                <div className="mt-1.5 text-[11px] text-blue-700/70 tabular-nums print:mt-0 print:text-[10px]">연간 {formatCurrency(annualSsgCost)}</div>
-              </div>
-            </div>
+          <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-5 print:p-2">
+            <div className="mb-1 text-xs font-medium text-blue-700">신세계푸드 (월)</div>
+            <div className="text-2xl font-bold text-blue-900 print:text-base">{formatCurrency(monthlySsgCost)}</div>
+            <div className="mt-2 text-xs text-blue-700 print:mt-0 print:text-[10px]">연간 {formatCurrency(annualSsgCost)}</div>
           </div>
-          {/* 절감 효과 — 그린 (긍정) */}
-          <div className="overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50/40 print:rounded-lg">
-            <div className="flex items-stretch">
-              <div className="w-1 bg-emerald-600" />
-              <div className="flex-1 px-4 py-4 print:px-2 print:py-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">절감 효과 · 월</div>
-                <div className="mt-1.5 text-2xl font-bold text-emerald-700 tabular-nums print:text-base">{formatCurrency(monthlySavings)}</div>
-                <div className="mt-1.5 text-[11px] font-semibold text-emerald-700 tabular-nums print:mt-0 print:text-[10px]">▼ {savingsPercent.toFixed(1)}%</div>
-              </div>
-            </div>
+          <div className="rounded-xl border-2 border-green-300 bg-green-50 p-5 print:p-2">
+            <div className="mb-1 text-xs font-medium text-green-700">절감 효과</div>
+            <div className="text-2xl font-bold text-green-700 print:text-base">- {formatCurrency(monthlySavings)}</div>
+            <div className="mt-2 text-xs text-green-700 print:mt-0 print:text-[10px]">▼ {savingsPercent.toFixed(1)}% (월)</div>
           </div>
         </section>
 
@@ -525,59 +493,54 @@ export function ProposalReport({
 
         {/* ─── 2페이지 시작 — 콘텐츠 적어 수직 중앙 정렬 + 좌우 적절한 padding ─── */}
         <div className="print:break-before-page print:flex print:min-h-[180mm] print:flex-col print:justify-center">
-        {/* ─── 연간 환산 — 흰 카드 + 좌측 navy strip + 의미별 색 분리 (2026-06-27) ─── */}
-        <section className="mb-4 mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:mt-0 print:rounded-xl print:break-inside-avoid">
-          <div className="flex items-stretch">
-            <div className="w-1.5 bg-blue-700 print:w-1" />
-            <div className="flex-1">
-              {/* 상단: 라벨 + 좌우 비교 (현재 vs 전환 시) */}
-              <div className="px-7 pt-5 pb-4 print:px-5 print:pt-4 print:pb-2">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  연간 환산 <span className="text-slate-400 normal-case tracking-normal">(월 합계 × 12)</span>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-4 print:mt-2">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3 print:py-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">현재</div>
-                    <div className="mt-1 whitespace-nowrap text-2xl font-bold text-slate-700 tabular-nums print:text-xl">
-                      {formatCurrency(annualOurCost)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 print:py-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">신세계푸드 전환 시</div>
-                    <div className="mt-1 whitespace-nowrap text-2xl font-bold text-blue-900 tabular-nums print:text-xl">
-                      {formatCurrency(annualSsgCost)}
-                    </div>
-                  </div>
+        {/* ─── 연간 환산 (블루 강조 카드) ─── */}
+        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-xl print:mt-0 print:break-inside-avoid">
+          <div className="px-7 pt-6 pb-4 print:px-6 print:pt-5 print:pb-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
+              연간 환산 (월 합계 × 12)
+            </div>
+
+            {/* 현재 ↔ 전환 시 — 좌우 비교 (한 줄) */}
+            <div className="mt-3 grid grid-cols-2 gap-4">
+              <div className="rounded-xl bg-blue-900/30 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-wider text-blue-200">현재</div>
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-blue-100 print:text-xl">
+                  {formatCurrency(annualOurCost)}
                 </div>
               </div>
-              {/* 하단: 연간 절감 — Hero (green, 가장 큰 강조) */}
-              <div className="border-t border-slate-200 bg-emerald-50/50 px-7 py-5 print:px-5 print:py-3">
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                      연간 절감액
-                    </div>
-                    <div className="mt-1 whitespace-nowrap text-[40px] font-extrabold leading-none tracking-tight text-emerald-600 tabular-nums print:text-3xl">
-                      {formatCurrency(annualSavings)}
-                    </div>
-                  </div>
-                  <div className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white shadow-sm print:text-xs">
-                    ▼ {savingsPercent.toFixed(1)}%
-                  </div>
+              <div className="rounded-xl bg-white/15 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-wider text-blue-100">신세계푸드 전환 시</div>
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-white print:text-xl">
+                  {formatCurrency(annualSsgCost)}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 연간 절감 — 별도 행으로 분리, 큰 임팩트 */}
+          <div className="border-t border-blue-400/40 bg-blue-900/40 px-7 py-5 print:px-6 print:py-3">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-yellow-200">연간 절감</div>
+                <div className="mt-1 whitespace-nowrap text-4xl font-extrabold text-yellow-300 print:text-3xl">
+                  {formatCurrency(annualSavings)}
+                </div>
+              </div>
+              <div className="rounded-full bg-yellow-300 px-3 py-1 text-sm font-bold text-blue-900 print:text-xs">
+                ▼ {savingsPercent.toFixed(1)}%
               </div>
             </div>
           </div>
         </section>
 
-        {/* ─── 연결 메시지 — 단순화 (2026-06-27) ─── */}
-        <div className="my-4 flex items-center justify-center gap-2 print:my-2">
-          <div className="h-px flex-1 bg-slate-200" />
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-            <span className="text-amber-600">▼</span>
+        {/* ─── 연결 메시지 — 절감액이 부가서비스로 제공됨을 시각화 ─── */}
+        <div className="my-3 flex items-center justify-center gap-3 print:my-2">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-300 to-amber-400" />
+          <div className="flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-semibold text-amber-800 ring-2 ring-amber-200">
+            <span className="text-base">↓</span>
             이 절감액이 유치원 부가서비스로 제공됩니다
           </div>
-          <div className="h-px flex-1 bg-slate-200" />
+          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-amber-300 to-amber-400" />
         </div>
 
         {/* ─── 제안 부가서비스 (예상 절감액) — 임팩트 디자인 ─── */}
@@ -692,66 +655,52 @@ export function ProposalReport({
           </div>
           {/* /입력 표 영역 (print:hidden) */}
 
-          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 가독성 개선)
-                · 큰 amber 면적 → 흰 캔버스 + 좌측 amber strip + amber accent 헤더
-                · 숫자 위계: Hero(navy) / 참고(slate) / 카드 금액(navy bold)
-                · 항목 카드 분리감: 흰 카드 + slate border */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (PDF 출력 영역) */}
           {(() => {
             const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:break-inside-avoid print:rounded-xl">
-                <div className="flex items-stretch">
-                  {/* 좌측 amber strip — 작은 강조 색 */}
-                  <div className="w-1.5 bg-amber-500 print:w-1" />
-                  <div className="flex-1">
-                    {/* 헤더 — 라벨 + 합계 Hero + 참고 */}
-                    <div className="border-b border-slate-200 bg-amber-50/40 px-6 py-5 print:px-5 print:py-3">
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
-                            유치원 제안 부가서비스 · 연간
-                          </div>
-                          <div className="mt-1 text-[40px] font-extrabold leading-none tracking-tight text-slate-900 tabular-nums print:text-3xl">
-                            {formatCurrency(totalExtrasAnnual)}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">참고 · 연간 절감액</div>
-                          <div className="mt-0.5 text-base font-bold text-emerald-700 tabular-nums">{formatCurrency(annualSavings)}</div>
-                        </div>
-                      </div>
+              <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-6 text-white shadow-lg print:break-inside-avoid">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">
+                      유치원 제안 부가서비스 (연간)
                     </div>
-
-                    {/* 본문 — 체크된 항목 카드들 (흰 카드, 분리감 명확) */}
-                    <div className="px-6 py-5 print:px-5 print:py-3">
-                      {checkedItems.length > 0 ? (
-                        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-                          {checkedItems.map((e) => (
-                            <div
-                              key={e.key}
-                              className="flex items-baseline justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 transition hover:border-amber-300"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-bold text-slate-900">{e.label}</div>
-                                <div className="mt-0.5 text-[11px] text-slate-500 tabular-nums">
-                                  {e.count ?? 0}회 × {formatNumber(e.perRound)}원
-                                  {e.note && <span className="ml-1 text-slate-400">· {e.note}</span>}
-                                </div>
-                              </div>
-                              <div className="shrink-0 font-mono text-base font-bold text-slate-900 tabular-nums">
-                                {formatCurrency(e.annualAmount)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3 text-center text-sm text-slate-500">
-                          체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
-                        </div>
-                      )}
+                    <div className="mt-1 text-4xl font-extrabold leading-none">
+                      {formatCurrency(totalExtrasAnnual)}
                     </div>
                   </div>
+                  <div className="text-right">
+                    <div className="text-[11px] uppercase tracking-widest text-amber-100">참고 · 연간 절감액</div>
+                    <div className="text-base font-semibold text-amber-100">{formatCurrency(annualSavings)}</div>
+                  </div>
                 </div>
+
+                {/* 체크된 항목 내용 강조 */}
+                {checkedItems.length > 0 ? (
+                  <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {checkedItems.map((e) => (
+                      <div
+                        key={e.key}
+                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/15 px-3 py-2 backdrop-blur-sm"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-bold">{e.label}</div>
+                          <div className="text-[11px] text-amber-100">
+                            {e.count ?? 0}회 × {formatNumber(e.perRound)}원
+                            {e.note && <span className="ml-1 opacity-80">· {e.note}</span>}
+                          </div>
+                        </div>
+                        <div className="shrink-0 font-mono text-base font-bold">
+                          {formatCurrency(e.annualAmount)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-amber-100">
+                    체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
+                  </div>
+                )}
               </div>
             )
           })()}
