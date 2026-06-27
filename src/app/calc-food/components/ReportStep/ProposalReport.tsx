@@ -60,6 +60,9 @@ interface ProposalExtras {
   based_on_period?: string
   /** 원아 수 (부가서비스 자동 계산용) */
   children_count?: number
+  /** 공급율 (2026-06-27 추가) — ReportView가 별도로 저장하지만, ProposalReport의 debounce가
+   * proposal_extras를 덮어쓸 때 supply_rate가 사라지는 버그 fix. payload에 명시적으로 포함. */
+  supply_rate?: number
 }
 
 const DEFAULT_EXTRAS: ExtraItem[] = [
@@ -248,15 +251,21 @@ export function ProposalReport({
   }
 
   // DB 저장 (수동 또는 변경 시 debounce)
+  // (2026-06-27) 버그 fix — initialExtras spread + supply_rate 명시 포함
+  //   기존: payload에 supply_rate 없어서 ReportView가 저장한 공급율(1.25 등)을
+  //         ProposalReport의 debounce가 덮어써서 1.0으로 reset 되는 문제
+  //   해결: 기존 proposal_extras 전체 보존(spread) + 명시적으로 supply_rate prop 전달
   const persist = async () => {
     if (!sessionId) return
     setSaving(true)
     try {
       const payload: ProposalExtras = {
+        ...(initialExtras ?? {}),  // 기존 모든 필드 보존 (supply_rate 등)
         items: extras,
         proposed_to: proposedTo,
         based_on_period: period,
         children_count: childrenCount,
+        supply_rate: supplyRate,  // ReportView가 prop으로 전달한 값을 보존
       }
       await fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
@@ -273,6 +282,9 @@ export function ProposalReport({
 
   // debounce 자동 저장 (1.5s)
   // ready=false 동안은 저장 X — initialExtras fetch 도착 전에 DEFAULT 데이터로 DB 덮어쓰기 방지
+  // (2026-06-27) supplyRate를 deps에 포함하지 않음 — ReportView가 별도로 저장하므로
+  //   여기 deps에 두면 supplyRate 변경 시 ProposalReport·ReportView 두 곳에서 동시 PATCH 발생.
+  //   대신 persist() payload에 supplyRate 포함시켜 다른 필드 저장 시 supplyRate가 reset 안 되도록 보장.
   useEffect(() => {
     if (!sessionId || !extrasReady) return
     const t = setTimeout(() => {
@@ -377,11 +389,12 @@ export function ProposalReport({
       </div>
 
       {/* 보고서 본체 (인쇄 영역)
-          PDF: A4 landscape (267mm 가로 — 15mm 마진 차감) — max-w로 좌우 자연 여백
-          2페이지(연간환산+부가서비스)는 콘텐츠 적어 수직 중앙 정렬
-          (2026-05-17) 좌우 padding 확대 px-14 — 모든 카드 우측 라인 좌측 안쪽으로
-          헤더는 풀폭 (border-b) 유지, 카드는 좁은 grid로 시각 강조 */}
-      <div className="mx-auto max-w-4xl bg-white px-14 py-8 shadow-lg print:max-w-[260mm] print:px-6 print:py-0 print:shadow-none">
+          PDF: A4 landscape (267mm 가로 — 15mm 마진 차감)
+          (2026-06-27) 화면 표시: 좌측 정렬(mr-auto) + 우측 여백 — 사용자 요청
+            · max-w-4xl 유지하면서 mx-auto → ml-0/mr-auto 로 변경
+            · 화면 폭이 더 크면 자연스럽게 우측에 여백 생김
+            · 인쇄 시(print:max-w-[260mm]) A4 landscape에 적합한 폭 유지 */}
+      <div className="ml-0 mr-auto max-w-4xl bg-white px-14 py-8 shadow-lg print:max-w-[260mm] print:px-6 print:py-0 print:shadow-none">
         {/* ─── 헤더 ─── */}
         <header className="mb-8 border-b-2 border-blue-600 pb-6 print:mb-2 print:pb-2">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-blue-600">
@@ -657,26 +670,32 @@ export function ProposalReport({
           </div>
           {/* /입력 표 영역 (print:hidden) */}
 
-          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 톤 통일)
-                · 황색 그라데이션 → 1페이지 HERO와 동일한 밝은 blue
-                · text-amber-100 → text-blue-100 (대비 확보)
-                · 합계는 흰 큰 숫자, 참고 절감액은 옅은 blue (정보 위계) */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 색상 차별화)
+                · 사용자 요청: 파란/황색 아닌 색으로 — 차분한 slate(차콜) 톤 적용
+                · slate-800 → slate-900 그라데이션으로 시각적 무게 + 신뢰감
+                · 합계 강조는 emerald pill (절감→환원 의미)
+                · 항목 카드는 white/12 backdrop으로 분리감 */}
           {(() => {
             const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
-              <div className="mt-4 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-6 text-white shadow-lg print:bg-blue-700 print:break-inside-avoid">
+              <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white shadow-lg print:bg-slate-800 print:break-inside-avoid">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
+                    <div className="text-xs font-semibold uppercase tracking-widest text-slate-300">
                       유치원 제안 부가서비스 (연간)
                     </div>
-                    <div className="mt-1 text-4xl font-extrabold leading-none tabular-nums">
-                      {formatCurrency(totalExtrasAnnual)}
+                    <div className="mt-1 flex items-baseline gap-3">
+                      <div className="text-4xl font-extrabold leading-none tabular-nums">
+                        {formatCurrency(totalExtrasAnnual)}
+                      </div>
+                      <div className="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[11px] font-bold text-white shadow-sm">
+                        ▲ 환원
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-widest text-blue-100">참고 · 연간 절감액</div>
-                    <div className="text-base font-semibold text-white tabular-nums">{formatCurrency(annualSavings)}</div>
+                    <div className="text-[11px] uppercase tracking-widest text-slate-300">참고 · 연간 절감액</div>
+                    <div className="text-base font-semibold text-emerald-300 tabular-nums">{formatCurrency(annualSavings)}</div>
                   </div>
                 </div>
 
@@ -686,23 +705,23 @@ export function ProposalReport({
                     {checkedItems.map((e) => (
                       <div
                         key={e.key}
-                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/15 px-3 py-2 backdrop-blur-sm"
+                        className="flex items-baseline justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 backdrop-blur-sm ring-1 ring-white/5"
                       >
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-bold">{e.label}</div>
-                          <div className="text-[11px] text-blue-100 tabular-nums">
+                          <div className="truncate text-sm font-bold text-white">{e.label}</div>
+                          <div className="text-[11px] text-slate-300 tabular-nums">
                             {e.count ?? 0}회 × {formatNumber(e.perRound)}원
                             {e.note && <span className="ml-1 opacity-80">· {e.note}</span>}
                           </div>
                         </div>
-                        <div className="shrink-0 font-mono text-base font-bold tabular-nums">
+                        <div className="shrink-0 font-mono text-base font-bold text-white tabular-nums">
                           {formatCurrency(e.annualAmount)}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-blue-100">
+                  <div className="mt-4 rounded-lg bg-white/5 px-3 py-2 text-sm text-slate-400">
                     체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
                   </div>
                 )}

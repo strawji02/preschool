@@ -70,6 +70,13 @@ const C = {
   amber: 'F59E0B',
   amberLight: 'FBBF24',
   amberSoft: 'FEF3C7',
+  // (2026-06-27) slate 톤 추가 — 2페이지 부가서비스 카드 색상 차별화 (파란/황색 아닌)
+  slate900: '0F172A',
+  slate800: '1E293B',
+  slate700: '334155',
+  slate300: 'CBD5E1',
+  emerald500: '10B981',
+  emerald300: '6EE7B7',
   white: 'FFFFFF',
   gray900: '111827',
   gray700: '374151',
@@ -458,34 +465,43 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fontSize: 13, bold: true, color: C.navy, align: 'center', valign: 'middle',
   })
 
-  // (3) 연결 메시지
+  // (3) 연결 메시지 — slate 톤으로 차분하게 (amber→slate, 2026-06-27)
   s2.addText('↓  이 절감액이 유치원 부가서비스로 제공됩니다', {
     x: 0.40, y: 3.41, w: 12.53, h: 0.35,
-    fontSize: 12, bold: true, color: '92400E', align: 'center',
+    fontSize: 12, bold: true, color: C.slate700, align: 'center',
   })
 
-  // (4) 부가서비스 amber 카드
+  // (4) 부가서비스 slate 카드 — 2026-06-27 색상 차별화 (파란/황색 아닌 차분한 차콜)
   const a2Y = 3.86
   const a2H = 3.19
   s2.addShape('roundRect', {
     x: 0.70, y: a2Y, w: 11.94, h: a2H,
-    fill: { color: C.amber }, line: { type: 'none' }, rectRadius: 0.15,
+    fill: { color: C.slate800 }, line: { type: 'none' }, rectRadius: 0.15,
   })
   s2.addText('유치원 제안 부가서비스 (연간)', {
     x: 0.90, y: a2Y + 0.16, w: 7.00, h: 0.30,
-    fontSize: 11, bold: true, color: 'FFFBEB', charSpacing: 2,
+    fontSize: 11, bold: true, color: C.slate300, charSpacing: 2,
   })
   s2.addText(formatCurrency(data.totalExtrasAnnual), {
-    x: 0.90, y: a2Y + 0.46, w: 8.00, h: 0.65,
+    x: 0.90, y: a2Y + 0.46, w: 6.00, h: 0.65,
     fontSize: 32, bold: true, color: C.white,
+  })
+  // emerald "▲ 환원" 배지 (절감→환원 의미 강조)
+  s2.addShape('roundRect', {
+    x: 6.95, y: a2Y + 0.62, w: 1.00, h: 0.34,
+    fill: { color: C.emerald500 }, line: { type: 'none' }, rectRadius: 0.17,
+  })
+  s2.addText('▲ 환원', {
+    x: 6.95, y: a2Y + 0.62, w: 1.00, h: 0.34,
+    fontSize: 10, bold: true, color: C.white, align: 'center', valign: 'middle',
   })
   s2.addText('참고 · 연간 절감액', {
     x: 8.72, y: a2Y + 0.20, w: 3.30, h: 0.22,
-    fontSize: 9, color: 'FFFBEB', align: 'right', charSpacing: 1,
+    fontSize: 9, color: C.slate300, align: 'right', charSpacing: 1,
   })
   s2.addText(formatCurrency(data.annualSavings), {
     x: 8.72, y: a2Y + 0.45, w: 3.30, h: 0.40,
-    fontSize: 16, bold: true, color: 'FFFBEB', align: 'right',
+    fontSize: 16, bold: true, color: C.emerald300, align: 'right',
   })
 
   // 부가서비스 항목 (체크된 것만) — 2열 그리드 (2026-05-17 정렬 수정)
@@ -523,7 +539,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     const detail = `${e.count ?? 0}회 × ${formatNumber(e.perRound)}원${e.note ? ` · ${e.note}` : ''}`
     s2.addText(detail, {
       x: ix + 0.20, y: iy + 0.28, w: itW - 2.50, h: 0.22,
-      fontSize: 9, color: 'FFFBEB',
+      fontSize: 9, color: C.slate300,  // amber-soft → slate-300 (2026-06-27)
     })
     s2.addText(formatCurrency(e.annualAmount), {
       x: ix + itW - 2.30, y: iy + 0.13, w: 2.10, h: 0.35,
