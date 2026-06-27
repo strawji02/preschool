@@ -493,8 +493,10 @@ export function ProposalReport({
 
         {/* ─── 2페이지 시작 — 콘텐츠 적어 수직 중앙 정렬 + 좌우 적절한 padding ─── */}
         <div className="print:break-before-page print:flex print:min-h-[180mm] print:flex-col print:justify-center">
-        {/* ─── 연간 환산 (블루 강조 카드) ─── */}
-        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-xl print:mt-0 print:break-inside-avoid">
+        {/* ─── 연간 환산 — 1페이지 HERO와 톤 통일 (2026-06-27)
+              · 짙은 navy → 밝은 blue (from-blue-600 to-blue-700)
+              · 노란 큰 글자 제거 → 흰 글자 + 황색 ▼% pill (HERO 동일 패턴) ─── */}
+        <section className="mb-4 mt-8 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg print:mt-0 print:bg-blue-700 print:break-inside-avoid">
           <div className="px-7 pt-6 pb-4 print:px-6 print:pt-5 print:pb-3">
             <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
               연간 환산 (월 합계 × 12)
@@ -502,45 +504,45 @@ export function ProposalReport({
 
             {/* 현재 ↔ 전환 시 — 좌우 비교 (한 줄) */}
             <div className="mt-3 grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-blue-900/30 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-wider text-blue-200">현재</div>
-                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-blue-100 print:text-xl">
+              <div className="rounded-xl bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-wider text-blue-100">현재</div>
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-white tabular-nums print:text-xl">
                   {formatCurrency(annualOurCost)}
                 </div>
               </div>
-              <div className="rounded-xl bg-white/15 px-4 py-3">
+              <div className="rounded-xl bg-white/20 px-4 py-3">
                 <div className="text-[11px] uppercase tracking-wider text-blue-100">신세계푸드 전환 시</div>
-                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-white print:text-xl">
+                <div className="mt-1 whitespace-nowrap text-2xl font-bold text-white tabular-nums print:text-xl">
                   {formatCurrency(annualSsgCost)}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* 연간 절감 — 별도 행으로 분리, 큰 임팩트 */}
-          <div className="border-t border-blue-400/40 bg-blue-900/40 px-7 py-5 print:px-6 print:py-3">
+          {/* 연간 절감 — 별도 행 + HERO 동일 패턴 (흰 큰 숫자 + 황색 ▼% pill) */}
+          <div className="border-t border-white/20 bg-blue-700/40 px-7 py-5 print:px-6 print:py-3">
             <div className="flex items-end justify-between gap-4">
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-yellow-200">연간 절감</div>
-                <div className="mt-1 whitespace-nowrap text-4xl font-extrabold text-yellow-300 print:text-3xl">
+                <div className="text-[11px] uppercase tracking-wider text-blue-100">연간 절감</div>
+                <div className="mt-1 whitespace-nowrap text-4xl font-extrabold text-white tabular-nums print:text-3xl">
                   {formatCurrency(annualSavings)}
                 </div>
               </div>
-              <div className="rounded-full bg-yellow-300 px-3 py-1 text-sm font-bold text-blue-900 print:text-xs">
+              <div className="rounded-full bg-amber-400 px-3 py-1 text-sm font-bold text-blue-900 shadow-sm print:text-xs">
                 ▼ {savingsPercent.toFixed(1)}%
               </div>
             </div>
           </div>
         </section>
 
-        {/* ─── 연결 메시지 — 절감액이 부가서비스로 제공됨을 시각화 ─── */}
+        {/* ─── 연결 메시지 — 2페이지 톤 통일(amber→blue), 2026-06-27 ─── */}
         <div className="my-3 flex items-center justify-center gap-3 print:my-2">
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-amber-300 to-amber-400" />
-          <div className="flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-semibold text-amber-800 ring-2 ring-amber-200">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-blue-300 to-blue-400" />
+          <div className="flex items-center gap-1.5 rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-800 ring-2 ring-blue-200">
             <span className="text-base">↓</span>
             이 절감액이 유치원 부가서비스로 제공됩니다
           </div>
-          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-amber-300 to-amber-400" />
+          <div className="h-px flex-1 bg-gradient-to-l from-transparent via-blue-300 to-blue-400" />
         </div>
 
         {/* ─── 제안 부가서비스 (예상 절감액) — 임팩트 디자인 ─── */}
@@ -655,23 +657,26 @@ export function ProposalReport({
           </div>
           {/* /입력 표 영역 (print:hidden) */}
 
-          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (PDF 출력 영역) */}
+          {/* 임팩트 — 부가서비스 환원 합계 + 항목 내용 강조 (2026-06-27 톤 통일)
+                · 황색 그라데이션 → 1페이지 HERO와 동일한 밝은 blue
+                · text-amber-100 → text-blue-100 (대비 확보)
+                · 합계는 흰 큰 숫자, 참고 절감액은 옅은 blue (정보 위계) */}
           {(() => {
             const checkedItems = extrasComputed.filter((e) => e.checked && e.annualAmount > 0)
             return (
-              <div className="mt-4 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 p-6 text-white shadow-lg print:break-inside-avoid">
+              <div className="mt-4 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-6 text-white shadow-lg print:bg-blue-700 print:break-inside-avoid">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-widest text-amber-100">
+                    <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">
                       유치원 제안 부가서비스 (연간)
                     </div>
-                    <div className="mt-1 text-4xl font-extrabold leading-none">
+                    <div className="mt-1 text-4xl font-extrabold leading-none tabular-nums">
                       {formatCurrency(totalExtrasAnnual)}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-widest text-amber-100">참고 · 연간 절감액</div>
-                    <div className="text-base font-semibold text-amber-100">{formatCurrency(annualSavings)}</div>
+                    <div className="text-[11px] uppercase tracking-widest text-blue-100">참고 · 연간 절감액</div>
+                    <div className="text-base font-semibold text-white tabular-nums">{formatCurrency(annualSavings)}</div>
                   </div>
                 </div>
 
@@ -685,19 +690,19 @@ export function ProposalReport({
                       >
                         <div className="min-w-0">
                           <div className="truncate text-sm font-bold">{e.label}</div>
-                          <div className="text-[11px] text-amber-100">
+                          <div className="text-[11px] text-blue-100 tabular-nums">
                             {e.count ?? 0}회 × {formatNumber(e.perRound)}원
                             {e.note && <span className="ml-1 opacity-80">· {e.note}</span>}
                           </div>
                         </div>
-                        <div className="shrink-0 font-mono text-base font-bold">
+                        <div className="shrink-0 font-mono text-base font-bold tabular-nums">
                           {formatCurrency(e.annualAmount)}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-amber-100">
+                  <div className="mt-4 rounded-lg bg-white/10 px-3 py-2 text-sm text-blue-100">
                     체크된 부가서비스가 없습니다. 위 표에서 항목을 선택해주세요.
                   </div>
                 )}
