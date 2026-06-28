@@ -151,8 +151,13 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fill: { color: C.navy }, line: { type: 'none' },
   })
   s1.addText(`${data.proposedTo || '유치원'} - 급식 제안서`, {
-    x: 0.7, y: 0.25, w: 12, h: 0.4,
+    x: 0.7, y: 0.25, w: 9.50, h: 0.4,
     fontSize: 22, bold: true, color: C.white, fontFace: 'Pretendard',
+  })
+  // 원아 수 라벨 — 헤더 우측 (2026-06-27) — 부가서비스 계산 기준
+  s1.addText(`원아 ${formatNumber(data.childrenCount)}명 · ${data.period}`, {
+    x: 9.50, y: 0.30, w: 3.30, h: 0.32,
+    fontSize: 11, color: 'BFDBFE', align: 'right', fontFace: 'Pretendard',
   })
 
   // ── (2) HERO 청색 카드 (연간 절감 효과) — 가장 좁음 ──
@@ -487,8 +492,17 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
     fill: { color: C.slate500 }, line: { type: 'none' }, rectRadius: 0.15,
   })
   s2.addText('유치원 제안 부가서비스 (연간)', {
-    x: 0.90, y: a2Y + 0.16, w: 7.00, h: 0.30,
+    x: 0.90, y: a2Y + 0.16, w: 4.50, h: 0.30,
     fontSize: 11, bold: true, color: C.slate100, charSpacing: 2,
+  })
+  // 원아 수 기준 라벨 (2026-06-27) — 부가서비스 계산 기준 명시
+  s2.addShape('roundRect', {
+    x: 5.45, y: a2Y + 0.14, w: 1.85, h: 0.34,
+    fill: { color: C.white, transparency: 80 }, line: { type: 'none' }, rectRadius: 0.17,
+  })
+  s2.addText(`원아 ${formatNumber(data.childrenCount)}명 기준`, {
+    x: 5.45, y: a2Y + 0.14, w: 1.85, h: 0.34,
+    fontSize: 9, bold: true, color: C.white, align: 'center', valign: 'middle',
   })
   s2.addText(formatCurrency(data.totalExtrasAnnual), {
     x: 0.90, y: a2Y + 0.46, w: 6.00, h: 0.65,

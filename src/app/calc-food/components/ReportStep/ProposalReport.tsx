@@ -426,13 +426,24 @@ export function ProposalReport({
               />
             </h1>
             <div className="text-right text-sm text-gray-500">
-              <div>기준 기간</div>
-              <input
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                placeholder="2024년 8월"
-                className="w-32 border-none bg-transparent text-right font-semibold text-gray-900 outline-none focus:bg-blue-50 print:bg-transparent"
-              />
+              <div className="flex items-baseline justify-end gap-4">
+                <div>
+                  <div>기준 기간</div>
+                  <input
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value)}
+                    placeholder="2024년 8월"
+                    className="w-32 border-none bg-transparent text-right font-semibold text-gray-900 outline-none focus:bg-blue-50 print:bg-transparent"
+                  />
+                </div>
+                {/* 원아 수 표시 (2026-06-27) — 사용자 입력값을 PDF/PPT에도 반영 */}
+                <div>
+                  <div>원아 수</div>
+                  <div className="text-right font-semibold text-gray-900 tabular-nums">
+                    {formatNumber(childrenCount)} <span className="text-xs font-medium text-gray-500">명</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </header>
@@ -700,8 +711,12 @@ export function ProposalReport({
               <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-500 to-slate-600 p-6 text-white shadow-lg print:bg-slate-500 print:break-inside-avoid">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-widest text-slate-100">
-                      유치원 제안 부가서비스 (연간)
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-100">
+                      <span>유치원 제안 부가서비스 (연간)</span>
+                      {/* 원아 수 라벨 (2026-06-27) — 부가서비스 계산 기준 명시 */}
+                      <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-white ring-1 ring-white/15">
+                        원아 {formatNumber(childrenCount)}명 기준
+                      </span>
                     </div>
                     <div className="mt-1 flex items-baseline gap-3">
                       <div className="text-4xl font-extrabold leading-none tabular-nums">
