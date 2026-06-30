@@ -52,6 +52,35 @@ interface ExtraItem {
   per_child?: boolean
   /** 단가 배수 (예: 1.1 = 교사포함, 1.5 = 학부모포함, 1.0 = 기본) */
   multiplier?: number
+  /** 계산 알고리즘 (2026-06-30 추가)
+   *  - 'simple' (기본): unit_price × children × multiplier
+   *  - 'coffee_truck': 엑셀 v1 산식 — 50명 이하 530k, 51명+ ROUNDUP(인원 × 2잔 × 단가 + 부대비용, 100k) */
+  algo?: 'simple' | 'coffee_truck'
+}
+
+/**
+ * 커피차 회당 비용 계산 (엑셀 v1 산식 — 2026-06-30)
+ * @param children  원아 수
+ * @param cupPrice  잔당 단가 (기본 3,500원, 사용자 input으로 변경 가능)
+ * @param multiplier 학부모 포함 배율 (기본 1.5)
+ * @returns 회당 비용 (100,000원 단위 올림, 최소 530,000원)
+ */
+function calcCoffeeTruckPerRound(
+  children: number,
+  cupPrice: number = 3500,
+  multiplier: number = 1.5,
+): number {
+  const CUPS_PER_PERSON = 2          // 1인당 준비 잔 수
+  const OVERHEAD = 168_000           // 부대비용 = 배너 34k + 현수막 34k + 출장비 100k
+  const MIN_PRICE = 530_000          // 50명 이하 기본 가격
+  const ROUND_UNIT = 100_000         // 100,000원 단위 올림
+
+  const totalPeople = Math.ceil(children * multiplier)
+  if (totalPeople <= 50) return MIN_PRICE
+
+  const cups = totalPeople * CUPS_PER_PERSON
+  const beverageCost = cups * cupPrice
+  return Math.ceil((beverageCost + OVERHEAD) / ROUND_UNIT) * ROUND_UNIT
 }
 
 interface ProposalExtras {
@@ -68,7 +97,8 @@ interface ProposalExtras {
 const DEFAULT_EXTRAS: ExtraItem[] = [
   // 원아수 비례 항목 (per_child: true)
   { key: 'snack',   label: '원아 간식',     checked: false, note: '교사포함 1.1배', count: 4,  unit_price: 5500,   per_child: true,  multiplier: 1.1 },
-  { key: 'coffee',  label: '커피차',        checked: false, note: '학부모 1.5배',  count: 5,  unit_price: 5500,   per_child: true,  multiplier: 1.5 },
+  // 커피차 — 엑셀 v1 산식 적용 (2026-06-30) · unit_price = 잔당 단가 (3,500), multiplier = 학부모 포함 1.5배
+  { key: 'coffee',  label: '커피차',        checked: false, note: '학부모 1.5배 · 1인당 2잔', count: 5,  unit_price: 3500, per_child: true, multiplier: 1.5, algo: 'coffee_truck' },
   { key: 'cooking', label: '요리실습 재료', checked: false, note: '',              count: 4,  unit_price: 5500,   per_child: true,  multiplier: 1.0 },
   // 회당 직접 항목 (per_child: false — 원아수 무관)
   { key: 'mat',     label: '대형매트',      checked: false, note: '2EA 세척·교환', count: 12, unit_price: 55000,  per_child: false, multiplier: 1.0 },
@@ -163,7 +193,17 @@ export function ProposalReport({
       // DB에 저장된 항목이 있으면 그것을 base로, default와 병합
       const merged = DEFAULT_EXTRAS.map((d) => {
         const saved = initialExtras.items?.find((i) => i.key === d.key)
-        return saved ? { ...d, ...saved } : d
+        if (!saved) return d
+        // 커피차 마이그레이션 (2026-06-30) — 이전 unit_price=5500(인당) → 3500(잔당), algo 강제
+        if (d.key === 'coffee') {
+          return {
+            ...d,
+            ...saved,
+            algo: 'coffee_truck' as const,
+            unit_price: saved.unit_price === 5500 ? 3500 : (saved.unit_price ?? 3500),
+          }
+        }
+        return { ...d, ...saved }
       })
       // DB에만 있는 추가 항목도 보존
       const extra = initialExtras.items.filter((i) => !DEFAULT_EXTRAS.some((d) => d.key === i.key))
@@ -192,7 +232,17 @@ export function ProposalReport({
     if (initialExtras.items && initialExtras.items.length > 0) {
       const merged = DEFAULT_EXTRAS.map((d) => {
         const saved = initialExtras.items?.find((i) => i.key === d.key)
-        return saved ? { ...d, ...saved } : d
+        if (!saved) return d
+        // 커피차 마이그레이션 (2026-06-30) — 이전 unit_price=5500(인당) → 3500(잔당), algo 강제
+        if (d.key === 'coffee') {
+          return {
+            ...d,
+            ...saved,
+            algo: 'coffee_truck' as const,
+            unit_price: saved.unit_price === 5500 ? 3500 : (saved.unit_price ?? 3500),
+          }
+        }
+        return { ...d, ...saved }
       })
       const extra = initialExtras.items.filter((i) => !DEFAULT_EXTRAS.some((d) => d.key === i.key))
       setExtras([...merged, ...extra])
@@ -203,17 +253,32 @@ export function ProposalReport({
     setExtrasReady(true)
   }, [initialExtras])
 
-  // 부가서비스 자동 계산 (2026-05-04 수식 확정)
+  // 부가서비스 자동 계산 (2026-05-04 수식 / 2026-06-30 커피차 분기 추가)
   //   per_child=true:  단가(회당) = 인당단가 × 원아수 × multiplier
   //   per_child=false: 단가(회당) = 인당단가 × multiplier  (원아수 무관)
   //   금액(년) = 단가(회당) × 횟수
   // 예: 원아간식 5,500 × 100 × 1.1 = 605,000   (per_child=true, mult=1.1)
-  //     커피차   5,500 × 100 × 1.5 = 825,000   (per_child=true, mult=1.5)
   //     대형매트 55,000 × 1.0      = 55,000    (per_child=false, mult=1.0)
+  //
+  // (2026-06-30) 커피차는 별도 산식 — algo='coffee_truck':
+  //   인원 = 원아 × multiplier (학부모 포함 1.5배)
+  //   인원 ≤ 50명: 530,000원 (기본/최소)
+  //   인원 > 50명: ROUNDUP(인원 × 2잔 × 잔당단가 + 168,000, 100,000)
   const extrasComputed = useMemo(() => {
     return extras.map((e) => {
-      const base = (e.unit_price ?? 0) * (e.per_child !== false ? childrenCount : 1)
-      const perRound = base * (e.multiplier ?? 1)
+      let perRound: number
+      if (e.algo === 'coffee_truck' || e.key === 'coffee') {
+        // 커피차 — 엑셀 v1 산식
+        perRound = calcCoffeeTruckPerRound(
+          childrenCount,
+          e.unit_price ?? 3500,
+          e.multiplier ?? 1.5,
+        )
+      } else {
+        // 기본 산식
+        const base = (e.unit_price ?? 0) * (e.per_child !== false ? childrenCount : 1)
+        perRound = base * (e.multiplier ?? 1)
+      }
       const annualAmount = perRound * (e.count ?? 0)
       return { ...e, perRound, annualAmount }
     })
