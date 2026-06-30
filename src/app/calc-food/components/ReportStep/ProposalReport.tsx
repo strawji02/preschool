@@ -305,6 +305,26 @@ export function ProposalReport({
   const annualSavings = monthlySavings * 12
   const savingsPercent = monthlyOurCost > 0 ? (monthlySavings / monthlyOurCost) * 100 : 0
 
+  // (2026-06-30) 커피차 비고 자동 동기화 — "기본 N잔" 표시
+  //   N = 50명 이하: 100잔 고정 / 51명+: 인원 × 2잔
+  //   childrenCount 또는 multiplier 변경 시 note 자동 갱신
+  //   사용자 수동 수정 시에도 다음 변경 시 자동 덮어씌움 (자동 표시 우선)
+  useEffect(() => {
+    setExtras((prev) => {
+      let changed = false
+      const next = prev.map((e) => {
+        if (e.key !== 'coffee' && e.algo !== 'coffee_truck') return e
+        const totalPeople = Math.ceil(childrenCount * (e.multiplier ?? 1.5))
+        const cups = totalPeople <= 50 ? 100 : totalPeople * 2
+        const autoNote = `기본 ${cups}잔`
+        if (e.note === autoNote) return e
+        changed = true
+        return { ...e, note: autoNote }
+      })
+      return changed ? next : prev
+    })
+  }, [childrenCount])
+
   // 부가서비스 토글 / 노트 / 횟수 / 인당단가 변경
   const toggleExtra = (key: string) => {
     setExtras((prev) => prev.map((e) => (e.key === key ? { ...e, checked: !e.checked } : e)))
