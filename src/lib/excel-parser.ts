@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { parseOrderUnit } from './spec-parser'
 
 export interface ExtractedExcelItem {
   name: string
@@ -15,6 +16,12 @@ export interface ExtractedExcelItem {
   tax_amount?: number
   /** 세액을 포함한 총액 (원장 총액) */
   total_price: number
+  /** 발주 단위 타입 (KG/EA/PK/BOX) — 규격/단위 파싱 결과 */
+  unit_type?: string
+  /** 총 발주 무게(g) = 단위당무게 × 수량. 산출 불가 시 undefined */
+  total_weight_g?: number
+  /** kg당 단가 = total_price / (total_weight_g/1000). 산출 불가 시 undefined */
+  price_per_kg?: number
   row_index: number
 }
 
@@ -309,6 +316,19 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
         ? supplyAmount
         : finalUnitPrice * quantity
 
+      // 발주 단위 무게 환산 — 규격/단위 컬럼 (unit + spec 결합) 기준
+      // 예: unit="PK" spec="개당60~68g/30ea_국내산" → "PK 개당60~68g/30ea" 로 결합
+      const unitSpecStr = [unit, spec].filter(Boolean).join(' ')
+      const orderUnit = parseOrderUnit(unitSpecStr)
+      let totalWeightG: number | undefined
+      let pricePerKg: number | undefined
+      if (orderUnit.unitWeightG !== null && quantity > 0) {
+        totalWeightG = orderUnit.unitWeightG * quantity
+        if (totalWeightG > 0) {
+          pricePerKg = Math.round(finalTotalPrice / (totalWeightG / 1000))
+        }
+      }
+
       items.push({
         name,
         spec: spec || undefined,
@@ -319,6 +339,9 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
         supply_amount: finalSupplyAmount,
         tax_amount: taxIdx !== -1 ? taxAmount : undefined,
         total_price: finalTotalPrice,
+        unit_type: orderUnit.unitType || undefined,
+        total_weight_g: totalWeightG,
+        price_per_kg: pricePerKg,
         row_index: i - headerRowIndex - 1,
       })
     }

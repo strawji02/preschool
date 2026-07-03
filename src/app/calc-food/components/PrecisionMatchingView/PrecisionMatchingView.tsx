@@ -23,6 +23,7 @@ import { formatCurrency, formatNumber, formatWeight } from '@/lib/format'
 import {
   parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
+import { parseOrderUnit } from '@/lib/spec-parser'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
@@ -146,6 +147,33 @@ function specToUnitFallback(text: string | undefined | null): number | null {
   if (/\bL\b/.test(t)) return 1000
   if (/\bG\b/.test(t)) return 1
   return null
+}
+
+/**
+ * 발주 단위(KG/EA/PK/BOX) 기반 총 발주 무게(g) + kg당 단가 산출.
+ * 규격/단위 혼재 케이스(EA(85g), PK.(개당60~68g/30ea) 등) 대응 — parseOrderUnit 우선,
+ * 실패 시 기존 parseSpecToGrams 체인으로 fallback.
+ */
+function computeInvoiceWeight(item: ComparisonItem): {
+  totalWeightG: number | null
+  unitPricePerKg: number | null
+} {
+  const unitSpec = [item.extracted_unit, item.extracted_spec].filter(Boolean).join(' ')
+  const perUnitG =
+    parseOrderUnit(unitSpec).unitWeightG ??
+    unitToGrams(item.extracted_unit) ??
+    parseSpecToGrams(item.extracted_spec) ??
+    parseSpecToGrams(item.extracted_name) ??
+    specToUnitFallback(item.extracted_spec)
+
+  const qty = item.adjusted_quantity ?? item.extracted_quantity
+  if (!perUnitG || perUnitG <= 0 || !qty || qty <= 0) {
+    return { totalWeightG: null, unitPricePerKg: null }
+  }
+  return {
+    totalWeightG: perUnitG * qty,
+    unitPricePerKg: pricePerKg(item.extracted_unit_price, perUnitG),
+  }
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -942,6 +970,21 @@ function ItemListPanel({
                         {it.extracted_spec}
                       </div>
                     )}
+                    {/* (2026-07-04) 총 발주 무게 + kg당 단가 — 규격/단위 환산 결과 */}
+                    {(() => {
+                      const { totalWeightG, unitPricePerKg } = computeInvoiceWeight(it)
+                      if (totalWeightG == null) return null
+                      return (
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-400">
+                          <span title="총 발주 무게">⚖ {formatWeight(totalWeightG)}</span>
+                          {unitPricePerKg ? (
+                            <span className="text-emerald-600" title="kg당 단가">
+                              · {formatCurrency(unitPricePerKg)}/kg
+                            </span>
+                          ) : null}
+                        </div>
+                      )
+                    })()}
                   </div>
                   {/* 우측 상단: 수량·단가 / 금액 (오른쪽 정렬) */}
                   <div className="shrink-0 text-right">

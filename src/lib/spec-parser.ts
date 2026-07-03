@@ -411,6 +411,118 @@ export function calculateVolumeMultiplier(
 }
 
 /**
+ * 발주 단위 파싱 결과
+ *
+ * 거래명세표의 "규격/단위" 컬럼에 KG/EA/PK/BOX 등 발주 단위와
+ * 개당 무게·팩당 개수가 혼재된 경우, 1 발주 단위당 무게(g)를 산출합니다.
+ */
+export interface OrderUnitInfo {
+  original: string
+  // 발주 단위 타입 (KG / EA / PK / BOX / null)
+  unitType: string | null
+  // 개당 무게(g) — EA(85g), PK.(개당64g...) 등에서 추출
+  perSizeG: number | null
+  // 팩/박스당 개수 — PK.(.../30ea) 등에서 추출
+  perPackEa: number | null
+  // 1 발주 단위당 무게(g). 산출 불가 시 null (예: BOX 무게 미상)
+  unitWeightG: number | null
+}
+
+// 발주 단위 별칭 → 정규화 타입
+const ORDER_UNIT_ALIASES: Array<{ type: string; patterns: RegExp }> = [
+  { type: 'KG', patterns: /^\s*kg\b/i },
+  { type: 'BOX', patterns: /^\s*(box|박스|상자)\b/i },
+  { type: 'PK', patterns: /^\s*(pk|pack|팩)\b/i },
+  { type: 'EA', patterns: /^\s*(ea|개|입)\b/i },
+]
+
+/**
+ * 발주 단위 문자열을 파싱하여 1 발주 단위당 무게(g)를 산출합니다.
+ *
+ * @param spec 규격/단위 문자열 (예: "KG", "EA(85g)", "PK.(개당60~68g/30ea_국내산)")
+ * @returns 발주 단위 정보
+ *
+ * @example
+ * parseOrderUnit("KG")                      // unitType:"KG", unitWeightG:1000
+ * parseOrderUnit("EA(85g)")                 // unitType:"EA", perSizeG:85, unitWeightG:85
+ * parseOrderUnit("PK.(200g_외국산)")         // unitType:"PK", unitWeightG:200
+ * parseOrderUnit("PK.(개당60~68g/30ea)")     // unitType:"PK", perSizeG:64, perPackEa:30, unitWeightG:1920
+ * parseOrderUnit("BOX")                     // unitType:"BOX", unitWeightG:null
+ */
+export function parseOrderUnit(spec: string): OrderUnitInfo {
+  const result: OrderUnitInfo = {
+    original: spec,
+    unitType: null,
+    perSizeG: null,
+    perPackEa: null,
+    unitWeightG: null,
+  }
+
+  if (!spec || spec.trim() === '') {
+    return result
+  }
+
+  const trimmed = spec.trim()
+
+  // 1. 발주 단위 타입 판별 (문자열 시작 부분 기준)
+  for (const { type, patterns } of ORDER_UNIT_ALIASES) {
+    if (patterns.test(trimmed)) {
+      result.unitType = type
+      break
+    }
+  }
+
+  // 2. 괄호 안 참고 정보 추출: 개당 무게 / 팩당 개수
+  const inner = trimmed.match(/\(([^)]+)\)/)?.[1] ?? ''
+
+  // 개당 무게: "60~68g" → 평균 64, "85g" → 85, "약300g" → 300
+  const rangeMatch = inner.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g/i)
+  if (rangeMatch) {
+    result.perSizeG = (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2
+  } else {
+    // g 뒤에 알파벳이 오지 않는 경우만 (kg 오매칭 방지). 언더스코어/한글/슬래시는 허용.
+    const singleG = inner.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
+    if (singleG) {
+      result.perSizeG = parseFloat(singleG[1])
+    }
+  }
+
+  // 팩당 개수: "30ea", "30개" — 뒤에 알파벳이 오지 않는 경우
+  const eaMatch = inner.match(/(\d+(?:\.\d+)?)\s*(ea|개|입)(?![a-z])/i)
+  if (eaMatch) {
+    result.perPackEa = parseFloat(eaMatch[1])
+  }
+
+  // 3. 1 발주 단위당 무게(g) 산출
+  if (result.unitType === 'KG') {
+    // KG 발주: 괄호 안 개당 무게는 참고정보일 뿐, 1발주단위 = 1kg
+    result.unitWeightG = 1000
+  } else if (result.unitType === 'EA') {
+    // 1개당 무게 = perSizeG
+    result.unitWeightG = result.perSizeG
+  } else if (result.unitType === 'PK') {
+    if (result.perSizeG !== null && result.perPackEa !== null) {
+      // 팩당 무게 = 개당무게 × 팩당개수
+      result.unitWeightG = result.perSizeG * result.perPackEa
+    } else if (result.perSizeG !== null) {
+      // 팩당 총 무게가 직접 표기된 경우 (예: "200g")
+      result.unitWeightG = result.perSizeG
+    } else {
+      result.unitWeightG = null
+    }
+  } else if (result.unitType === 'BOX') {
+    // 박스당 무게 미상 (내부 개수/무게 없으면 산출 불가)
+    if (result.perSizeG !== null && result.perPackEa !== null) {
+      result.unitWeightG = result.perSizeG * result.perPackEa
+    } else {
+      result.unitWeightG = null
+    }
+  }
+
+  return result
+}
+
+/**
  * 규격 비교 (정규화된 값 기준)
  *
  * @param spec1 첫 번째 규격
