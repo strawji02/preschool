@@ -158,10 +158,14 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       }
     }
 
-    // (2026-06-30) 다중행 헤더 병합 — 아워홈 ERP 스타일 케이스
-    // 첫 헤더 행이 필수 컬럼(name/qty/price)만 갖고 total/supply/tax 컬럼이 없으면
-    // 다음 행에 헤더성 텍스트('합계|VAT|공급가|면세|과세|계' 등)가 있는지 확인
-    // 있으면 두 행을 열별로 병합해서 한 줄 헤더로 사용 (헤더 행 인덱스는 아래 행으로 이동)
+    // (2026-06-30 v2) 다중행 헤더 병합 — 조건 완화
+    // 조건 변경 이유:
+    //   v1은 total/supply/tax가 모두 -1일 때만 병합했으나,
+    //   아워홈 ERP처럼 R1에 "공급가" (실은 단가/평균단가) 셀이 있으면
+    //   supply_amount alias("공급가" 포함)에 substring 매칭되어 currSupply=6로 잡힘
+    //   → missingImportant=false → 병합 안 됨
+    //   → R2의 실제 "합계(VAT포함) / 계(VAT제외) / VAT" 컬럼 놓침
+    // v2 조건: total 없으면 병합 (합계는 반드시 있어야 하는 필수 필드)
     if (headerRowIndex + 1 < rawData.length) {
       const nextRow = rawData[headerRowIndex + 1]
       if (nextRow) {
@@ -174,13 +178,11 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
           const trimmed = s.replace(/[,\s]/g, '')
           return /^-?\d+\.?\d*$/.test(trimmed) && trimmed.length > 0
         })
-        // 현재 total/supply/tax 검출 여부
+        // 조건 완화: total만 없어도 병합 (합계 표기는 반드시 필요)
         const currTotal = findColumnIndex(headers, COLUMN_ALIASES.total_price)
-        const currSupply = findColumnIndex(headers, COLUMN_ALIASES.supply_amount)
-        const currTax = findColumnIndex(headers, COLUMN_ALIASES.tax_amount)
-        const missingImportant = currTotal === -1 && currSupply === -1 && currTax === -1
+        const missingTotal = currTotal === -1
 
-        if (nextIsHeader && !nextHasNumericData && missingImportant) {
+        if (nextIsHeader && !nextHasNumericData && missingTotal) {
           // 열별 병합: 빈 헤더 자리를 다음 행 텍스트로 채움. 둘 다 있으면 공백으로 결합.
           const merged = headers.map((v, idx) => {
             const next = nextStrings[idx] || ''
@@ -194,18 +196,28 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       }
     }
 
-    // 컬럼 인덱스 찾기
-    // 순서: 공급가액·세액 먼저 → 총액 → 금액(fallback)
-    // 이렇게 해야 "공급가액"이 "금액" alias에 잘못 잡히지 않음
+    // 컬럼 인덱스 찾기 — 중복 매핑 방지 (2026-06-30 v2)
+    //   병합 헤더 "공급가 평균단가" 같은 케이스에서 unit_price와 supply_amount가
+    //   동일 인덱스에 잡힐 수 있음 → excludeIndexes로 방지
+    // 순서: name/spec/qty/unit_price 먼저 → supply/tax/total (이미 잡힌 인덱스 제외)
     const nameIdx = findColumnIndex(headers, COLUMN_ALIASES.name)
     const specIdx = findColumnIndex(headers, COLUMN_ALIASES.spec)
     const originIdx = findColumnIndex(headers, COLUMN_ALIASES.origin)
     const unitIdx = findColumnIndex(headers, COLUMN_ALIASES.unit)
     const qtyIdx = findColumnIndex(headers, COLUMN_ALIASES.quantity)
     const unitPriceIdx = findColumnIndex(headers, COLUMN_ALIASES.unit_price)
-    const supplyIdx = findColumnIndex(headers, COLUMN_ALIASES.supply_amount)
-    const taxIdx = findColumnIndex(headers, COLUMN_ALIASES.tax_amount)
-    // total_price: "공급가액/세액/단가"가 이미 잡힌 컬럼은 제외
+    // supply_amount: unit_price 인덱스 제외 (병합 헤더 중복 매핑 방지)
+    const supplyIdx = findColumnIndex(
+      headers,
+      COLUMN_ALIASES.supply_amount,
+      [unitPriceIdx].filter(i => i !== -1),
+    )
+    const taxIdx = findColumnIndex(
+      headers,
+      COLUMN_ALIASES.tax_amount,
+      [unitPriceIdx, supplyIdx].filter(i => i !== -1),
+    )
+    // total_price: 이미 잡힌 컬럼 모두 제외
     const totalPriceIdx = findColumnIndex(
       headers,
       COLUMN_ALIASES.total_price,
