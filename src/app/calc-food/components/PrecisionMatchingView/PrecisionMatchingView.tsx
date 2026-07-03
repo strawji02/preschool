@@ -158,13 +158,7 @@ function computeInvoiceWeight(item: ComparisonItem): {
   totalWeightG: number | null
   unitPricePerKg: number | null
 } {
-  const unitSpec = [item.extracted_unit, item.extracted_spec].filter(Boolean).join(' ')
-  const perUnitG =
-    parseOrderUnit(unitSpec).unitWeightG ??
-    unitToGrams(item.extracted_unit) ??
-    parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    specToUnitFallback(item.extracted_spec)
+  const perUnitG = resolveInvoiceUnitWeightG(item)
 
   const qty = item.adjusted_quantity ?? item.extracted_quantity
   if (!perUnitG || perUnitG <= 0 || !qty || qty <= 0) {
@@ -174,6 +168,27 @@ function computeInvoiceWeight(item: ComparisonItem): {
     totalWeightG: perUnitG * qty,
     unitPricePerKg: pricePerKg(item.extracted_unit_price, perUnitG),
   }
+}
+
+/**
+ * 기존 업체(거래명세표) 품목의 "1 발주 단위당 무게(g)" 결정.
+ *
+ * 발주 단위(KG/EA/PK/BOX)를 최우선으로 인식 — "KG(약300g_국내산)"처럼 단위 뒤에
+ * 괄호 참고정보가 붙어도 KG 발주로 보고 1,000g 반환.
+ * (버그 fix: unitToGrams는 정확 일치만 해서 "KG(...)"를 놓치고, 다음 순위인
+ *  parseSpecToGrams가 괄호 안 300g을 단위중량으로 오인 → 300×1.5=450g 오류)
+ * parseOrderUnit이 산출 불가일 때만 기존 체인으로 fallback.
+ */
+function resolveInvoiceUnitWeightG(item: ComparisonItem): number | null {
+  const unitSpec = [item.extracted_unit, item.extracted_spec].filter(Boolean).join(' ')
+  return (
+    parseOrderUnit(unitSpec).unitWeightG ??
+    unitToGrams(item.extracted_unit) ??
+    parseSpecToGrams(item.extracted_spec) ??
+    parseSpecToGrams(item.extracted_name) ??
+    specToUnitFallback(item.extracted_spec) ??
+    specToUnitFallback(item.extracted_name)
+  )
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -1060,12 +1075,7 @@ function ExistingItemDetail({
   //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
   // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
   // 3) spec/품목명에 무게 단위 키워드만 있는 경우 1 단위 가정 (청피망 EA + spec="상품 KG" 케이스)
-  const existingWeightG =
-    unitToGrams(item.extracted_unit) ??
-    parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    specToUnitFallback(item.extracted_spec) ??
-    specToUnitFallback(item.extracted_name)
+  const existingWeightG = resolveInvoiceUnitWeightG(item)
   const total = getExistingTotal(item)
   const perKg =
     existingWeightG && item.extracted_quantity > 0
@@ -1275,12 +1285,7 @@ function ShinsegaeMatching({
   //         박혀있어도 그건 총량/이력번호이지 단위중량이 아님 (돈앞다리 케이스)
   // 2) spec/품목명에서 무게 추출 (단위가 EA/박스/봉인 경우 — "5KG/팩" 같은 패턴)
   // 3) spec/품목명에 무게 단위 키워드만 있는 경우 1 단위 가정 (청피망 EA + spec="상품 KG" 케이스)
-  const existingWeightG =
-    unitToGrams(item.extracted_unit) ??
-    parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    specToUnitFallback(item.extracted_spec) ??
-    specToUnitFallback(item.extracted_name)
+  const existingWeightG = resolveInvoiceUnitWeightG(item)
   const existingTotal = getExistingTotal(item)
 
   // 검수자 조정값 (mount 시 초기화 — useEffect로 ssgMatch 변경 시 자동 동기화)
@@ -1932,13 +1937,7 @@ function CandidatesAndSearchPanel({
 
   // (2026-05-11) 검수 단위중량 — 단위중량 가까운 후보 우선 정렬용
   // 예: '쌀 20kg' 검수 → 신세계 20kg 양곡 후보 우선, 1kg 가공품 후순위
-  const itemWeightG =
-    unitToGrams(item.extracted_unit) ??
-    parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    specToUnitFallback(item.extracted_spec) ??
-    specToUnitFallback(item.extracted_name) ??
-    0
+  const itemWeightG = resolveInvoiceUnitWeightG(item) ?? 0
   const candWeightOf = (c: SupplierMatch): number => {
     if (c.spec_quantity == null || !c.spec_unit) return 0
     const u = c.spec_unit.toUpperCase()

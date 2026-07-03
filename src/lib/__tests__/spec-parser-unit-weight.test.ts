@@ -71,4 +71,15 @@ describe('parseOrderUnit — 총 무게 / kg당 단가 산출 helper', () => {
     const totalWeightG = (r.unitWeightG ?? 0) * qty
     expect(totalWeightG).toBe(9600) // 1920 × 5
   })
+
+  it('[회귀] 애호박 발주 1.5 KG(약300g_국내산): 괄호 300g 오인 금지, 총무게 1500g', () => {
+    // 버그: 단위가 "KG(약300g_국내산)"일 때 괄호 안 참고정보 300g을
+    //       단위중량으로 잡아 300×1.5=450g으로 계산하던 문제.
+    // 기대: KG 발주단위 = 1000g → 1000×1.5 = 1500g
+    const r = parseOrderUnit('KG(약300g_국내산)')
+    expect(r.unitType).toBe('KG')
+    expect(r.unitWeightG).toBe(1000)
+    const qty = 1.5
+    expect((r.unitWeightG ?? 0) * qty).toBe(1500)
+  })
 })
