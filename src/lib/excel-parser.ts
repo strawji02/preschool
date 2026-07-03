@@ -184,12 +184,18 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
 
         if (nextIsHeader && !nextHasNumericData && missingTotal) {
           // 열별 병합: 빈 헤더 자리를 다음 행 텍스트로 채움. 둘 다 있으면 공백으로 결합.
-          const merged = headers.map((v, idx) => {
+          // (2026-07-03 fix) SheetJS의 sheet_to_json은 R1의 trailing 빈 셀을 배열에서 제거함
+          //   → R1 길이=7, R2 길이=13인 경우 headers.map만 하면 [7]~[12] 놓침
+          //   → max 길이로 iterate + 부족한 자리는 nextStrings 값으로 채움
+          const maxLen = Math.max(headers.length, nextStrings.length)
+          const merged: string[] = []
+          for (let idx = 0; idx < maxLen; idx++) {
+            const v = headers[idx] || ''
             const next = nextStrings[idx] || ''
-            if (!v && next) return next
-            if (v && next && v !== next) return `${v} ${next}`.trim()
-            return v
-          })
+            if (!v && next) merged.push(next)
+            else if (v && next && v !== next) merged.push(`${v} ${next}`.trim())
+            else merged.push(v)
+          }
           headers = merged
           headerRowIndex = headerRowIndex + 1  // 데이터는 병합 헤더 다음 행부터
         }
