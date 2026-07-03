@@ -56,12 +56,25 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     // (2026-06-26) 공급사 거래내역서 표기 추가 — 풀무원 ERP "매출량", 일부 공급사 "판매량/공급량"
     '매출량', '판매량', '공급량', '판매수량', '공급수량', '매출수량',
   ],
-  unit_price: ['단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행'],
+  unit_price: [
+    '단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행',
+    // (2026-06-30) 아워홈 ERP "평균단가" 케이스 추가
+    '평균단가', '평균 단가',
+  ],
   // 세액 포함 최종 총액 (최우선)
-  total_price: ['총액', '총계', '합계', '최종금액', 'grand_total', 'total_amount', 'total_price'],
+  total_price: [
+    '총액', '총계', '합계', '최종금액', 'grand_total', 'total_amount', 'total_price',
+    // (2026-06-30) 아워홈 ERP "합계(VAT포함)", 과세 총액 표기 추가
+    '합계(VAT포함)', '합계(vat포함)', 'VAT포함', 'vat포함', '합계 vat포함', 'VAT포함합계',
+    '과세 계(VAT포함)', '과세계(VAT포함)', '과세계vat포함',
+  ],
   // 세액 미포함 공급가액 (별도 파싱 → total 없으면 supply+tax로 합산)
-  supply_amount: ['공급가액', '공급가', 'supply_amount'],
-  tax_amount: ['세액', '부가세', '부가가치세', 'tax_amount', 'vat'],
+  supply_amount: [
+    '공급가액', '공급가', 'supply_amount',
+    // (2026-06-30) 아워홈 ERP "계(VAT제외)", "VAT제외" 표기
+    '계(VAT제외)', '계(vat제외)', 'VAT제외', 'vat제외', '순공급가',
+  ],
+  tax_amount: ['세액', '부가세', '부가가치세', 'tax_amount', 'vat', 'VAT'],
   // 일반 "금액" (총액/공급가액 미검출 시 fallback)
   amount: ['금액', 'amount'],
 }
@@ -114,13 +127,13 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     // 헤더 행 찾기 (처음 10행 내에서)
     let headerRowIndex = -1
     let headers: string[] = []
-    
+
     for (let i = 0; i < Math.min(10, rawData.length); i++) {
       const row = rawData[i]
       if (!row || row.length < 3) continue
-      
+
       const rowStrings = row.map(cell => String(cell || '').trim())
-      
+
       // 필수 컬럼 (품명, 수량, 단가) 중 2개 이상 있으면 헤더로 인식
       const hasName = findColumnIndex(rowStrings, COLUMN_ALIASES.name) !== -1
       const hasQty = findColumnIndex(rowStrings, COLUMN_ALIASES.quantity) !== -1
@@ -128,7 +141,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
                        findColumnIndex(rowStrings, COLUMN_ALIASES.total_price) !== -1 ||
                        findColumnIndex(rowStrings, COLUMN_ALIASES.supply_amount) !== -1 ||
                        findColumnIndex(rowStrings, COLUMN_ALIASES.amount) !== -1
-      
+
       if ((hasName && hasQty) || (hasName && hasPrice) || (hasQty && hasPrice)) {
         headerRowIndex = i
         headers = rowStrings
@@ -142,6 +155,42 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
         items: [],
         fileName: file.name,
         error: '헤더 행을 찾을 수 없습니다. 품명, 수량, 단가 컬럼이 필요합니다.',
+      }
+    }
+
+    // (2026-06-30) 다중행 헤더 병합 — 아워홈 ERP 스타일 케이스
+    // 첫 헤더 행이 필수 컬럼(name/qty/price)만 갖고 total/supply/tax 컬럼이 없으면
+    // 다음 행에 헤더성 텍스트('합계|VAT|공급가|면세|과세|계' 등)가 있는지 확인
+    // 있으면 두 행을 열별로 병합해서 한 줄 헤더로 사용 (헤더 행 인덱스는 아래 행으로 이동)
+    if (headerRowIndex + 1 < rawData.length) {
+      const nextRow = rawData[headerRowIndex + 1]
+      if (nextRow) {
+        const nextStrings = nextRow.map(cell => String(cell || '').trim())
+        // 헤더성 키워드 존재 판단
+        const HEADER_KEYWORDS = /합계|vat|공급가|면세|과세|부가세|계$|\(vat|평균단가|납품가|매입가/i
+        const nextIsHeader = nextStrings.some(s => s.length > 0 && HEADER_KEYWORDS.test(s))
+        // 다음 행에 숫자 데이터가 없어야 (데이터 행이면 병합하지 않음)
+        const nextHasNumericData = nextStrings.some(s => {
+          const trimmed = s.replace(/[,\s]/g, '')
+          return /^-?\d+\.?\d*$/.test(trimmed) && trimmed.length > 0
+        })
+        // 현재 total/supply/tax 검출 여부
+        const currTotal = findColumnIndex(headers, COLUMN_ALIASES.total_price)
+        const currSupply = findColumnIndex(headers, COLUMN_ALIASES.supply_amount)
+        const currTax = findColumnIndex(headers, COLUMN_ALIASES.tax_amount)
+        const missingImportant = currTotal === -1 && currSupply === -1 && currTax === -1
+
+        if (nextIsHeader && !nextHasNumericData && missingImportant) {
+          // 열별 병합: 빈 헤더 자리를 다음 행 텍스트로 채움. 둘 다 있으면 공백으로 결합.
+          const merged = headers.map((v, idx) => {
+            const next = nextStrings[idx] || ''
+            if (!v && next) return next
+            if (v && next && v !== next) return `${v} ${next}`.trim()
+            return v
+          })
+          headers = merged
+          headerRowIndex = headerRowIndex + 1  // 데이터는 병합 헤더 다음 행부터
+        }
       }
     }
 
