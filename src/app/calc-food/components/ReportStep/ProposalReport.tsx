@@ -324,6 +324,11 @@ export function ProposalReport({
   const annualSavings = monthlySavings * 12
   const savingsPercent = monthlyOurCost > 0 ? (monthlySavings / monthlyOurCost) * 100 : 0
 
+  // (2026-07-04) 절감률 분모 명시 — 확정 품목만으로 상대비교했음을 투명하게 표기.
+  //   미확정·비교불가는 절감 계산에서 제외되므로 "확정 M / 전체 N 기준"을 hero에 노출.
+  const comparedCount = items.filter((i) => i.is_confirmed && !i.is_excluded).length
+  const excludedCount = items.length - comparedCount
+
   // (2026-06-30 v2) 커피차 비고 자동 동기화 — "기본 N잔" 표시
   //   N = 50명 이하: 100잔 고정 / 51명+: 원아 × multiplier(잔수, 기본 2.0)
   //   childrenCount 변경 시 note 자동 갱신
@@ -560,6 +565,11 @@ export function ProposalReport({
           </div>
           <div className="mt-3 text-sm text-blue-100 print:mt-0.5 print:text-xs">
             월 평균 <strong className="text-white">{formatCurrency(monthlySavings)}</strong> 절감
+          </div>
+          {/* (2026-07-04) 절감률 분모 명시 — 확정 품목만 상대비교했음을 투명하게 */}
+          <div className="mt-1.5 text-xs text-blue-200 print:mt-0.5 print:text-[9px]">
+            비교 완료 <strong className="text-white">{comparedCount}</strong>품목 기준
+            {excludedCount > 0 && ` · 미확정·비교불가 ${excludedCount}품목 제외`}
           </div>
         </section>
 

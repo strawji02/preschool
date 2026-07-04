@@ -641,21 +641,39 @@ export function PrecisionMatchingView({
               </button>
             ) : null
           })()}
-          <button
-            onClick={onProceedToReport}
-            disabled={!items.every((i) => i.is_confirmed)}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium',
-              items.every((i) => i.is_confirmed)
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'cursor-not-allowed bg-gray-200 text-gray-500',
-            )}
-          >
-            {items.every((i) => i.is_confirmed)
-              ? '리포트 생성'
-              : `${kpi.total - kpi.confirmed}개 미확정`}
-            <ArrowRight size={14} />
-          </button>
+          {(() => {
+            // (2026-07-04) 미확정이 있어도 진행 가능 — 최종 보고서에서 미확정은 "비교불가"로
+            //   처리되어 절감 계산에서 제외되므로, 넘어가기 직전에 그 사실을 확인창으로 고지.
+            const unconfirmed = items.filter((i) => !i.is_confirmed && !i.is_excluded).length
+            return (
+              <button
+                onClick={() => {
+                  if (
+                    unconfirmed > 0 &&
+                    !window.confirm(
+                      `미확정 ${unconfirmed}개 품목이 있습니다.\n\n` +
+                        `최종 보고서에서는 미확정 품목이 "비교불가"로 처리되어 ` +
+                        `절감률·절감액 계산에서 제외됩니다.\n(확정 품목끼리만 정확히 상대비교)\n\n` +
+                        `이대로 리포트를 생성하시겠습니까?`,
+                    )
+                  ) {
+                    return
+                  }
+                  onProceedToReport()
+                }}
+                disabled={items.length === 0}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium',
+                  unconfirmed === 0
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-amber-500 text-white hover:bg-amber-600',
+                )}
+              >
+                {unconfirmed === 0 ? '리포트 생성' : `${unconfirmed}개 미확정 — 비교불가로 진행`}
+                <ArrowRight size={14} />
+              </button>
+            )
+          })()}
         </div>
       </div>
 
