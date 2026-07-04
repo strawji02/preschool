@@ -87,3 +87,22 @@ describe('명사 끝음절 "이" 조사 오인 방지 (오이류)', () => {
     expect(expandWithSynonyms('옛날자른미역')).toContain('미역')
   })
 })
+
+describe('소고기 부위 상호 대체 — 홍두깨 ↔ 우둔 (사용자 등록 2026-07-04)', () => {
+  // 홍두깨살·우둔살은 소 뒷다리 안쪽 저지방 살코기로 결이 곧고,
+  // 장조림·육회·산적·육포에 상호 대체 가능. 급식 발주에서 혼용됨.
+  it('홍두깨 → 우둔 방향 확장', () => {
+    expect(expandWithSynonyms('홍두깨')).toContain('우둔')
+    expect(expandWithSynonyms('홍두깨살')).toContain('우둔')
+  })
+
+  it('우둔 → 홍두깨 방향 확장 (양방향)', () => {
+    expect(expandWithSynonyms('우둔')).toContain('홍두깨')
+    expect(expandWithSynonyms('한우우둔')).toContain('홍두깨')
+    expect(expandWithSynonyms('소우둔')).toContain('홍두깨')
+  })
+
+  it('둘은 같은 표준어로 수렴', () => {
+    expect(getStandardTerm('홍두깨')).toBe(getStandardTerm('우둔'))
+  })
+})
