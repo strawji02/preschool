@@ -185,8 +185,14 @@ export async function GET(request: NextRequest) {
     // (2026-05-11) synonyms 동의어 있는 query는 무조건 fallback — '국물용멸치' BM25가 '국물/용' 분리로
     //              점수 높게 잡혀도 동의어 검색은 항상 필요 (국멸치/다시멸치 등 별도 매칭)
     const topScore = results[0]?.match_score ?? 0
+    // (2026-07-04) semantic gate — top 후보의 trigram 유사도가 높으면(브랜드만 다른
+    //   거의 동일 제품, 예: "순수우유후레쉬번 파리바게뜨" → "…파리크라상" se=0.58)
+    //   RRF 점수가 낮아도 이미 좋은 매칭이므로 fallback을 스킵한다.
+    //   fallback이 브랜드명("파리바게뜨")을 "파리/바게뜨/게뜨" 조각으로 재검색해
+    //   식기·바닥솔 같은 노이즈를 끌어와 정답을 밀어내던 문제 차단.
+    const topSem = (results[0] as { semantic_score?: number } | undefined)?.semantic_score ?? 0
     const hasSynonyms = synonymTerms.length > 1 && synonymTerms.some((s) => s.toLowerCase() !== forKeyword.toLowerCase())
-    if ((topScore < 0.025 || hasSynonyms) && searchMode !== 'semantic') {
+    if (((topScore < 0.025 && topSem < 0.4) || hasSynonyms) && searchMode !== 'semantic') {
       // 후보 키워드 (우선순위):
       // 1) 마지막 어절 (예: "이츠웰 신선한계란" → "신선한계란")
       // 2) 마지막 어절의 suffix 2~3자 (한국어 합성어 분해, 예: "신선한계란" → "계란")
