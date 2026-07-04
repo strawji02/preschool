@@ -173,6 +173,9 @@ export function cleanProductQuery(q: string): string {
   //   접두(미니/세척 등) 분리는 "미니크리스피핫도그→핫도그" full match를 깨서 제외 —
   //   품목 본질인 접미어만 분리하면 recall은 확보되고 ratio 회귀는 없음.
   s = s.replace(/([가-힣])(약과|강정|한과|전병|튀각|부각|쌈무)/g, '$1 $2')
+  // (2026-07-04) 김(海苔) 접미 분리 — 검수 "짱구김"이 통짜라 신세계 김류 recall 0.
+  //   어절 끝 "김"만 분리(김치/김밥 불변), "튀김"은 복원(감자튀김 보존). splitCompoundAffixes와 동일.
+  s = s.replace(/([가-힣])김(?=\s|$|[^가-힣])/g, '$1 김').replace(/튀 김/g, '튀김')
   // (2026-05-12) 포장 suffix 분리 — "스팸캔" → "스팸 캔", "참치캔" → "참치 캔"
   // 검수가 포장 형태를 식자재명 뒤에 붙여 쓰는 경우 (캔/병/팩/통)
   s = s.replace(/([가-힣]{2,})(캔|병|팩|통|봉|박스|상자)(\s|$|[,])/g, '$1 $2$3')
@@ -311,10 +314,20 @@ export function isProcessedProduct(productName: string): boolean {
 const COMPOUND_PREFIX_RE =
   /(냉동|냉장|실온|상온|세척|손질|미니|대용량|유기농|친환경|무항생제|절단|슬라이스|컷팅|커팅|채썬|깍둑)([가-힣])/g
 const COMPOUND_SUFFIX_RE = /([가-힣])(약과|강정|한과|전병|튀각|부각|쌈무)/g
+// (2026-07-04) 김(海苔) 접미 분리 — "짱구김"·"재래김"이 통짜 lexeme라 서로 "김"으로
+//   매칭 안 되던 문제(짱구김 검색 시 신세계 김류 0개). "김"은 1글자라 오분해 위험이 커서:
+//   ① 어절 끝(공백/문자열끝/비한글 앞)의 "김"만 분리 → "김치/김밥/김말이"(뒤에 글자) 불변
+//   ② "튀김"은 일단 "튀 김"으로 분리됐다가 복원 → "감자튀김" 보존 (Postgres는 lookbehind
+//      미지원이라 이 "분리 후 복원" 방식으로 mig048과 대칭 유지)
+const GIM_SUFFIX_RE = /([가-힣])김(?=\s|$|[^가-힣])/g
+function splitGim(s: string): string {
+  return s.replace(GIM_SUFFIX_RE, '$1 김').replace(/튀 김/g, '튀김')
+}
 export function splitCompoundAffixes(s: string | null | undefined): string {
   if (!s) return ''
   let r = s.replace(COMPOUND_PREFIX_RE, '$1 $2').replace(COMPOUND_PREFIX_RE, '$1 $2')
   r = r.replace(COMPOUND_SUFFIX_RE, '$1 $2')
+  r = splitGim(r)
   return r
 }
 
