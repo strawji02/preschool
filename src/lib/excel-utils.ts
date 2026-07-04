@@ -50,6 +50,74 @@ function shinsegaePriceAmount(item: ComparisonItem): { qty: number; price: numbe
   return { qty, price, amount }
 }
 
+/** 엑셀 한 데이터 행 (비교가능/비교불가 공용) */
+export interface ExcelDataRow {
+  name: string
+  spec: string
+  qty: number
+  unitPrice: number
+  existing: number
+  /** 신세계 매칭 정보 — 비교불가/미매칭이면 null */
+  ssg: { name: string; spec: string; qty: number; price: number; amount: number } | null
+}
+
+export interface ExcelModel {
+  /** 비교 가능 = 확정 && 비제외 (화면 computeCategoryStats 대상과 동일) */
+  comparable: ExcelDataRow[]
+  /** 비교 불가 = 미확정 || 비교불가 (절감 계산에서 제외) */
+  excluded: ExcelDataRow[]
+  comparableSums: { existing: number; ssgAmount: number; applied: number; savings: number }
+  excludedExisting: number
+  /** 거래명세표 원장 총액 = 비교가능 기존 + 비교불가 기존 (전체 품목 합) */
+  grandExisting: number
+}
+
+/** 비교 가능 판정 — 화면 computeCategoryStats(`is_excluded || !is_confirmed` 제외)와 정합 */
+function isComparable(it: ComparisonItem): boolean {
+  return it.is_confirmed === true && it.is_excluded !== true
+}
+
+function toRow(it: ComparisonItem): ExcelDataRow {
+  const ssg = shinsegaePriceAmount(it)
+  return {
+    name: it.extracted_name,
+    spec: it.extracted_spec ?? '',
+    qty: it.extracted_quantity,
+    unitPrice: it.extracted_unit_price,
+    existing: existingTotal(it),
+    ssg: ssg ? { name: it.ssg_match!.product_name ?? '', spec: shinsegaeSpec(it), ...ssg } : null,
+  }
+}
+
+/**
+ * 엑셀 3단 모델 계산 (순수함수 — TDD).
+ * 비교가능/비교불가 분류 + 소계·총액. 절감은 비교가능만, 총액은 전체 품목 기존금액 합.
+ */
+export function buildExcelModel(items: ComparisonItem[], supplyRate: number = 1): ExcelModel {
+  const comparableItems = items.filter(isComparable)
+  const excludedItems = items.filter((it) => !isComparable(it))
+  const comparable = comparableItems.map(toRow)
+  const excluded = excludedItems.map(toRow)
+
+  const cExisting = comparable.reduce((s, r) => s + r.existing, 0)
+  const cSsg = comparable.reduce((s, r) => s + (r.ssg ? r.ssg.amount : 0), 0)
+  const cApplied = comparable.reduce((s, r) => s + (r.ssg ? Math.round(r.ssg.amount * supplyRate) : 0), 0)
+  const excludedExisting = excluded.reduce((s, r) => s + r.existing, 0)
+
+  return {
+    comparable,
+    excluded,
+    comparableSums: {
+      existing: cExisting,
+      ssgAmount: cSsg,
+      applied: cApplied,
+      savings: cExisting - cApplied,
+    },
+    excludedExisting,
+    grandExisting: cExisting + excludedExisting,
+  }
+}
+
 export function downloadReportAsExcel(
   items: ComparisonItem[],
   fileName: string = '가격비교_보고서',
@@ -60,160 +128,125 @@ export function downloadReportAsExcel(
     return
   }
 
-  // ──────────────────────────────────────────────────────────────
-  // 1. AOA (Array of Arrays) 구성 — 값만, 수식은 별도 셀에 주입
-  // ──────────────────────────────────────────────────────────────
-  // Row 1 (group header): No | 기존 업체 품목 (B~F merged) | 신세계 제안 품목 (G~K merged) | 공급율 (L1) | 절감액 (M merged)
+  // (2026-07-05) 3단 구조 — 비교가능 → 비교불가 → 거래명세표 총액.
+  //   절감은 비교가능 소계로만(화면 computeCategoryStats와 정합), 총액은 전량 합(원장 대조).
+  const model = buildExcelModel(items, supplyRate)
+  const EXCLUDED_MARK = '⛔ 비교불가'
+
   const groupHeader: (string | number)[] = [
     'No', '기존 업체 품목', '', '', '', '', '신세계 제안 품목', '', '', '', '', '공급율', '절감액',
   ]
-  // Row 2 (column header): L2에 공급율 값(red), M2는 비움 (M1:M2 merge)
   const colHeader: (string | number)[] = [
     '', '품명', '규격', '수량', '단가(동행)', '금액(동행)',
     '품명', '규격', '수량', '단가(신세계)', '금액(신세계)',
     supplyRate, '',
   ]
 
-  // Row 3+ (data) — L/M열은 placeholder (수식으로 덮어쓸 예정)
-  const dataRows = items.map((it, i) => {
-    const ssg = shinsegaePriceAmount(it)
-    return [
-      i + 1,
-      it.extracted_name,
-      it.extracted_spec ?? '',
-      it.extracted_quantity,
-      it.extracted_unit_price,
-      existingTotal(it),
-      ssg ? (it.ssg_match!.product_name ?? '') : '',
-      shinsegaeSpec(it),
-      ssg ? ssg.qty : '',
-      ssg ? ssg.price : '',
-      ssg ? ssg.amount : '',
-      '', // L (수식으로 덮어씀)
-      '', // M (수식으로 덮어씀)
-    ]
-  })
+  const aoa: (string | number)[][] = [groupHeader, colHeader]
+  let no = 1
 
-  // 합계 행 — 값은 추후 SUM 수식으로 대체
-  const summaryRow: (string | number)[] = [
-    '합계', '', '', '', '', '', '', '', '', '', '', '', '',
-  ]
+  // ① 비교가능 데이터
+  const compStartRow = aoa.length + 1 // 1-based
+  for (const row of model.comparable) {
+    aoa.push([
+      no++, row.name, row.spec, row.qty, row.unitPrice, row.existing,
+      row.ssg ? row.ssg.name : '', row.ssg ? row.ssg.spec : '',
+      row.ssg ? row.ssg.qty : '', row.ssg ? row.ssg.price : '',
+      row.ssg ? row.ssg.amount : '',
+      '', '',
+    ])
+  }
+  const compEndRow = aoa.length // 1-based (== compStartRow-1 if empty)
+  const hasComp = model.comparable.length > 0
 
-  const aoa = [groupHeader, colHeader, ...dataRows, summaryRow]
+  // 비교가능 소계
+  const compSubRow = aoa.length + 1
+  aoa.push([
+    `비교가능 소계 (${model.comparable.length}건)`, '', '', '', '',
+    model.comparableSums.existing, '', '', '', '', model.comparableSums.ssgAmount,
+    model.comparableSums.applied, model.comparableSums.savings,
+  ])
+
+  // ② 비교불가 데이터 + 소계 (있을 때만)
+  let exStartRow = 0, exEndRow = 0, exSubRow = 0
+  const hasEx = model.excluded.length > 0
+  if (hasEx) {
+    exStartRow = aoa.length + 1
+    for (const row of model.excluded) {
+      aoa.push([
+        no++, row.name, row.spec, row.qty, row.unitPrice, row.existing,
+        EXCLUDED_MARK, '', '', '', '', '', '',
+      ])
+    }
+    exEndRow = aoa.length
+    exSubRow = aoa.length + 1
+    aoa.push([
+      `비교불가 소계 (${model.excluded.length}건)`, '', '', '', '',
+      model.excludedExisting, '', '', '', '', '', '', '',
+    ])
+  }
+
+  // ③ 거래명세표 총액 (= 비교가능 + 비교불가 = 원장)
+  const totalRow = aoa.length + 1
+  aoa.push([
+    '거래명세표 총액', '', '', '', '', model.grandExisting,
+    '', '', '', '', '', '', '',
+  ])
+
   const ws = XLSX.utils.aoa_to_sheet(aoa)
 
-  // ──────────────────────────────────────────────────────────────
-  // 2. 수식 주입 (L/M 데이터 행 + 합계 행)
-  //    엑셀 행번호는 1-based: row 3 = data start, lastRow = summary
-  // ──────────────────────────────────────────────────────────────
-  const firstDataRow = 3
-  const lastDataRow = firstDataRow + items.length - 1
-  const summaryRowNum = lastDataRow + 1
-
-  // 각 데이터 행 L/M 수식
-  for (let i = 0; i < items.length; i++) {
-    const r = firstDataRow + i
-    const ssg = shinsegaePriceAmount(items[i])
-    // L 셀 (공급율 적용 금액) — (2026-05-17) INT → ROUND 변경 (per-item round 통일)
-    const lRef = `L${r}`
-    if (ssg) {
-      ws[lRef] = {
-        t: 'n',
-        f: `ROUND($L$2*K${r},0)`,
-        v: Math.round(ssg.amount * supplyRate),
-        z: '#,##0',
-      }
+  // ── 비교가능 데이터행 L/M 수식 (공급율 L2 연동) ──
+  model.comparable.forEach((row, i) => {
+    const rr = compStartRow + i
+    if (row.ssg) {
+      const applied = Math.round(row.ssg.amount * supplyRate)
+      ws[`L${rr}`] = { t: 'n', f: `ROUND($L$2*K${rr},0)`, v: applied, z: '#,##0' }
+      ws[`M${rr}`] = { t: 'n', f: `F${rr}-L${rr}`, v: row.existing - applied, z: '#,##0' }
     } else {
-      ws[lRef] = { t: 's', v: '' }
+      ws[`L${rr}`] = { t: 's', v: '' }
+      ws[`M${rr}`] = { t: 's', v: '' }
     }
-    // M 셀 (절감액 = F - L)
-    const mRef = `M${r}`
-    if (ssg) {
-      ws[mRef] = {
-        t: 'n',
-        f: `F${r}-L${r}`,
-        v: existingTotal(items[i]) - Math.round(ssg.amount * supplyRate),
-        z: '#,##0',
-      }
-    } else {
-      ws[mRef] = { t: 's', v: '' }
-    }
+  })
+
+  // ── 비교가능 소계 SUM 수식 ──
+  if (hasComp) {
+    ws[`F${compSubRow}`] = { t: 'n', f: `SUM(F${compStartRow}:F${compEndRow})`, v: model.comparableSums.existing, z: '#,##0' }
+    ws[`K${compSubRow}`] = { t: 'n', f: `SUM(K${compStartRow}:K${compEndRow})`, v: model.comparableSums.ssgAmount, z: '#,##0' }
+    ws[`L${compSubRow}`] = { t: 'n', f: `SUM(L${compStartRow}:L${compEndRow})`, v: model.comparableSums.applied, z: '#,##0' }
+    ws[`M${compSubRow}`] = { t: 'n', f: `SUM(M${compStartRow}:M${compEndRow})`, v: model.comparableSums.savings, z: '#,##0' }
   }
 
-  // 합계 행: F = SUM(F3:F_n), K = SUM(K3:K_n), L = SUM(L), M = SUM(M)
-  // (2026-05-17) per-row 합산 — F/L 모두 per-item round 되어 있으므로
-  //   화면 monthlyOurCost/monthlySsgCost와 정확히 일치
-  const sumExisting = items.reduce((s, it) => s + existingTotal(it), 0)
-  const sumSsg = items.reduce((s, it) => {
-    const x = shinsegaePriceAmount(it)
-    return s + (x ? x.amount : 0)
-  }, 0)
-  // per-row L 합 = Σ Math.round(ssg.amount * supplyRate)  (Excel ROUND과 동일)
-  const sumApplied = items.reduce((s, it) => {
-    const x = shinsegaePriceAmount(it)
-    return s + (x ? Math.round(x.amount * supplyRate) : 0)
-  }, 0)
-  const sumSavings = sumExisting - sumApplied
+  // ── 비교불가 소계 SUM ──
+  if (hasEx) {
+    ws[`F${exSubRow}`] = { t: 'n', f: `SUM(F${exStartRow}:F${exEndRow})`, v: model.excludedExisting, z: '#,##0' }
+  }
 
-  ws[`F${summaryRowNum}`] = {
+  // ── 거래명세표 총액 = 비교가능 소계 + 비교불가 소계 ──
+  ws[`F${totalRow}`] = {
     t: 'n',
-    f: `SUM(F${firstDataRow}:F${lastDataRow})`,
-    v: sumExisting,
-    z: '#,##0',
-  }
-  ws[`K${summaryRowNum}`] = {
-    t: 'n',
-    f: `SUM(K${firstDataRow}:K${lastDataRow})`,
-    v: sumSsg,
-    z: '#,##0',
-  }
-  ws[`L${summaryRowNum}`] = {
-    t: 'n',
-    f: `SUM(L${firstDataRow}:L${lastDataRow})`,
-    v: sumApplied,
-    z: '#,##0',
-  }
-  ws[`M${summaryRowNum}`] = {
-    t: 'n',
-    f: `SUM(M${firstDataRow}:M${lastDataRow})`,
-    v: sumSavings,
+    f: hasEx ? `F${compSubRow}+F${exSubRow}` : `F${compSubRow}`,
+    v: model.grandExisting,
     z: '#,##0',
   }
 
   // ──────────────────────────────────────────────────────────────
-  // 3. Merge — 사용자 양식과 완전 동일
-  //    A1:A2 (No), B1:F1 (기존 업체 품목), G1:K1 (신세계 제안 품목)
-  //    L1 단독 (공급율 header), L2 = 값
-  //    M1:M2 (절감액 세로)
+  // Merge (헤더만) + 컬럼 너비
   // ──────────────────────────────────────────────────────────────
   ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },   // A1:A2 No
-    { s: { r: 0, c: 1 }, e: { r: 0, c: 5 } },   // B1:F1 기존 업체 품목
-    { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },  // G1:K1 신세계 제안 품목
-    { s: { r: 0, c: 12 }, e: { r: 1, c: 12 } }, // M1:M2 절감액
+    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+    { s: { r: 0, c: 1 }, e: { r: 0, c: 5 } },
+    { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },
+    { s: { r: 0, c: 12 }, e: { r: 1, c: 12 } },
   ]
-
-  // 컬럼 너비 (사용자 양식 기준)
   ws['!cols'] = [
-    { wch: 5.8 },   // A: No
-    { wch: 26.8 },  // B: 기존 품명
-    { wch: 36.8 },  // C: 기존 규격
-    { wch: 7.8 },   // D: 기존 수량
-    { wch: 11.8 },  // E: 기존 단가
-    { wch: 13.8 },  // F: 기존 금액
-    { wch: 26.8 },  // G: 신세계 품명
-    { wch: 16.8 },  // H: 신세계 규격
-    { wch: 6.2 },   // I: 신세계 수량
-    { wch: 11.8 },  // J: 신세계 단가
-    { wch: 11.6 },  // K: 신세계 금액
-    { wch: 11.1 },  // L: 공급율 적용 금액
-    { wch: 12.6 },  // M: 절감액
+    { wch: 5.8 }, { wch: 26.8 }, { wch: 36.8 }, { wch: 7.8 }, { wch: 11.8 }, { wch: 13.8 },
+    { wch: 26.8 }, { wch: 16.8 }, { wch: 6.2 }, { wch: 11.8 }, { wch: 11.6 }, { wch: 11.1 }, { wch: 12.6 },
   ]
 
   // ──────────────────────────────────────────────────────────────
-  // 4. 스타일 — 헤더 강조 + 공급율 셀 red + 합계 행 + 절감액 색상
+  // 스타일
   // ──────────────────────────────────────────────────────────────
-  // 그룹 헤더 + 컬럼 헤더 (row 1~2)
+  // 헤더 (row 0~1)
   for (let c = 0; c < 13; c++) {
     for (let r = 0; r < 2; r++) {
       const ref = XLSX.utils.encode_cell({ r, c })
@@ -232,7 +265,7 @@ export function downloadReportAsExcel(
       }
     }
   }
-  // L2 (공급율 값) — red font + 굵게 (사용자가 직접 수정 가능 표시)
+  // L2 공급율 (red)
   if (ws['L2']) {
     ws['L2'].s = {
       font: { bold: true, color: { rgb: 'DC2626' }, sz: 12 },
@@ -246,45 +279,59 @@ export function downloadReportAsExcel(
       },
     }
   }
-  // 합계 행 highlight + 절감액 색상
-  for (let c = 0; c < 13; c++) {
-    const ref = XLSX.utils.encode_cell({ r: summaryRowNum - 1, c })
-    if (ws[ref]) {
-      ws[ref].s = {
-        font: { bold: true },
-        fill: { fgColor: { rgb: 'F3F4F6' } },
-        alignment: { horizontal: c === 0 ? 'center' : 'right' },
-        border: {
-          top: { style: 'medium', color: { rgb: '6B7280' } },
-        },
+  // 소계/총액 강조 행 (0-based)
+  const emphRows = [compSubRow - 1, ...(hasEx ? [exSubRow - 1] : []), totalRow - 1]
+  for (const r of emphRows) {
+    const isTotal = r === totalRow - 1
+    for (let c = 0; c < 13; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      if (ws[ref]) {
+        ws[ref].s = {
+          font: { bold: true, color: { rgb: isTotal ? '1E3A8A' : '111827' } },
+          fill: { fgColor: { rgb: isTotal ? 'DBEAFE' : 'F3F4F6' } },
+          alignment: { horizontal: c === 0 ? 'left' : 'right', vertical: 'center' },
+          border: { top: { style: 'medium', color: { rgb: isTotal ? '1E3A8A' : '6B7280' } } },
+        }
       }
     }
   }
-  // 절감액 색상 (M열, 양수=녹색, 음수=빨강)
-  for (let r = firstDataRow - 1; r <= summaryRowNum - 1; r++) {
+  // 비교불가 데이터행 G열 마크 강조 (회색 이탤릭)
+  if (hasEx) {
+    for (let r = exStartRow - 1; r <= exEndRow - 1; r++) {
+      const ref = XLSX.utils.encode_cell({ r, c: 6 })
+      if (ws[ref]) {
+        ws[ref].s = {
+          font: { italic: true, color: { rgb: '6B7280' } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+        }
+      }
+    }
+  }
+  // 절감액 색상 (M열 = c12) — 데이터/소계에서 숫자면
+  for (let r = compStartRow - 1; r <= totalRow - 1; r++) {
     const ref = XLSX.utils.encode_cell({ r, c: 12 })
     if (ws[ref] && typeof ws[ref].v === 'number') {
       const v = ws[ref].v as number
-      const isSummary = r === summaryRowNum - 1
+      const isEmph = emphRows.includes(r)
       if (v > 0) {
         ws[ref].s = {
           ...(ws[ref].s ?? {}),
-          font: { color: { rgb: '047857' }, bold: isSummary },
-          fill: { fgColor: { rgb: isSummary ? 'D1FAE5' : 'ECFDF5' } },
+          font: { color: { rgb: '047857' }, bold: isEmph },
+          fill: { fgColor: { rgb: isEmph ? 'D1FAE5' : 'ECFDF5' } },
           alignment: { horizontal: 'right' },
         }
       } else if (v < 0) {
         ws[ref].s = {
           ...(ws[ref].s ?? {}),
-          font: { color: { rgb: 'B91C1C' }, bold: isSummary },
-          fill: { fgColor: { rgb: isSummary ? 'FEE2E2' : 'FEF2F2' } },
+          font: { color: { rgb: 'B91C1C' }, bold: isEmph },
+          fill: { fgColor: { rgb: isEmph ? 'FEE2E2' : 'FEF2F2' } },
           alignment: { horizontal: 'right' },
         }
       }
     }
   }
   // 숫자 컬럼 number format
-  for (let r = firstDataRow - 1; r <= summaryRowNum - 1; r++) {
+  for (let r = compStartRow - 1; r <= totalRow - 1; r++) {
     for (const c of [3, 4, 5, 8, 9, 10, 11, 12]) {
       const ref = XLSX.utils.encode_cell({ r, c })
       if (ws[ref] && typeof ws[ref].v === 'number' && !ws[ref].z) {
@@ -292,11 +339,11 @@ export function downloadReportAsExcel(
       }
     }
   }
-  // 데이터 영역 border (3 ~ summary-1)
-  for (let r = firstDataRow - 1; r < summaryRowNum - 1; r++) {
+  // 데이터 영역 border (비교가능 첫 행 ~ 총액 직전)
+  for (let r = compStartRow - 1; r < totalRow - 1; r++) {
     for (let c = 0; c < 13; c++) {
       const ref = XLSX.utils.encode_cell({ r, c })
-      if (ws[ref]) {
+      if (ws[ref] && !(ws[ref].s as { border?: unknown })?.border) {
         ws[ref].s = {
           ...(ws[ref].s ?? {}),
           border: {
@@ -313,9 +360,7 @@ export function downloadReportAsExcel(
     }
   }
 
-  // ──────────────────────────────────────────────────────────────
-  // 5. 저장 — 시트명 '가격비교' (사용자 양식 동일)
-  // ──────────────────────────────────────────────────────────────
+  // 저장 — 시트명 '가격비교'
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '가격비교')
   const timestamp = new Date().toISOString().split('T')[0]
