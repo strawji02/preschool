@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2, AlertTriangle,
   FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X, RefreshCw,
-  ExternalLink, MessageSquare,
+  ExternalLink, MessageSquare, Ban, Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -45,6 +45,8 @@ interface PrecisionMatchingViewProps {
   onConfirmAllAutoMatched: () => void
   onAutoExcludeUnmatched?: () => void
   onProceedToReport: () => void
+  /** 개별 품목 비교불가 토글 (2026-07-04) — 확정 품목도 검토 중 비교불가 처리 가능 */
+  onToggleExclude?: (itemId: string, reason?: string) => void
   onReload?: () => void
   /** 거래명세표 재확인/수정 모달 트리거 (2026-05-10) */
   onOpenInvoiceReview?: () => void
@@ -331,6 +333,7 @@ export function PrecisionMatchingView({
   onConfirmAllAutoMatched,
   onAutoExcludeUnmatched,
   onProceedToReport,
+  onToggleExclude,
   onReload,
   onOpenInvoiceReview,
 }: PrecisionMatchingViewProps) {
@@ -556,6 +559,7 @@ export function PrecisionMatchingView({
                 item={currentItem}
                 itemNumber={selectedIndex + 1}
                 onOpenImage={pages.length > 0 ? () => setIsPdfModalOpen(true) : undefined}
+                onToggleExclude={onToggleExclude}
                 commonTokens={commonTokens}
               />
               <ShinsegaeMatching
@@ -1085,11 +1089,13 @@ function ExistingItemDetail({
   item,
   itemNumber,
   onOpenImage,
+  onToggleExclude,
   commonTokens,
 }: {
   item: ComparisonItem
   itemNumber?: number
   onOpenImage?: () => void
+  onToggleExclude?: (itemId: string, reason?: string) => void
   commonTokens: Set<string>
 }) {
   // 단위중량 결정 우선순위:
@@ -1121,9 +1127,34 @@ function ExistingItemDetail({
     <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-white shadow-sm">
       {/* 헤더 — 타이틀 + 출처 클릭 버튼 (모달 트리거) */}
       <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-sm font-semibold text-gray-700">
-        <span className="shrink-0">
-          🗄️ 기존 업체 품목 <span className="ml-1 text-[11px] font-normal text-gray-400">Read-only</span>
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span>
+            🗄️ 기존 업체 품목 <span className="ml-1 text-[11px] font-normal text-gray-400">Read-only</span>
+          </span>
+          {/* (2026-07-04) 검토 중 비교불가 토글 — 확정 품목도 담당자가 비교불가로 처리 가능.
+              비교불가면 최종 보고서 절감 계산에서 제외된다. */}
+          {onToggleExclude && (
+            <button
+              onClick={() =>
+                onToggleExclude(item.id, item.is_excluded ? undefined : '담당자 검토 제외')
+              }
+              className={cn(
+                'flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium transition',
+                item.is_excluded
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'border-gray-300 bg-white text-gray-500 hover:border-red-400 hover:bg-red-50 hover:text-red-600',
+              )}
+              title={
+                item.is_excluded
+                  ? '비교 포함으로 되돌리기'
+                  : '이 품목을 비교불가로 처리 (최종 보고서 절감 계산에서 제외)'
+              }
+            >
+              {item.is_excluded ? <Eye size={12} /> : <Ban size={12} />}
+              {item.is_excluded ? '비교 포함' : '비교불가 처리'}
+            </button>
+          )}
+        </div>
         {(item.source_file_name || item.page_number != null) && onOpenImage ? (
           <button
             onClick={onOpenImage}

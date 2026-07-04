@@ -219,6 +219,7 @@ export default function CalcFoodPage() {
               onConfirmAllAutoMatched={confirmAllAutoMatched}
               onAutoExcludeUnmatched={autoExcludeUnmatched}
               onProceedToReport={proceedToReport}
+              onToggleExclude={toggleExclude}
               onReload={() => state.sessionId && loadSession(state.sessionId)}
               onOpenInvoiceReview={() => setInvoiceModalOpen(true)}
             />
