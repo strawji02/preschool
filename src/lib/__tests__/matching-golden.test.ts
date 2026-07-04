@@ -6,6 +6,9 @@ import {
   parsePerPieceGrams,
   comparePerPieceCloseness,
   splitCompoundAffixes,
+  tokenize,
+  SUPPLIER_BRANDS,
+  GENERIC_MODIFIERS,
 } from '../token-match'
 import { expandWithSynonyms } from '../synonyms'
 
@@ -122,6 +125,28 @@ describe('골든셋: 김(海苔) 통짜 recall (짱구김 → 김)', () => {
 
   it('김밥김(뒤 "김")은 마지막 김만 분리', () => {
     expect(splitCompoundAffixes('구운 김밥김 국내제조')).toBe('구운 김밥 김 국내제조')
+  })
+})
+
+describe('골든셋: 브랜드 노이즈 제거 (매실청 백설 → 매실청)', () => {
+  // route(products/search)의 검색 clean 토큰 필터를 그대로 재현:
+  //   meaningful = tokenize(cleanProductQuery(q)).filter(!SUPPLIER_BRANDS && !GENERIC)
+  const meaningful = (q: string) =>
+    tokenize(cleanProductQuery(q)).filter(
+      (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
+    )
+
+  it('"백설"이 CJ 브랜드로 등록됨', () => {
+    expect(SUPPLIER_BRANDS.has('백설')).toBe(true)
+  })
+
+  it('매실청 백설 → 검색 키워드는 "매실청" (백설 제외)', () => {
+    expect(meaningful('매실청 백설')).toEqual(['매실청'])
+  })
+
+  it('오탐 방지: "백설기"(떡)는 통짜라 제거되지 않음', () => {
+    // "백설"만 브랜드 토큰 — "백설기"는 별개 토큰이라 유지되어야 함
+    expect(meaningful('백설기')).toContain('백설기')
   })
 })
 

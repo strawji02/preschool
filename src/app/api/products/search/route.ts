@@ -62,6 +62,13 @@ export async function GET(request: NextRequest) {
     const meaningfulCleanTokens = cleanTokens.filter(
       (t) => !SUPPLIER_BRANDS.has(t) && !GENERIC_MODIFIERS.has(t),
     )
+    // (2026-07-04) raw 검색어에서도 공급사 브랜드 제거 — "매실청 백설"에서 브랜드 "백설"이
+    //   raw BM25를 지배해 CJ 백설 제품(대두유·올리고당)만 매칭되고 매실청이 밀리던 문제.
+    //   브랜드는 "변별력 0"(다수 제품에 등장)이라 raw에서도 노이즈. GENERIC은 raw에 유지.
+    //   모든 토큰이 브랜드면(브랜드 단독 검색) 원본 유지(fallback).
+    const brandStrippedTokens = cleanTokens.filter((t) => !SUPPLIER_BRANDS.has(t))
+    const rawForSearch =
+      brandStrippedTokens.length > 0 ? brandStrippedTokens.join(' ') : cleanedQuery
     // (2026-05-12) 합성어 안의 식자재 키워드 추출
     // 예: "햇살가득고춧가루" → suffix "고춧가루" 식별 → expand("고춧가루") 동의어 그룹
     //     "냉동참기름" → suffix "참기름" 식별
@@ -91,9 +98,13 @@ export async function GET(request: NextRequest) {
     const synonymTerms = expandWithSynonyms(expandKeyword)
     // (2026-05-11) slice 3 → 8로 확장 — 동의어가 많은 케이스 (멸치 시리즈, 쌀 시리즈 등)에서
     // 5번째 이후 동의어 (예: 국멸치, 다시멸치, 육수용멸치)가 BM25 검색에 포함되어 직접 매칭
+    // (2026-07-04) 동의어 없을 때 fallback을 forKeyword(브랜드 포함) 대신 브랜드 제거된
+    //   토큰으로 — "매실청 백설"처럼 동의어 없는 품목에서 clean에도 백설이 살아나던 문제.
+    const cleanFallback =
+      meaningfulCleanTokens.length > 0 ? meaningfulCleanTokens.join(' ') : forKeyword
     const expandedQuery = synonymTerms.length > 1
       ? synonymTerms.slice(0, 8).join(' ')
-      : forKeyword
+      : cleanFallback
 
     let results: RpcResult[] = []
     let error: any = null
@@ -102,7 +113,7 @@ export async function GET(request: NextRequest) {
     if (searchMode === 'hybrid') {
       // Hybrid Search: BM25 + Trigram (matching.ts와 동일한 함수 사용)
       const { data, error: rpcError } = await supabase.rpc('search_products_hybrid', {
-        search_term_raw: cleanedQuery,
+        search_term_raw: rawForSearch,
         search_term_clean: expandedQuery,
         limit_count: Math.min(limit, 50),
         supplier_filter: supplier || undefined,
