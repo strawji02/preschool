@@ -84,6 +84,19 @@ export function cleanInput(name: string): { primary: string; secondary: string }
   primary = stripGrade(primary)
   secondary = stripGrade(secondary)
 
+  // 3.6 맨 앞 단일 대문자 접두코드 제거 (2026-07-04 버그 fix)
+  //   신세계 거래명세서는 품목명 앞에 분류/등급 접두코드(단일 대문자+구분자)를 붙임:
+  //     "N (계란)특란(무항생제)", "P-술찌", "K-아위카즈", "E-(친환경)..."
+  //   이게 forKeyword 맨 앞 토큰으로 남으면 expandWithCompoundSplitting의
+  //   slice(0,4)에서 슬롯을 차지해 핵심 등급어(특란/무항생제)를 밀어내고,
+  //   BM25 OR 쿼리에 'N'|'P'가 들어가 "N 사이다"·"N 콜라" 같은 노이즈를 끌어올림.
+  //   단일 대문자 뒤에 구분자(공백/하이픈/점/슬래시/문자열끝)가 와야 제거 →
+  //   'CJ'·'GAP' 같은 2글자 이상 대문자 약어는 보존(뒤가 대문자라 미매칭).
+  const stripLeadingCode = (s: string) =>
+    s.replace(/^\s*[A-Z](?=[\s\-._/]|$)[\s\-._/]*/, '')
+  primary = stripLeadingCode(primary)
+  secondary = stripLeadingCode(secondary)
+
   // 4. 단어 내 공백 정규화: '컷 팅' → '컷팅', '스파게티소 스' → '스파게티소스'
   // 한글 음절 사이의 단독 공백을 제거 (2글자 이하 토큰이 한글로만 구성된 경우)
   primary = normalizeIntraWordSpaces(primary)

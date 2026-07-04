@@ -106,3 +106,30 @@ describe('소고기 부위 상호 대체 — 홍두깨 ↔ 우둔 (사용자 등
     expect(getStandardTerm('홍두깨')).toBe(getStandardTerm('우둔'))
   })
 })
+
+describe('명세서 단일 대문자 접두코드 제거 (N/P/K/S/E/R…) — 사용자 보고 2026-07-04', () => {
+  // 신세계 거래명세서는 품목명 앞에 분류/등급 접두코드(단일 대문자)를 붙임:
+  //   "N (계란)특란(무항생제)", "P-술찌", "K-[아위카즈]", "E-(친환경)..."
+  // 이 접두가 forKeyword 맨 앞 토큰으로 남으면 expandWithCompoundSplitting의
+  // slice(0,4)에서 슬롯을 차지해 핵심 등급어(특란/무항생제)를 밀어내고,
+  // BM25 OR 쿼리에 'N'|'P'가 들어가 "N 사이다"·"N 콜라" 같은 노이즈를 끌어올림.
+  it('N (계란)특란(무항생제): 맨 앞 "N" 제거, 계란/특란 보존', () => {
+    const d = dualNormalize('N (계란)특란(무항생제)')
+    const tokens = d.forKeyword.split(/\s+/).filter(Boolean)
+    expect(tokens).not.toContain('N')       // 단독 노이즈 토큰 제거
+    expect(d.forKeyword).not.toMatch(/^N\b/) // 맨 앞 아님
+    expect(tokens).toContain('계란')
+    expect(tokens).toContain('특란')
+    expect(tokens).toContain('무항생제')
+  })
+
+  it('P-술찌 / K-아위카즈: 하이픈 접두코드 제거', () => {
+    expect(cleanInput('P-술찌').primary).toBe('술찌')
+    expect(cleanInput('K-아위카즈').primary.startsWith('K')).toBe(false)
+  })
+
+  it('오탐 방지: 두 글자 이상 대문자 약어(CJ 등)는 보존', () => {
+    // 'C' 뒤가 대문자 'J'라 단일 접두 아님 → 유지
+    expect(cleanInput('CJ만두').primary).toContain('CJ')
+  })
+})
