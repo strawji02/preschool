@@ -49,8 +49,16 @@ export function cleanInput(name: string): { primary: string; secondary: string }
   //    - 단, 앞뒤에 공백을 둬 이웃 단어와 붙지 않게: "(계란)특란" → " 계란 특란"
   //      (버그 fix 2026-07-04: "N (계란)특란(무항생제)" → "계란특란무항생제"로 붙어
   //       BM25가 계란/특란을 못 쪼개 계란 상품 검색 실패하던 문제)
+  //    - 언더스코어/슬래시는 필드 구분자이므로 세그먼트로 분리 후 각각 OCR공백만 제거:
+  //      "(특품_적색)" → " 특품 적색 ", "(무항생제_특란)" → " 무항생제 특란 "
+  //      (버그 fix 2026-07-04: "파프리카(특품_적색)"이 "특품적색"으로 붙어 적색이
+  //       특수문자 제거 단계에서 소멸 → 적색→빨강 확장 실패, 노랑 파프리카 오매칭)
   cleaned = cleaned.replace(/[\(\[](.*?)[\)\]]/g, (_match, content: string) => {
-    return ` ${content.replace(/\s+/g, '')} `
+    const segments = content
+      .split(/[_/]/)                       // 필드 구분자 분리
+      .map(seg => seg.replace(/\s+/g, '')) // 세그먼트별 OCR 공백 제거
+      .filter(Boolean)
+    return ` ${segments.join(' ')} `
   })
 
   // 2. 콤마로 분리하여 주요 품목 / 부가 설명 분리

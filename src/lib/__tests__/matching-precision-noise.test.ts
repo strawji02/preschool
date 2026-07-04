@@ -56,6 +56,18 @@ describe('색상 동의어 (적색→빨강)', () => {
   it('노랑 동의어: 황색 → 노랑', () => {
     expect(getStandardTerm('황색')).toBe('노랑')
   })
+
+  it('파프리카(특품_적색): 언더스코어 구분자 분리 → 적색이 독립 토큰으로 살아남아 빨강 확장', () => {
+    // 버그: 괄호 안 "_"가 필드구분자인데 공백변환 안 돼 "특품적색"으로 붙고,
+    //   특수문자 제거 단계에서 "_"만 사라져 적색이 소멸 → 적색→빨강 확장 실패 →
+    //   파프리카류 중 노랑이 hybrid 점수로 1위 오매칭.
+    const d = dualNormalize('파프리카(특품_적색)')
+    const tokens = d.forKeyword.split(/\s+/).filter(Boolean)
+    expect(tokens).toContain('파프리카')
+    expect(tokens).toContain('적색')      // 언더스코어 분리로 독립 토큰 보존
+    expect(tokens).not.toContain('특품적색') // 붙은 노이즈 토큰 아님
+    expect(expandWithSynonyms('적색')).toContain('빨강')
+  })
 })
 
 describe('명사 끝음절 "이" 조사 오인 방지 (오이류)', () => {
