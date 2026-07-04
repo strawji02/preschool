@@ -24,6 +24,7 @@ import {
   parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
 import { parseOrderUnit } from '@/lib/spec-parser'
+import type { ReferenceProduct } from '@/lib/naver-shopping'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
@@ -1269,6 +1270,115 @@ function FinanceCardCompact({
 /* ────────────────────────────────────────────────────────── */
 /* 중앙 하단: 신세계 매칭 + 조정                                 */
 /* ────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 시중 참고자료 패널 — 신세계 매칭 없을 때 네이버 쇼핑 이미지·시중가   */
+/* (2026-07-04, Phase 1) 검수자가 수동으로 하던 "품명 웹검색 → 이미지 */
+/*   확인 → 시중가 점검"을 자동화. 온디맨드 버튼으로만 조회.          */
+/* ────────────────────────────────────────────────────────── */
+function WebReferencePanel({
+  state,
+  onSearch,
+  query,
+  invoiceUnitPrice,
+}: {
+  state: {
+    loading: boolean
+    loaded: boolean
+    configured: boolean
+    items: ReferenceProduct[]
+    error?: string
+  }
+  onSearch: () => void
+  query?: string | null
+  invoiceUnitPrice?: number | null
+}) {
+  const { loading, loaded, configured, items, error } = state
+  return (
+    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-gray-600">🔎 시중 참고 (네이버 쇼핑)</span>
+        <button
+          type="button"
+          onClick={onSearch}
+          disabled={loading}
+          className="shrink-0 rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {loading ? '검색 중…' : loaded ? '다시 검색' : '시중 상품 찾기'}
+        </button>
+      </div>
+
+      {!loaded && !loading && (
+        <p className="text-[11px] text-gray-400">
+          &ldquo;{query}&rdquo; 품명으로 시중 상품 이미지·최저가를 조회합니다.
+        </p>
+      )}
+
+      {loaded && !configured && (
+        <p className="text-[11px] leading-relaxed text-amber-600">
+          네이버 API 키가 아직 등록되지 않았습니다. Vercel 환경변수에{' '}
+          <code className="rounded bg-amber-100 px-1">NAVER_CLIENT_ID</code>·
+          <code className="rounded bg-amber-100 px-1">NAVER_CLIENT_SECRET</code>를 등록하면 바로 작동합니다.
+        </p>
+      )}
+
+      {loaded && configured && error && <p className="text-[11px] text-red-500">{error}</p>}
+
+      {loaded && configured && !error && items.length === 0 && (
+        <p className="text-[11px] text-gray-400">
+          시중 검색 결과가 없습니다. 우측 &ldquo;신세계 DB 직접 검색&rdquo;을 이용하세요.
+        </p>
+      )}
+
+      {items.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {items.map((r, i) => (
+              <a
+                key={i}
+                href={r.link || undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex gap-2 rounded border border-gray-200 bg-white p-1.5 transition hover:border-emerald-400 hover:shadow-sm"
+              >
+                {r.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={r.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    className="h-12 w-12 shrink-0 rounded object-cover"
+                  />
+                ) : (
+                  <div className="h-12 w-12 shrink-0 rounded bg-gray-100" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="line-clamp-2 text-[11px] font-medium leading-tight text-gray-800">
+                    {r.title}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                    {r.lowestPrice != null && (
+                      <span className="text-xs font-bold text-emerald-700">
+                        ₩{r.lowestPrice.toLocaleString()}
+                      </span>
+                    )}
+                    {r.mallName && <span className="text-[10px] text-gray-400">{r.mallName}</span>}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
+            {invoiceUnitPrice != null && (
+              <>거래명세표 단가 ₩{invoiceUnitPrice.toLocaleString()} · </>
+            )}
+            시중가는 규격이 다를 수 있어 <b>참고용</b>입니다. 확인 후 우측에서 유사 상품을 선택하세요.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function ShinsegaeMatching({
   item,
   onSelectCandidate: _onSelectCandidate,
@@ -1306,6 +1416,37 @@ function ShinsegaeMatching({
   const [quantity, setQuantity] = useState<number>(item.adjusted_quantity ?? item.extracted_quantity)
   // 후보 변경 시 시각 피드백 — 단위중량 칸 1초 노란색 깜빡임 (2026-05-10)
   const [highlightSpec, setHighlightSpec] = useState(false)
+
+  // (2026-07-04) 시중 참고자료 — 신세계 매칭 없을 때 네이버 쇼핑 이미지·시중가 (Phase 1)
+  //   온디맨드(버튼 클릭)로만 조회해 API 무료한도 보호. 품목 전환 시 초기화.
+  const [refState, setRefState] = useState<{
+    loading: boolean
+    loaded: boolean
+    configured: boolean
+    items: ReferenceProduct[]
+    error?: string
+  }>({ loading: false, loaded: false, configured: true, items: [] })
+  useEffect(() => {
+    setRefState({ loading: false, loaded: false, configured: true, items: [] })
+  }, [item.id])
+  const loadReference = useCallback(async () => {
+    const q = item.extracted_name?.trim()
+    if (!q) return
+    setRefState((s) => ({ ...s, loading: true, error: undefined }))
+    try {
+      const res = await fetch(`/api/reference-search?q=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      setRefState({
+        loading: false,
+        loaded: true,
+        configured: data.configured ?? true,
+        items: Array.isArray(data.items) ? data.items : [],
+        error: data.error,
+      })
+    } catch {
+      setRefState((s) => ({ ...s, loading: false, loaded: true, error: '시중 검색에 실패했습니다' }))
+    }
+  }, [item.extracted_name])
 
   // 발주수량 동기화 — item 변경 또는 후보 변경(adjusted_quantity reset 포함) 시
   useEffect(() => {
@@ -1495,8 +1636,16 @@ function ShinsegaeMatching({
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-2">
         {!ssgMatch ? (
-          <div className="flex h-24 items-center justify-center text-sm text-gray-400">
-            매칭된 신세계 상품이 없습니다. 우측 후보에서 선택하세요.
+          <div className="flex flex-col gap-3 py-1">
+            <div className="text-center text-sm text-gray-400">
+              매칭된 신세계 상품이 없습니다. 우측 후보에서 선택하거나, 아래에서 시중 상품을 참고하세요.
+            </div>
+            <WebReferencePanel
+              state={refState}
+              onSearch={loadReference}
+              query={item.extracted_name}
+              invoiceUnitPrice={item.extracted_unit_price}
+            />
           </div>
         ) : (
           <>
