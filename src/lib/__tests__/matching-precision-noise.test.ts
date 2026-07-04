@@ -57,3 +57,21 @@ describe('색상 동의어 (적색→빨강)', () => {
     expect(getStandardTerm('황색')).toBe('노랑')
   })
 })
+
+describe('명사 끝음절 "이" 조사 오인 방지 (오이류)', () => {
+  it('오이: forKeyword가 "오"로 파괴되지 않고 "오이" 유지', () => {
+    expect(dualNormalize('오이').forKeyword).toBe('오이')
+    expect(dualNormalize('청오이').forKeyword).toBe('청오이')
+  })
+
+  it('가시오이(특품): 오이로 확장돼 신세계 오이류 검색 가능', () => {
+    const d = dualNormalize('가시오이(특품)')
+    expect(d.forKeyword.split(/\s+/)).toContain('가시오이')
+    expect(expandWithSynonyms('가시오이')).toContain('오이')
+  })
+
+  it('자른미역/옛날자른미역: 미역으로 확장', () => {
+    expect(expandWithSynonyms('자른미역')).toContain('미역')
+    expect(expandWithSynonyms('옛날자른미역')).toContain('미역')
+  })
+})
