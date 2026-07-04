@@ -27,7 +27,7 @@ import { parseOrderUnit } from '@/lib/spec-parser'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
-  parsePerPieceGrams,
+  parsePerPieceGrams, comparePerPieceCloseness,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -1979,17 +1979,13 @@ function CandidatesAndSearchPanel({
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
-        // 2.5) 개당중량 근접 (2026-07-04) — 검수에 개당중량이 있고 두 후보 모두
-        // 개당중량이 파싱될 때만 근접한(차이 작은) 후보를 위로. 한쪽만/없으면 다음 키로.
-        // 예: 당근 검수 개당130~200g(중앙165) → 후보 개당200g(차35)이 개당120g(차45)보다 위.
+        // 2.5) 개당중량 근접 (2026-07-04, 회귀 fix) — 검수가 개당중량을 지정하면
+        // (1) 개당중량 명시 후보를 미명시 후보보다 우선 (2) 둘 다 명시면 근접한 쪽 우선.
+        // 예: 당근 검수 개당130~200g(중앙165) → 세척당근(개당200g)이 컷팅당근(미명시)보다 위.
+        // comparePerPieceCloseness 순수함수로 추출 → matching-golden 회귀 테스트로 보호.
         if (itemPerPieceG != null) {
-          const ap = parsePerPieceGrams(a.spec_raw)
-          const bp = parsePerPieceGrams(b.spec_raw)
-          if (ap != null && bp != null) {
-            const ad = Math.abs(ap - itemPerPieceG)
-            const bd = Math.abs(bp - itemPerPieceG)
-            if (ad !== bd) return ad - bd
-          }
+          const c = comparePerPieceCloseness(itemPerPieceG, a.spec_raw, b.spec_raw)
+          if (c !== 0) return c
         }
 
         // 3) tax_type 일치 우선 (면세 검수 → 면세 후보 우선, 2026-05-11)

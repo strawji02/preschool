@@ -91,6 +91,33 @@ export function parsePerPieceGrams(text: string | null | undefined): number | nu
   return (lo + (Number.isNaN(hi) ? lo : hi)) / 2
 }
 
+/**
+ * 개당중량 근접 정렬 비교자 (2026-07-04) — 순수함수로 추출해 회귀 테스트 가능하게.
+ *
+ * 검수 품목이 개당중량을 지정("당근 개당130~200g")했을 때 후보 정렬 우선순위:
+ *   1) 개당중량이 명시된 후보를 명시 안 된 후보보다 우선 (검수 의도 반영)
+ *   2) 둘 다 명시되면 검수 개당중량에 근접한 후보 우선
+ *   3) 검수가 개당중량 미지정이거나 둘 다 미명시면 0(동률 → 다음 정렬키로)
+ *
+ * @returns 음수=a 우선, 양수=b 우선, 0=판단 보류
+ * @example
+ *   // 검수 165g: 세척당근(개당200g 명시) vs 컷팅당근(미명시) → 세척당근 우선
+ *   comparePerPieceCloseness(165, '1KG, 개당200g이상', '1KG, 2mm 채') // < 0
+ */
+export function comparePerPieceCloseness(
+  itemGrams: number | null,
+  aSpec: string | null | undefined,
+  bSpec: string | null | undefined,
+): number {
+  if (itemGrams == null) return 0
+  const a = parsePerPieceGrams(aSpec)
+  const b = parsePerPieceGrams(bSpec)
+  if (a != null && b == null) return -1 // 개당중량 명시 후보 우선
+  if (b != null && a == null) return 1
+  if (a != null && b != null) return Math.abs(a - itemGrams) - Math.abs(b - itemGrams)
+  return 0
+}
+
 export function cleanProductQuery(q: string): string {
   if (!q) return ''
   let s = q
@@ -268,6 +295,26 @@ export function isProcessedProduct(productName: string): boolean {
  */
 
 /** 한국어 어절 단순 분리 (2자 이상 토큰만) */
+/**
+ * 통짜 합성어 분해 — 단일 소스 (2026-07-04, 회귀 근본대응)
+ *
+ * DB search_vector(migration 047)·검수 검색어(cleanProductQuery)·후보 토큰매칭
+ * (getTokenMatchRatio) 세 곳이 "세척당근"을 통짜로 보면 비대칭이 생겨 회귀가 반복됨.
+ * 여기 한 곳에 접두/접미 목록을 두고 공유한다. **migration 047의 목록과 동기화할 것.**
+ *   접두: 크기/가공/저장 수식어(다짐/다진/볶은 등 동사·접미혼동 단어는 제외).
+ *   접미: 과자 품목어(약과/강정 등).
+ *   "세척당근" → "세척 당근", "미니꿀약과" → "미니 꿀 약과"(접두 2회로 연속접두 분해).
+ */
+const COMPOUND_PREFIX_RE =
+  /(냉동|냉장|실온|상온|세척|손질|미니|대용량|유기농|친환경|무항생제|절단|슬라이스|컷팅|커팅|채썬|깍둑)([가-힣])/g
+const COMPOUND_SUFFIX_RE = /([가-힣])(약과|강정|한과|전병|튀각|부각)/g
+export function splitCompoundAffixes(s: string | null | undefined): string {
+  if (!s) return ''
+  let r = s.replace(COMPOUND_PREFIX_RE, '$1 $2').replace(COMPOUND_PREFIX_RE, '$1 $2')
+  r = r.replace(COMPOUND_SUFFIX_RE, '$1 $2')
+  return r
+}
+
 export function tokenize(text: string | undefined | null): string[] {
   if (!text) return []
   return text
@@ -292,13 +339,17 @@ export function getTokenMatchRatio(
 ): number {
   const q = (query ?? '').toLowerCase().replace(/\s+/g, '')
   const n = (productName ?? '').toLowerCase().replace(/\s+/g, '')
+  // (2026-07-04) 후보명 통짜 합성어 분해 — "세척당근"의 토큰매칭이 "당근"(검수)을
+  //   suffix라 제외하던 비대칭 해소. DB search_vector(mig 047)와 대칭.
+  //   토큰 분리에만 사용하고 substring 매칭(n)은 원본 유지.
+  const nameSplit = splitCompoundAffixes(productName)
 
   // Full substring match → 확실
   // (2026-05-11) 1~2자 query는 word-boundary 매칭만 허용 — substring이 너무 광범위
   // 3자 이상은 한국어 합성어 식별력 충분 → 일반 substring 허용
   if (q.length >= 3 && (n.includes(q) || q.includes(n))) return 1.5
   if (q.length === 2 && n.includes(q)) {
-    const productTokens = tokenize(productName ?? '')
+    const productTokens = tokenize(nameSplit)
     // 정확 토큰 또는 token-prefix만 인정 (token-suffix "옥수수→수수" 잘못 매칭 차단)
     const exactOrPrefix = productTokens.some(
       (t) => t === q || (t.length > q.length && t.startsWith(q)),
@@ -308,7 +359,7 @@ export function getTokenMatchRatio(
   // 1자 한국어 query (쌀/무/콩/팥/파 등) — token-exact + token-prefix + token-suffix 모두 허용
   // 한국어 식자재 합성어 패턴이 광범위 (찹쌀/쌀가루/대파/총각무) → suffix도 안전
   if (q.length === 1 && /^[가-힣]$/.test(q) && n.includes(q)) {
-    const productTokens = tokenize(productName ?? '')
+    const productTokens = tokenize(nameSplit)
     const wordBoundary = productTokens.some(
       (t) => t === q || (t.length > 1 && (t.startsWith(q) || t.endsWith(q))),
     )
@@ -326,7 +377,7 @@ export function getTokenMatchRatio(
         // 3자 이상은 substring으로 충분히 식별력 있음
         if (synLower.length >= 3) return 1.5
         // 2자 동의어는 word-boundary 매칭만 허용
-        const productTokens = tokenize(productName ?? '')
+        const productTokens = tokenize(nameSplit)
         const exactOrPrefix = productTokens.some(
           (t) => t === synLower || (t.length > synLower.length && t.startsWith(synLower)),
         )
@@ -365,7 +416,7 @@ export function getTokenMatchRatio(
   }
   // (2026-05-11) 1~2자 토큰은 word-boundary 매칭만 — substring 매칭이 "수수→옥수수" 잘못 매칭 유발
   // 3자 이상은 한국어 합성어 식별력 충분 → 일반 substring 허용
-  const productTokensCached = tokenize(productName ?? '')
+  const productTokensCached = tokenize(nameSplit)
   // strictSuffix: true → 2자 token-suffix 매칭 비활성 (회귀 보호 영역, 예: '전분'→'옥수수전분')
   const tokenMatchesProduct = (sub: string, opts: { strictSuffix?: boolean } = {}): boolean => {
     if (!sub) return false
