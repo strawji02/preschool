@@ -44,9 +44,13 @@ const FLAVOR_MODIFIERS = [
 export function cleanInput(name: string): { primary: string; secondary: string } {
   let cleaned = name.trim()
 
-  // 1. 괄호 내용을 공백 제거 후 본문에 합치기: (컷 팅) → 컷팅
+  // 1. 괄호 내용을 본문에 합치되 이웃 단어와는 공백으로 분리
+  //    - 내부 공백은 제거해 OCR 단어조각 복원: "(컷 팅)" → "컷팅"
+  //    - 단, 앞뒤에 공백을 둬 이웃 단어와 붙지 않게: "(계란)특란" → " 계란 특란"
+  //      (버그 fix 2026-07-04: "N (계란)특란(무항생제)" → "계란특란무항생제"로 붙어
+  //       BM25가 계란/특란을 못 쪼개 계란 상품 검색 실패하던 문제)
   cleaned = cleaned.replace(/[\(\[](.*?)[\)\]]/g, (_match, content: string) => {
-    return content.replace(/\s+/g, '')
+    return ` ${content.replace(/\s+/g, '')} `
   })
 
   // 2. 콤마로 분리하여 주요 품목 / 부가 설명 분리
@@ -60,6 +64,17 @@ export function cleanInput(name: string): { primary: string; secondary: string }
     primary = primary.replace(regex, '')
     secondary = secondary.replace(regex, '')
   }
+
+  // 3.5 품위등급 단독 토큰 제거 (상/중/하 등) — (2026-07-04 버그 fix)
+  //   BM25는 AND 검색이라 DB에 없는 등급어 하나가 결과를 0으로 만들고 fallback이
+  //   무관 후보를 반환함: "쑥갓(상)"→브로컬리, "양파(상)"→양파드레싱/소스.
+  //   '상온'·'중간' 등 합성어는 단어경계로 보호. 크기 등급 '특/대/왕'은 특란/대란
+  //   등 의미가 있어 유지. normalizeIntraWordSpaces(4단계) 전에 제거해 "상 적색"이
+  //   "상적색"으로 재결합되는 것도 방지.
+  const stripGrade = (s: string) =>
+    s.replace(/(^|\s)(상|중|하|최상|상급|중급|하급|상등|중등|하등)(?=\s|$)/g, '$1')
+  primary = stripGrade(primary)
+  secondary = stripGrade(secondary)
 
   // 4. 단어 내 공백 정규화: '컷 팅' → '컷팅', '스파게티소 스' → '스파게티소스'
   // 한글 음절 사이의 단독 공백을 제거 (2글자 이하 토큰이 한글로만 구성된 경우)
@@ -79,11 +94,14 @@ export function cleanInput(name: string): { primary: string; secondary: string }
  * 단, '토마토 소스' 처럼 양쪽이 모두 2글자 이상이면 유지
  */
 function normalizeIntraWordSpaces(text: string): string {
-  // 한글 1글자 + 공백 + 한글 1-2글자 패턴을 결합
-  // 예: '컷 팅' (1+2), '소 스' (1+1)
+  // 한글 단독 1글자 토큰 + 공백 + 한글 1-2글자 결합 (OCR 음절 분리 복원)
+  // 예: '컷 팅'(1+2)→'컷팅', '소 스'(1+1)→'소스', '계 란'→'계란'
+  // 단, 왼쪽 1글자는 독립 토큰이어야 함(앞이 공백/시작). '계란 특란'의 '란 특란'
+  // 처럼 긴 단어 꼬리글자는 결합 안 함 — 단어경계 공백 보존.
+  // (버그 fix 2026-07-04: "(계란)특란(무항생제)"→"계란특란무항생제" 재결합 방지)
   return text.replace(
-    /([\uAC00-\uD7A3]{1})\s+([\uAC00-\uD7A3]{1,2})(?=\s|$|[\uAC00-\uD7A3])/g,
-    '$1$2'
+    /(^|\s)([\uAC00-\uD7A3])\s+([\uAC00-\uD7A3]{1,2})(?=\s|$|[\uAC00-\uD7A3])/g,
+    '$1$2$3'
   )
 }
 
