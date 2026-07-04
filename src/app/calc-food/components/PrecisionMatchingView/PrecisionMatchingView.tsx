@@ -2299,8 +2299,21 @@ function CandidateCard({
           : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40',
       )}
     >
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
-        <Package size={22} />
+      {/* 이미지 자리 + 그 아래 신세계 코드 크게 표시 (사용자 요청 2026-07-04) */}
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+          <Package size={22} />
+        </div>
+        {candidate.product_code ? (
+          <span
+            className="w-14 rounded-md bg-blue-600 px-1 py-0.5 text-center font-mono text-sm font-extrabold leading-tight tracking-tight text-white ring-1 ring-blue-700"
+            title={`신세계 코드 ${candidate.product_code}`}
+          >
+            {candidate.product_code}
+          </span>
+        ) : (
+          <span className="text-[9px] text-gray-300">코드없음</span>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         {/* 상단: #N + 제품명 (큰 볼드) + 우측 신뢰도 라벨 */}
@@ -2313,13 +2326,7 @@ function CandidateCard({
               </h4>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1">
-              {/* (2026-05-11) 신세계 코드 강조 chip — 현재 매칭된 후보만 표시 (사용자 피드백 반영) */}
-              {/* 일반 후보는 코드 숨김 — 검수자가 매칭/컨펌 시점에만 코드 인지 */}
-              {candidate.product_code && isSelected && (
-                <span className="inline-flex items-center rounded bg-blue-600 px-1.5 py-0 font-mono text-[11px] font-bold text-white ring-1 ring-blue-700">
-                  #{candidate.product_code}
-                </span>
-              )}
+              {/* (2026-07-04) 코드는 이미지 자리 아래로 이동해 모든 후보에 크게 표시. 여기선 상태 배지만. */}
               {isSelected && (
                 <span className="inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
                   현재 매칭
