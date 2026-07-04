@@ -1853,8 +1853,18 @@ export function useAuditSession() {
 
   // 비교 제외 토글 ─ 2026-04-21
   const toggleExclude = useCallback((itemId: string, reason?: string) => {
+    // (2026-07-04 fix) 기존엔 dispatch만 하고 DB 저장을 안 해 비교불가 처리가 유실됐다
+    //   (새로고침·다음 단계에서 is_excluded=false로 복귀 → 총액검증 "비교 불가"에 미반영).
+    //   토글은 현재값의 반대이므로, 같은 새 값을 audit_items.is_excluded에 즉시 PATCH.
+    const cur = state.items.find((i) => i.id === itemId)
+    const newExcluded = !cur?.is_excluded
     dispatch({ type: 'TOGGLE_EXCLUDE', itemId, reason })
-  }, [])
+    void fetch(`/api/audit-items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_excluded: newExcluded }),
+    }).catch((e) => console.warn('비교불가 상태 저장 실패 (state는 유지):', e))
+  }, [state.items])
 
   // 엑셀 담당자 확인 단계 액션들 (2026-04-21)
   const updateExcelPreviewItem = useCallback(
