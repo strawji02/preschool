@@ -175,3 +175,23 @@ describe('parsePerPieceGrams 개당중량 파싱 (원산지·중량 랭킹) — 
     expect(parsePerPieceGrams('')).toBeNull()
   })
 })
+
+describe('cleanProductQuery 통짜 합성어 분해 (검수측, 상품 mig 047과 대칭) — 사용자 보고 2026-07-04', () => {
+  // "미니쌀약과"가 통짜라 "약과" 검색어가 안 생겨 trigram이 "미니 감자핫도그"·"미니 농심"
+  // 같은 미니 제품을 끌어올림. 상품 search_vector는 분해했으나 검수 검색어는 통짜였음.
+  it('P Oh! 미니쌀약과: 접미 품목어 "약과"가 독립 토큰으로 분리', () => {
+    const r = cleanProductQuery('P Oh! 미니쌀약과')
+    expect(r.split(/\s+/)).toContain('약과')  // 핵심 품목어 독립 → 약과 상품 BM25 매칭
+  })
+
+  it('미니쌀약과: 접미 "약과" 분리 (미니쌀 약과)', () => {
+    const r = cleanProductQuery('미니쌀약과')
+    expect(r.split(/\s+/)).toContain('약과')
+  })
+
+  it('오탐 방지: 미니크리스피핫도그는 접미 분리 안 됨 (핫도그 full match 보존)', () => {
+    // 접두 분리를 넣지 않으므로 핫도그 통짜 매칭이 그대로 유지되어야 함
+    const cleaned = cleanProductQuery('크레잇 미니크리스피핫도그(50g*10입 500g/EA)')
+    expect(getTokenMatchRatio(cleaned, '핫도그 대상')).toBeGreaterThanOrEqual(1)
+  })
+})
