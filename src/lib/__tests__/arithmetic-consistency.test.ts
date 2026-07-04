@@ -27,6 +27,7 @@ function makeItem(opts: {
   qty: number
   unit_price: number
   total?: number  // extracted_total_price (없으면 unit_price × qty 사용)
+  confirmed?: boolean  // 미지정 시 매칭(ssg)되면 확정으로 간주
   ssg?: {
     standard_price: number
     spec_quantity?: number | null
@@ -57,7 +58,7 @@ function makeItem(opts: {
       : undefined,
     cj_candidates: [],
     ssg_candidates: [],
-    is_confirmed: false,
+    is_confirmed: opts.confirmed ?? (opts.ssg != null),
     cj_confirmed: false,
     ssg_confirmed: false,
     savings: { cj: 0, ssg: 0, max: 0 },
@@ -106,7 +107,7 @@ function buildFixtures(): ComparisonItem[] {
 /** 화면 monthly 합계를 계약대로 — Σ Math.round(item) */
 function computeExpectedMonthlyOur(items: ComparisonItem[]): number {
   return items
-    .filter((it) => !it.is_excluded)
+    .filter((it) => !it.is_excluded && it.is_confirmed)
     .reduce((s, it) => {
       const raw = it.extracted_total_price ?? it.extracted_unit_price * it.extracted_quantity
       return s + Math.round(raw)
@@ -114,7 +115,7 @@ function computeExpectedMonthlyOur(items: ComparisonItem[]): number {
 }
 function computeExpectedMonthlySsg(items: ComparisonItem[], supplyRate: number): number {
   return items
-    .filter((it) => !it.is_excluded)
+    .filter((it) => !it.is_excluded && it.is_confirmed)
     .reduce((s, it) => {
       if (!it.ssg_match) {
         const raw = it.extracted_total_price ?? it.extracted_unit_price * it.extracted_quantity
@@ -167,6 +168,35 @@ describe('computeCategoryStats — per-item Math.round (2026-05-17)', () => {
     expect(sumOur).toBe(computeExpectedMonthlyOur(items))
   })
 
+  // (2026-07-04) 최종 보고서: 미확정(!is_confirmed)은 비교불가로 처리 → 확정 품목끼리만
+  //   상대비교. 미확정 오매칭이 절감액·절감률을 부풀리던 문제 차단.
+  it('미확정(매칭 있으나 confirmed=false)은 절감·건수에서 제외', () => {
+    const confirmed = makeItem({
+      id: 'c', name: '감자', qty: 1, unit_price: 1000, total: 1000, confirmed: true,
+      ssg: { standard_price: 600, spec_quantity: 1, spec_unit: 'KG', category: '농산' },
+    })
+    const pending = makeItem({
+      id: 'p', name: '당근', qty: 1, unit_price: 1000, total: 1000, confirmed: false,
+      ssg: { standard_price: 600, spec_quantity: 1, spec_unit: 'KG', category: '농산' },
+    })
+    const stats = computeCategoryStats([confirmed, pending], 1.0)
+    const count = stats.reduce((s, x) => s + x.itemCount, 0)
+    const savings = stats.reduce((s, x) => s + x.savings, 0)
+    expect(count).toBe(1)     // 확정 1건만
+    expect(savings).toBe(400) // 미확정 당근 절감(400) 제외
+  })
+
+  it('매칭 없는 미확정(unmatched)도 분모에서 제외', () => {
+    const confirmed = makeItem({
+      id: 'c', name: '감자', qty: 1, unit_price: 1000, total: 1000, confirmed: true,
+      ssg: { standard_price: 600, spec_quantity: 1, spec_unit: 'KG', category: '농산' },
+    })
+    const unmatched = makeItem({ id: 'u', name: '무', qty: 1, unit_price: 5000, total: 5000, confirmed: false })
+    const stats = computeCategoryStats([confirmed, unmatched], 1.0)
+    const count = stats.reduce((s, x) => s + x.itemCount, 0)
+    expect(count).toBe(1)     // unmatched 제외 → 분모 오염 방지
+  })
+
   it('월 절감액 == ourCost - ssgCost (per-item round 합산)', () => {
     const items = buildFixtures()
     const stats = computeCategoryStats(items, 1.0)
@@ -199,7 +229,7 @@ describe('Excel export 합계 == 화면 합계 (per-row Math.round 계약)', () 
     const screenMonthlyOur = stats.reduce((s, c) => s + c.ourCost, 0)
     // Excel: 각 row F = Math.round(item), summary = Σ F
     const excelSumF = items
-      .filter((it) => !it.is_excluded)
+      .filter((it) => !it.is_excluded && it.is_confirmed)
       .reduce((s, it) => s + existingTotal(it), 0)
     expect(excelSumF).toBe(screenMonthlyOur)
   })
@@ -210,7 +240,7 @@ describe('Excel export 합계 == 화면 합계 (per-row Math.round 계약)', () 
     const screenMonthlySsg = stats.reduce((s, c) => s + c.ssgCost, 0)
     // Excel: 각 row L = ROUND($L$2*K, 0), summary cache = Σ Math.round(ssg.amount × supplyRate)
     const excelSumL = items
-      .filter((it) => !it.is_excluded)
+      .filter((it) => !it.is_excluded && it.is_confirmed)
       .reduce((s, it) => {
         const amt = ssgAmount(it)
         if (amt === null) {
@@ -227,7 +257,7 @@ describe('Excel export 합계 == 화면 합계 (per-row Math.round 계약)', () 
     const stats = computeCategoryStats(items, 1.25)
     const screenMonthlySsg = stats.reduce((s, c) => s + c.ssgCost, 0)
     const excelSumL = items
-      .filter((it) => !it.is_excluded)
+      .filter((it) => !it.is_excluded && it.is_confirmed)
       .reduce((s, it) => {
         const amt = ssgAmount(it)
         if (amt === null) return s + existingTotal(it)
@@ -242,10 +272,10 @@ describe('Excel export 합계 == 화면 합계 (per-row Math.round 계약)', () 
     const screenSavings =
       stats.reduce((s, c) => s + c.ourCost, 0) - stats.reduce((s, c) => s + c.ssgCost, 0)
     const excelSumF = items
-      .filter((it) => !it.is_excluded)
+      .filter((it) => !it.is_excluded && it.is_confirmed)
       .reduce((s, it) => s + existingTotal(it), 0)
     const excelSumL = items
-      .filter((it) => !it.is_excluded)
+      .filter((it) => !it.is_excluded && it.is_confirmed)
       .reduce((s, it) => {
         const amt = ssgAmount(it)
         if (amt === null) return s + existingTotal(it)

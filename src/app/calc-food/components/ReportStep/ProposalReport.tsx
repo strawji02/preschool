@@ -150,7 +150,11 @@ export function computeCategoryStats(items: ComparisonItem[], supplyRate: number
     itemsByCategory.set(cat, [])
   }
   for (const item of items) {
-    if (item.is_excluded) continue
+    // (2026-07-04) 최종 보고서는 확정 품목만으로 상대비교.
+    //   미확정(!is_confirmed)은 비교불가로 처리해 제외 — 미확정 오매칭이 절감액·절감률을
+    //   부풀리던 문제 차단(예: 확정 안 한 "부드러운숙식빵"이 51.6% 절감으로 집계되던 케이스).
+    //   미확정은 검수 단계에서만 사용자에게 노출한다.
+    if (item.is_excluded || !item.is_confirmed) continue
     // DB 매칭(신세계 카테고리) 우선, 없으면 키워드 룰 fallback (2026-05-09)
     const cat = classifyItem(item.extracted_name, item.extracted_spec, item.ssg_match?.category)
     const stat = map.get(cat)!
