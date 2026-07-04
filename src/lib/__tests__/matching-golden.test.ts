@@ -36,6 +36,10 @@ describe('골든셋: 검수 품목명 → 검색어 핵심 토큰', () => {
     expect(tokens('P Oh! 미니쌀약과')).toContain('약과')
   })
 
+  it('쌈무: 비트쌈무 → 접미 "쌈무" 독립 토큰 (비트가 아니라 쌈무가 키워드)', () => {
+    expect(tokens('비트쌈무')).toContain('쌈무')
+  })
+
   it('접두코드: P-술찌 → 술찌 (단일 대문자 접두 제거)', () => {
     expect(cleanInput('P-술찌').primary).toBe('술찌')
   })

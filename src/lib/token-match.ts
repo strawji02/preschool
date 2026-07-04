@@ -169,7 +169,7 @@ export function cleanProductQuery(q: string): string {
   //   "미니 농심" 같은 미니 제품을 끌어올리던 문제. 접미 품목("약과")을 독립 토큰으로.
   //   접두(미니/세척 등) 분리는 "미니크리스피핫도그→핫도그" full match를 깨서 제외 —
   //   품목 본질인 접미어만 분리하면 recall은 확보되고 ratio 회귀는 없음.
-  s = s.replace(/([가-힣])(약과|강정|한과|전병|튀각|부각)/g, '$1 $2')
+  s = s.replace(/([가-힣])(약과|강정|한과|전병|튀각|부각|쌈무)/g, '$1 $2')
   // (2026-05-12) 포장 suffix 분리 — "스팸캔" → "스팸 캔", "참치캔" → "참치 캔"
   // 검수가 포장 형태를 식자재명 뒤에 붙여 쓰는 경우 (캔/병/팩/통)
   s = s.replace(/([가-힣]{2,})(캔|병|팩|통|봉|박스|상자)(\s|$|[,])/g, '$1 $2$3')
@@ -307,7 +307,7 @@ export function isProcessedProduct(productName: string): boolean {
  */
 const COMPOUND_PREFIX_RE =
   /(냉동|냉장|실온|상온|세척|손질|미니|대용량|유기농|친환경|무항생제|절단|슬라이스|컷팅|커팅|채썬|깍둑)([가-힣])/g
-const COMPOUND_SUFFIX_RE = /([가-힣])(약과|강정|한과|전병|튀각|부각)/g
+const COMPOUND_SUFFIX_RE = /([가-힣])(약과|강정|한과|전병|튀각|부각|쌈무)/g
 export function splitCompoundAffixes(s: string | null | undefined): string {
   if (!s) return ''
   let r = s.replace(COMPOUND_PREFIX_RE, '$1 $2').replace(COMPOUND_PREFIX_RE, '$1 $2')
