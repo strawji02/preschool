@@ -47,7 +47,7 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
   // token ratio를 부풀리던 문제 차단. 크기등급 특/대/왕은 계란 특란/왕란 변별에 필요해 제외.
   '상', '중', '하', '최상',
   // 형태/가공
-  '덩어리', '절단', '슬라이스', '다짐', '커팅', '필렛', '깍둑', '채썬',
+  '덩어리', '절단', '슬라이스', '다짐', '커팅', '컷팅', '필렛', '깍둑', '채썬',
   '갈은', '간', '으깬', '크러쉬',
   // 포장 (2026-05-12) — '스팸캔','참치캔' 같은 식자재명+포장 합성어 분리 시 modifier로 처리
   '캔', '병', '팩', '통', '봉', '박스', '상자',
@@ -72,10 +72,24 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
 export function cleanProductQuery(q: string): string {
   if (!q) return ''
   let s = q
-  // (2026-05-11) 중첩 괄호 처리 — "(약6g*(166±5)입 1Kg/EA)"같은 다중 괄호 케이스
-  // 안쪽부터 반복 제거 (최대 5회 반복으로 무한 루프 방지)
+  // (2026-07-04) 맨 앞 단일 대문자 접두코드 제거 — 신세계 명세서 분류코드(N/P/K/S/E/R)
+  //   "N (계란)특란(무항생제)"의 접두 N이 trigram raw를 오염("N 콜라/사이다") → 제거.
+  //   cleanInput 3.6단계와 동일 규칙(2글자+ 약어 CJ/GAP는 뒤가 대문자라 보존).
+  s = s.replace(/^\s*[A-Z](?=[\s\-._/]|$)[\s\-._/]*/, '')
+  // (2026-07-04) 괄호 안 내용 처리 — 숫자 있으면(spec) 제거, 없으면 식자재/크기등급어만 보존.
+  //   기존엔 괄호를 통째 삭제해 "(계란)특란(무항생제)" → "특란"으로 핵심 식자재어(계란)가
+  //   소실됐고, cleanInput(명세서 재분석 경로)은 이미 내용을 보존해 두 경로가 불일치했음.
+  //   보존 시 GENERIC_MODIFIER(무항생제/컷팅/특품 등 수식·가공어)는 제거해 노이즈를 막음.
+  //   "(계란)" → " 계란 " 보존 / "(컷팅)"·"(무항생제)" → 제거 / "(특품 200~280g/개)"(숫자) → 제거.
+  //   중첩 괄호는 안쪽부터 반복 처리(최대 5회).
   for (let i = 0; i < 5; i++) {
-    const next = s.replace(/\([^()]*\)/g, ' ')
+    const next = s.replace(/\(([^()]*)\)/g, (_m, c: string) => {
+      if (/\d/.test(c)) return ' '
+      const kept = c.split(/\s+/).filter(
+        (t) => t && !GENERIC_MODIFIERS.has(t) && !GENERIC_MODIFIERS.has(t.toLowerCase()),
+      )
+      return kept.length ? ` ${kept.join(' ')} ` : ' '
+    })
     if (next === s) break
     s = next
   }
