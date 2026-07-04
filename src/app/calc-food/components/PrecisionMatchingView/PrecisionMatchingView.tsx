@@ -553,6 +553,7 @@ export function PrecisionMatchingView({
             <section className="col-span-5 flex min-h-0 flex-col gap-3">
               <ExistingItemDetail
                 item={currentItem}
+                itemNumber={selectedIndex + 1}
                 onOpenImage={pages.length > 0 ? () => setIsPdfModalOpen(true) : undefined}
                 commonTokens={commonTokens}
               />
@@ -1063,10 +1064,12 @@ function ItemListPanel({
 /* ────────────────────────────────────────────────────────── */
 function ExistingItemDetail({
   item,
+  itemNumber,
   onOpenImage,
   commonTokens,
 }: {
   item: ComparisonItem
+  itemNumber?: number
   onOpenImage?: () => void
   commonTokens: Set<string>
 }) {
@@ -1127,8 +1130,16 @@ function ExistingItemDetail({
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-2">
         {/* 제품명 + 규격/단위 chips (출처 제거 — 헤더로 이동) */}
-        <h3 className="break-words text-2xl font-bold leading-tight text-gray-900">
-          <HighlightedText text={item.extracted_name} commonTokens={commonTokens} />
+        {/* (2026-07-04) 품명 맨 앞 거래명세표 순번(#N) — 좌측 리스트 #{idx+1}과 동일 체계 */}
+        <h3 className="flex items-baseline gap-2 break-words text-2xl font-bold leading-tight text-gray-900">
+          {itemNumber != null && (
+            <span className="shrink-0 rounded-md bg-gray-900 px-2 py-0.5 font-mono text-lg font-extrabold text-white">
+              #{itemNumber}
+            </span>
+          )}
+          <span className="min-w-0">
+            <HighlightedText text={item.extracted_name} commonTokens={commonTokens} />
+          </span>
         </h3>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-base">
           {item.extracted_spec && (
