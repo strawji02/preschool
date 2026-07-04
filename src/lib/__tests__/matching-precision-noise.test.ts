@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { cleanInput, dualNormalize } from '../preprocessing'
 import { getStandardTerm, expandWithSynonyms } from '../synonyms'
-import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO, cleanProductQuery } from '../token-match'
+import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO, cleanProductQuery, parsePerPieceGrams } from '../token-match'
 
 /**
  * 매칭 정밀도 회귀 테스트 — 사용자 보고 3케이스 (2026-07-04)
@@ -153,5 +153,25 @@ describe('cleanProductQuery 괄호 안 식자재어 보존 (AI 추천 후보 경
     const r = cleanProductQuery('세척당근(특품 200~280g/개)')
     expect(r).toContain('당근')
     expect(r).not.toMatch(/200|280/)
+  })
+})
+
+describe('parsePerPieceGrams 개당중량 파싱 (원산지·중량 랭킹) — 사용자 요청 2026-07-04', () => {
+  // 당근 검수 "KG(씻은_개당130∼200g_국내산)"의 개당중량과
+  // 후보 "1KG, 개당120g이상"/"개당200g이상"의 근접도로 랭킹.
+  it('개당 범위(130~200g)는 중앙값 반환', () => {
+    expect(parsePerPieceGrams('KG(씻은_개당130∼200g_국내산)')).toBe(165)
+    expect(parsePerPieceGrams('개당 60~68g/30ea')).toBe(64)
+  })
+
+  it('개당 단일값(120g이상)은 그 값', () => {
+    expect(parsePerPieceGrams('1KG, 개당120g이상')).toBe(120)
+    expect(parsePerPieceGrams('1KG, 개당200g이상')).toBe(200)
+  })
+
+  it('"개당" 키워드 없으면 null (총중량/용량 오인 방지)', () => {
+    expect(parsePerPieceGrams('1KG')).toBeNull()
+    expect(parsePerPieceGrams('1KG, 250G 이상')).toBeNull()
+    expect(parsePerPieceGrams('')).toBeNull()
   })
 })

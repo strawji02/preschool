@@ -27,6 +27,7 @@ import { parseOrderUnit } from '@/lib/spec-parser'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
+  parsePerPieceGrams,
 } from '@/lib/token-match'
 
 interface PrecisionMatchingViewProps {
@@ -1931,6 +1932,13 @@ function CandidatesAndSearchPanel({
   // 기존 업체 품목 원산지 (정렬 가중치용)
   const itemOrigin = useMemo(() => getItemOrigin(item), [item])
 
+  // (2026-07-04) 검수 품목 개당중량(g) — "당근(상) 개당130~200g" 처럼 개당 규격이 있으면
+  // 후보의 개당중량(spec_raw "개당120g이상")과 근접도로 랭킹 (원산지 다음 우선순위)
+  const itemPerPieceG = useMemo(
+    () => parsePerPieceGrams(`${item.extracted_name ?? ''} ${item.extracted_spec ?? ''}`),
+    [item],
+  )
+
   // (2026-05-11) 검수 품목 tax_type — 면세 검수면 면세 후보 우선
   // 농/축/수산 면세 품목 (쌀/소고기/생선 등)이 과세 가공품과 동일 선상 경쟁하던 문제 해결
   const itemTaxType: '면세' | '과세' = (item.extracted_tax_amount ?? 0) === 0 ? '면세' : '과세'
@@ -1971,6 +1979,19 @@ function CandidatesAndSearchPanel({
           if (aOriginMatch !== bOriginMatch) return aOriginMatch ? -1 : 1
         }
 
+        // 2.5) 개당중량 근접 (2026-07-04) — 검수에 개당중량이 있고 두 후보 모두
+        // 개당중량이 파싱될 때만 근접한(차이 작은) 후보를 위로. 한쪽만/없으면 다음 키로.
+        // 예: 당근 검수 개당130~200g(중앙165) → 후보 개당200g(차35)이 개당120g(차45)보다 위.
+        if (itemPerPieceG != null) {
+          const ap = parsePerPieceGrams(a.spec_raw)
+          const bp = parsePerPieceGrams(b.spec_raw)
+          if (ap != null && bp != null) {
+            const ad = Math.abs(ap - itemPerPieceG)
+            const bd = Math.abs(bp - itemPerPieceG)
+            if (ad !== bd) return ad - bd
+          }
+        }
+
         // 3) tax_type 일치 우선 (면세 검수 → 면세 후보 우선, 2026-05-11)
         if (a.tax_type && b.tax_type && a.tax_type !== b.tax_type) {
           if (a.tax_type === itemTaxType) return -1
@@ -2004,7 +2025,7 @@ function CandidatesAndSearchPanel({
       return 0
     })
     return list.slice(0, 10)
-  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemIsProcessedRef, itemTaxType, itemWeightG])
+  }, [candidates, sortMode, item, existingTotal, candidateConfidences, itemOrigin, itemPerPieceG, itemIsProcessedRef, itemTaxType, itemWeightG])
 
   // 검색 결과도 토큰 + origin 가중치로 정렬 (사용자 요청 — 매칭/후보/검색 모두 일관성)
   const sortedSearchResults = useMemo(() => {

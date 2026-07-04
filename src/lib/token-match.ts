@@ -69,6 +69,28 @@ export const GENERIC_MODIFIERS: Set<string> = new Set([
  *  3. 무게/부피 + 단위 패턴 (200g, 1kg, 280g/개)
  *  4. 다중 공백 정리
  */
+/**
+ * 개당중량(g) 파싱 — "개당" 키워드가 명시된 경우만 (2026-07-04)
+ *
+ * 검수 spec "KG(씻은_개당130∼200g_국내산)" ↔ 후보 spec_raw "1KG, 개당120g이상"의
+ * 개당중량 근접도로 랭킹하기 위한 순수 함수. 범위(130~200)는 중앙값 반환.
+ * "개당" 키워드가 없으면 총중량/용량을 개당으로 오인하지 않도록 null 반환.
+ *
+ * @example
+ *   parsePerPieceGrams('개당130∼200g')  // 165
+ *   parsePerPieceGrams('개당120g이상')   // 120
+ *   parsePerPieceGrams('1KG')           // null
+ */
+export function parsePerPieceGrams(text: string | null | undefined): number | null {
+  if (!text) return null
+  const m = text.match(/개당\s*(\d+)(?:\s*[~∼\-]\s*(\d+))?\s*g/i)
+  if (!m) return null
+  const lo = parseInt(m[1], 10)
+  const hi = m[2] ? parseInt(m[2], 10) : lo
+  if (Number.isNaN(lo)) return null
+  return (lo + (Number.isNaN(hi) ? lo : hi)) / 2
+}
+
 export function cleanProductQuery(q: string): string {
   if (!q) return ''
   let s = q
