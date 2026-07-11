@@ -19,6 +19,51 @@ export function normalizeItemName(s?: string | null): string {
 }
 
 /**
+ * 유사도 비교용 정규화 — 규격/포장/숫자단위/구분자를 제거해 "품목 본질명"만 남긴다.
+ *   "특등급국산콩콩나물_1kg(500g*2ea)" → "특등급국산콩콩나물"
+ *   "특등급국산콩나물_500g"            → "특등급국산콩나물"
+ */
+export function stripSpecName(s?: string | null): string {
+  return (s ?? '')
+    .replace(/\([^)]*\)/g, ' ') // 괄호 안 (규격/원산지)
+    .replace(/[0-9]+(\.[0-9]+)?\s*(kg|g|ml|l|ea|개|입|팩|봉|박스|매|절|호)\b/gi, ' ') // 숫자+단위
+    .replace(/[_/*×xX]+/g, ' ') // 구분자
+    .replace(/[0-9]+/g, ' ') // 남은 숫자
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+/** Levenshtein 편집거리 */
+function levenshtein(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  const dp = Array.from({ length: m + 1 }, (_, i) => i)
+  for (let j = 1; j <= n; j++) {
+    let prev = dp[0]
+    dp[0] = j
+    for (let i = 1; i <= m; i++) {
+      const tmp = dp[i]
+      dp[i] = a[i - 1] === b[j - 1] ? prev : Math.min(prev, dp[i], dp[i - 1]) + 1
+      prev = tmp
+    }
+  }
+  return dp[m]
+}
+
+/** 이름 유사도 (0~1). 규격 제거 후 편집거리 기반. 완전 동일 = 1 */
+export function nameSimilarity(a?: string | null, b?: string | null): number {
+  const x = stripSpecName(a)
+  const y = stripSpecName(b)
+  if (!x || !y) return 0
+  if (x === y) return 1
+  const dist = levenshtein(x, y)
+  return 1 - dist / Math.max(x.length, y.length)
+}
+
+/**
  * 확정된 source의 매칭을 전파할 대상 품목 id 목록을 반환한다.
  * 대상 = source와 품목명이 정확히 같고, 아직 미확정이며 비교불가가 아닌 품목.
  */
@@ -61,6 +106,59 @@ export function applyPropagation(
       ssg_confirmed: true,
       match_status: 'manual_matched' as const,
       is_excluded: false,
+    }
+  })
+}
+
+/** 유사 품목 제안 임계값 (규격 제거 후 이름 유사도) */
+export const SIMILAR_SUGGEST_THRESHOLD = 0.8
+
+/**
+ * 확정된 source와 **유사하지만 정확히 같지는 않은** 미확정·미매칭 품목 id 목록.
+ * 이들에는 매칭을 "제안"만 하고 확정은 사용자가 직접 한다(applySuggestions).
+ *   - 정확 일치는 제외(그건 applyPropagation이 자동 확정 처리)
+ *   - 이미 매칭이 있는 품목도 제외(사용자가 고른 매칭을 덮지 않음)
+ */
+export function findSimilarSuggestions(
+  items: ComparisonItem[],
+  sourceId: string,
+  threshold: number = SIMILAR_SUGGEST_THRESHOLD,
+): string[] {
+  const source = items.find((i) => i.id === sourceId)
+  if (!source || !source.ssg_match) return []
+  const exactKey = normalizeItemName(source.extracted_name)
+  return items
+    .filter(
+      (t) =>
+        t.id !== sourceId &&
+        t.is_confirmed !== true &&
+        t.is_excluded !== true &&
+        !t.ssg_match && // 아직 매칭 없는 품목만
+        normalizeItemName(t.extracted_name) !== exactKey && // 정확 일치는 propagation 담당
+        nameSimilarity(t.extracted_name, source.extracted_name) >= threshold,
+    )
+    .map((t) => t.id)
+}
+
+/**
+ * source의 매칭을 target들에 "제안"으로 적용 — ssg_match만 채우고 **미확정 유지**.
+ * 사용자가 검토 후 Confirm 버튼을 눌러야 최종 확정된다.
+ */
+export function applySuggestions(
+  items: ComparisonItem[],
+  sourceId: string,
+  targetIds: string[],
+): ComparisonItem[] {
+  const source = items.find((i) => i.id === sourceId)
+  if (!source || !source.ssg_match || targetIds.length === 0) return items
+  const targetSet = new Set(targetIds)
+  return items.map((item) => {
+    if (!targetSet.has(item.id)) return item
+    return {
+      ...item,
+      ssg_match: source.ssg_match,
+      match_status: 'auto_matched' as const, // 매칭됐으나 미확정(사용자 확정 대기)
+      // is_confirmed는 그대로 false — 최종 컨펌은 사용자가 누른다
     }
   })
 }
