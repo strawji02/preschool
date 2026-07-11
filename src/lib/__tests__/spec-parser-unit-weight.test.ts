@@ -52,6 +52,20 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
   it('괄호 없이 개당무게가 먼저 와도 kg 총량 우선: EA 개당±17.3G/1KG/10 → 1000', () => {
     expect(parseOrderUnit('EA 개당±17.3G/1KG/10').unitWeightG).toBe(1000)
   })
+
+  // (2026-07-05) 계란판 "N구,개당g" — 괄호 없이도 개당무게 × 구(개수) 산출
+  it('구 단위 + 괄호없음: EA 30구,52~60g_ → 30 × 56 = 1680', () => {
+    expect(parseOrderUnit('EA 30구,52~60g_').unitWeightG).toBe(1680)
+  })
+  it('구 단위 괄호형: EA 30구(52~60g) → 30 × 56 = 1680', () => {
+    expect(parseOrderUnit('EA 30구(52~60g)').unitWeightG).toBe(1680)
+  })
+  it('15구 계란판 BOX: BOX 15구,52~60g → 15 × 56 = 840', () => {
+    expect(parseOrderUnit('BOX 15구,52~60g').unitWeightG).toBe(840)
+  })
+  it('회귀: 괄호없는 단일무게 PK 500g → 500 (개수 없으면 개당=총량)', () => {
+    expect(parseOrderUnit('PK 500g').unitWeightG).toBe(500)
+  })
 })
 
 // (2026-07-05) 신세계 카드 단위중량 — 개수 단위 상품(spec_unit=개/EA)의 개당무게×개수

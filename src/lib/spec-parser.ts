@@ -472,68 +472,49 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
     }
   }
 
-  // 2. 괄호 안 참고 정보 추출: 개당 무게 / 팩당 개수
-  const inner = trimmed.match(/\(([^)]+)\)/)?.[1] ?? ''
+  // 2. 개당 무게 / 개수 추출 — (2026-07-05) 괄호가 없어도 전체 문자열에서 추출한다.
+  //   계란판 "30구,52~60g_"(괄호 없음)처럼 개당무게·개수가 괄호 밖에 있는 규격 대응.
+  const parseSrc = trimmed
 
-  // 개당 무게: "60~68g" → 평균 64, "85g" → 85, "약300g" → 300
-  const rangeMatch = inner.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g/i)
+  // 개당 무게: "52~60g" → 평균 56, "85g" → 85
+  const rangeMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
   if (rangeMatch) {
     result.perSizeG = (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2
   } else {
-    // g 뒤에 알파벳이 오지 않는 경우만 (kg 오매칭 방지). 언더스코어/한글/슬래시는 허용.
-    const singleG = inner.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
+    // g 뒤에 알파벳이 오지 않는 경우만 (kg 오매칭 방지).
+    const singleG = parseSrc.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
     if (singleG) {
       result.perSizeG = parseFloat(singleG[1])
     }
   }
 
-  // 팩당 개수: "30ea", "30개" — 뒤에 알파벳이 오지 않는 경우
-  const eaMatch = inner.match(/(\d+(?:\.\d+)?)\s*(ea|개|입)(?![a-z])/i)
+  // 팩/판당 개수: "30ea", "30개", "30구"(계란판) — 뒤에 알파벳이 오지 않는 경우
+  const eaMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*(ea|개|입|구)(?![a-z])/i)
   if (eaMatch) {
     result.perPackEa = parseFloat(eaMatch[1])
   }
 
-  // (2026-07-05) 괄호 밖 주 무게 — "EA 1kg(8±2g,90ea 이상)"·"PK 2kg(...)"에서 괄호 밖 "1kg"이
-  //   1 발주단위(1EA/1PK) 총 무게다. 괄호 안(8±2g/90ea)은 개당·구성 참고정보일 뿐이므로,
-  //   괄호 밖 무게가 있으면 그것을 최우선으로 쓴다. (없으면 기존 개당×개수 로직)
-  //   추출 규칙: kg 표기(총량 관례) 우선, 없으면 g 표기 중 최댓값(개당<총량 가정).
-  //   → "개당±17.3G/1KG" 처럼 개당무게가 먼저 와도 총량 1KG을 택한다.
+  // (2026-07-05) 괄호 밖 kg 총량 — "EA 1kg(8±2g,90ea)"·"EA 개당17.3G/1KG"에서 괄호 밖 "1kg"이
+  //   1 발주단위 총 무게. kg는 개당무게로 쓰이는 일이 없어(관례) 최우선 총량으로 택한다.
   const outer = trimmed.replace(/\([^)]*\)/g, ' ')
-  let outerWeightG: number | null = null
-  const outerKg = outer.match(/(\d+(?:\.\d+)?)\s*kg(?![a-z])/i)
-  if (outerKg) {
-    outerWeightG = parseFloat(outerKg[1]) * 1000
-  } else {
-    const gVals = [...outer.matchAll(/(\d+(?:\.\d+)?)\s*g(?![a-z])/gi)].map((m) => parseFloat(m[1]))
-    if (gVals.length > 0) outerWeightG = Math.max(...gVals)
-  }
+  const outerKgM = outer.match(/(\d+(?:\.\d+)?)\s*kg(?![a-z])/i)
+  const outerKg = outerKgM ? parseFloat(outerKgM[1]) * 1000 : null
 
-  // 3. 1 발주 단위당 무게(g) 산출
+  // 3. 1 발주 단위당 무게(g) 산출 — 우선순위: 괄호밖 kg > 개당무게×개수 > 개당무게
+  //   "30구,52~60g" → 56×30=1680, "1kg(8±2g,90ea)" → 1000(kg), "EA(85g)" → 85, "PK.(40g*72ea)" → 2880
   if (result.unitType === 'KG') {
-    // KG 발주: 괄호 안 개당 무게는 참고정보일 뿐, 1발주단위 = 1kg
     result.unitWeightG = 1000
-  } else if (result.unitType === 'EA') {
-    // 괄호 밖 무게(1EA 총량) 우선, 없으면 1개당 무게(perSizeG)
-    result.unitWeightG = outerWeightG ?? result.perSizeG
-  } else if (result.unitType === 'PK') {
-    if (outerWeightG !== null) {
-      // 괄호 밖 무게 = 1팩 총량 (예: "PK 2kg(...)")
-      result.unitWeightG = outerWeightG
+  } else if (
+    result.unitType === 'EA' ||
+    result.unitType === 'PK' ||
+    result.unitType === 'BOX'
+  ) {
+    if (outerKg !== null) {
+      result.unitWeightG = outerKg
     } else if (result.perSizeG !== null && result.perPackEa !== null) {
-      // 팩당 무게 = 개당무게 × 팩당개수
       result.unitWeightG = result.perSizeG * result.perPackEa
     } else if (result.perSizeG !== null) {
-      // 팩당 총 무게가 직접 표기된 경우 (예: "200g")
       result.unitWeightG = result.perSizeG
-    } else {
-      result.unitWeightG = null
-    }
-  } else if (result.unitType === 'BOX') {
-    // 박스당 무게: 괄호 밖 무게 우선, 없으면 내부 개수×무게
-    if (outerWeightG !== null) {
-      result.unitWeightG = outerWeightG
-    } else if (result.perSizeG !== null && result.perPackEa !== null) {
-      result.unitWeightG = result.perSizeG * result.perPackEa
     } else {
       result.unitWeightG = null
     }
