@@ -496,12 +496,16 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   // (2026-07-05) 괄호 밖 주 무게 — "EA 1kg(8±2g,90ea 이상)"·"PK 2kg(...)"에서 괄호 밖 "1kg"이
   //   1 발주단위(1EA/1PK) 총 무게다. 괄호 안(8±2g/90ea)은 개당·구성 참고정보일 뿐이므로,
   //   괄호 밖 무게가 있으면 그것을 최우선으로 쓴다. (없으면 기존 개당×개수 로직)
+  //   추출 규칙: kg 표기(총량 관례) 우선, 없으면 g 표기 중 최댓값(개당<총량 가정).
+  //   → "개당±17.3G/1KG" 처럼 개당무게가 먼저 와도 총량 1KG을 택한다.
   const outer = trimmed.replace(/\([^)]*\)/g, ' ')
-  const outerWMatch = outer.match(/(\d+(?:\.\d+)?)\s*(kg|g)(?![a-z])/i)
   let outerWeightG: number | null = null
-  if (outerWMatch) {
-    const val = parseFloat(outerWMatch[1])
-    outerWeightG = /kg/i.test(outerWMatch[2]) ? val * 1000 : val
+  const outerKg = outer.match(/(\d+(?:\.\d+)?)\s*kg(?![a-z])/i)
+  if (outerKg) {
+    outerWeightG = parseFloat(outerKg[1]) * 1000
+  } else {
+    const gVals = [...outer.matchAll(/(\d+(?:\.\d+)?)\s*g(?![a-z])/gi)].map((m) => parseFloat(m[1]))
+    if (gVals.length > 0) outerWeightG = Math.max(...gVals)
   }
 
   // 3. 1 발주 단위당 무게(g) 산출

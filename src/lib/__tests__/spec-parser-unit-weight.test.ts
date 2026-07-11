@@ -49,6 +49,10 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
     expect(parseOrderUnit('PK.(40g*72ea)').unitWeightG).toBe(2880)
   })
 
+  it('괄호 없이 개당무게가 먼저 와도 kg 총량 우선: EA 개당±17.3G/1KG/10 → 1000', () => {
+    expect(parseOrderUnit('EA 개당±17.3G/1KG/10').unitWeightG).toBe(1000)
+  })
+
   it('PK.(개당60~68g/30ea_국내산): 개당 평균64g × 30ea = 1920g/팩', () => {
     const r = parseOrderUnit('PK.(개당60~68g/30ea_국내산)')
     expect(r.unitType).toBe('PK')
