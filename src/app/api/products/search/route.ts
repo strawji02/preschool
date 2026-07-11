@@ -73,29 +73,41 @@ export async function GET(request: NextRequest) {
     // 예: "햇살가득고춧가루" → suffix "고춧가루" 식별 → expand("고춧가루") 동의어 그룹
     //     "냉동참기름" → suffix "참기름" 식별
     // FOOD_SYNONYMS 직접 순회 — REVERSE_SYNONYMS module-level IIFE 의존성 회피
-    let expandKeyword =
-      meaningfulCleanTokens.length === 1 ? meaningfulCleanTokens[0] : forKeyword
-    if (meaningfulCleanTokens.length === 1 && meaningfulCleanTokens[0].length >= 4) {
-      const token = meaningfulCleanTokens[0]
-      let bestKey: string | null = null
-      let bestLen = 0
-      // FOOD_SYNONYMS의 모든 키와 동의어 값을 후보로
-      for (const [stdKey, syns] of Object.entries(FOOD_SYNONYMS)) {
-        const allKeys = [stdKey, ...syns]
-        for (const key of allKeys) {
-          if (key.length >= 2 && key.length > bestLen) {
-            if (token === key || token.endsWith(key) || token.startsWith(key)) {
-              bestLen = key.length
-              bestKey = key
+    let synonymTerms: string[]
+    if (meaningfulCleanTokens.length === 1) {
+      let expandKeyword = meaningfulCleanTokens[0]
+      if (meaningfulCleanTokens[0].length >= 4) {
+        const token = meaningfulCleanTokens[0]
+        let bestKey: string | null = null
+        let bestLen = 0
+        // FOOD_SYNONYMS의 모든 키와 동의어 값을 후보로
+        for (const [stdKey, syns] of Object.entries(FOOD_SYNONYMS)) {
+          const allKeys = [stdKey, ...syns]
+          for (const key of allKeys) {
+            if (key.length >= 2 && key.length > bestLen) {
+              if (token === key || token.endsWith(key) || token.startsWith(key)) {
+                bestLen = key.length
+                bestKey = key
+              }
             }
           }
         }
+        if (bestKey && bestKey !== token) expandKeyword = bestKey
       }
-      if (bestKey && bestKey !== token) {
-        expandKeyword = bestKey
+      synonymTerms = expandWithSynonyms(expandKeyword)
+    } else if (meaningfulCleanTokens.length > 1) {
+      // (2026-07-05) 다중 의미토큰은 각각 동의어 확장 후 합집합 — "목초란 대란"처럼 두 토큰이
+      //   모두 계란 동의어인데 통짜("목초란 대란")로 expand해 실패하던 문제. 각 토큰
+      //   (목초란→계란, 대란→계란)을 확장해 "계란"이 검색어에 포함되게 한다.
+      const set = new Set<string>()
+      for (const tok of meaningfulCleanTokens) {
+        set.add(tok)
+        for (const s of expandWithSynonyms(tok)) set.add(s)
       }
+      synonymTerms = [...set]
+    } else {
+      synonymTerms = expandWithSynonyms(forKeyword)
     }
-    const synonymTerms = expandWithSynonyms(expandKeyword)
     // (2026-05-11) slice 3 → 8로 확장 — 동의어가 많은 케이스 (멸치 시리즈, 쌀 시리즈 등)에서
     // 5번째 이후 동의어 (예: 국멸치, 다시멸치, 육수용멸치)가 BM25 검색에 포함되어 직접 매칭
     // (2026-07-04) 동의어 없을 때 fallback을 forKeyword(브랜드 포함) 대신 브랜드 제거된
