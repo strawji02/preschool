@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseOrderUnit } from '../spec-parser'
+import { parseOrderUnit, ssgUnitWeightG, perPieceGramsFromSpec } from '../spec-parser'
 
 /**
  * 발주 단위(KG/EA/PK/BOX)별 "1 발주 단위당 무게(g)" 계산 테스트
@@ -51,6 +51,34 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
 
   it('괄호 없이 개당무게가 먼저 와도 kg 총량 우선: EA 개당±17.3G/1KG/10 → 1000', () => {
     expect(parseOrderUnit('EA 개당±17.3G/1KG/10').unitWeightG).toBe(1000)
+  })
+})
+
+// (2026-07-05) 신세계 카드 단위중량 — 개수 단위 상품(spec_unit=개/EA)의 개당무게×개수
+describe('ssgUnitWeightG — 신세계 상품 단위중량', () => {
+  it('무게단위(KG): spec_quantity가 총량 — 계란 대란 1.68KG → 1680', () => {
+    expect(ssgUnitWeightG(1.68, 'KG', '1.68KG, 52~60G*30EA')).toBe(1680)
+  })
+  it('무게단위(G): 모두부 340G → 340', () => {
+    expect(ssgUnitWeightG(340, 'G', '340G, 대두 국산')).toBe(340)
+  })
+  it('개수단위(개): 유정란 15개 × 개당56g(52~60) → 840', () => {
+    expect(ssgUnitWeightG(15, '개', '15개, 52~60G/개')).toBe(840)
+  })
+  it('개수단위(EA): 1EA × 개당200g → 200', () => {
+    expect(ssgUnitWeightG(1, 'EA', 'EA, 개당 200g')).toBe(200)
+  })
+  it('개수단위인데 개당무게 없으면 0', () => {
+    expect(ssgUnitWeightG(15, '개', '15개')).toBe(0)
+  })
+  it('수량/단위 없으면 0', () => {
+    expect(ssgUnitWeightG(undefined, 'KG', '1KG')).toBe(0)
+  })
+
+  it('perPieceGramsFromSpec: 범위 평균 / 단일 / 없음', () => {
+    expect(perPieceGramsFromSpec('52~60G/개')).toBe(56)
+    expect(perPieceGramsFromSpec('개당 200g')).toBe(200)
+    expect(perPieceGramsFromSpec('15개')).toBeNull()
   })
 
   it('PK.(개당60~68g/30ea_국내산): 개당 평균64g × 30ea = 1920g/팩', () => {

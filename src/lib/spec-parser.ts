@@ -543,6 +543,41 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
 }
 
 /**
+ * 규격 텍스트에서 "개당 무게(g)"를 추출한다.
+ *   "15개, 52~60G/개" → 56 (52~60 평균)
+ *   "EA, 개당 200g"   → 200
+ *   무게 표기가 없으면 null.
+ */
+export function perPieceGramsFromSpec(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  const range = raw.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g/i)
+  if (range) return (parseFloat(range[1]) + parseFloat(range[2])) / 2
+  const single = raw.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
+  return single ? parseFloat(single[1]) : null
+}
+
+/**
+ * 신세계 상품의 1 단위(발주단위) 무게(g)를 산출한다.
+ *   - spec_unit이 무게/부피(KG/G/L/ML)면 spec_quantity가 곧 총량
+ *   - 개수 단위(개/EA/팩/BOX 등)면 spec_raw의 개당무게 × spec_quantity(개수)
+ *     예) 계란 유정란 "15개, 52~60G/개", q=15, u='개' → 56 × 15 = 840g
+ *   산출 불가 시 0.
+ */
+export function ssgUnitWeightG(
+  specQuantity: number | null | undefined,
+  specUnit: string | null | undefined,
+  specRaw: string | null | undefined,
+): number {
+  if (!specQuantity || !specUnit) return 0
+  const u = specUnit.toUpperCase()
+  if (u === 'KG' || u === 'L') return specQuantity * 1000
+  if (u === 'G' || u === 'ML') return specQuantity
+  // 개수 단위 — 개당무게 × 개수
+  const per = perPieceGramsFromSpec(specRaw)
+  return per ? Math.round(per * specQuantity) : 0
+}
+
+/**
  * 규격 비교 (정규화된 값 기준)
  *
  * @param spec1 첫 번째 규격

@@ -23,7 +23,7 @@ import { formatCurrency, formatNumber, formatWeight } from '@/lib/format'
 import {
   parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
-import { parseOrderUnit } from '@/lib/spec-parser'
+import { parseOrderUnit, ssgUnitWeightG } from '@/lib/spec-parser'
 import type { ReferenceProduct } from '@/lib/naver-shopping'
 import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
 import {
@@ -1632,13 +1632,9 @@ function ShinsegaeMatching({
     if (item.adjusted_unit_weight_g) {
       setUnitWeightG(item.adjusted_unit_weight_g)
     } else if (ssgMatch.spec_quantity && ssgMatch.spec_unit) {
-      const u = ssgMatch.spec_unit.toUpperCase()
-      let g = 0
-      if (u === 'KG') g = ssgMatch.spec_quantity * 1000
-      else if (u === 'G') g = ssgMatch.spec_quantity
-      else if (u === 'L') g = ssgMatch.spec_quantity * 1000
-      else if (u === 'ML') g = ssgMatch.spec_quantity
-      setUnitWeightG(g)
+      // (2026-07-05) 개수 단위(개/EA/팩) 상품은 spec_raw의 개당무게 × 개수로 산출.
+      //   예: 유정란 "15개, 52~60G/개" q=15 u=개 → 56×15=840g (기존엔 0으로 미표시).
+      setUnitWeightG(ssgUnitWeightG(ssgMatch.spec_quantity, ssgMatch.spec_unit, ssgMatch.spec_raw))
     } else {
       setUnitWeightG(0)
     }
