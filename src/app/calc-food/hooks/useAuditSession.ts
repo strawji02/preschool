@@ -6,6 +6,7 @@ import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 import { estimateSsgTotal } from '@/lib/unit-conversion'
+import { findPropagationTargets, applyPropagation } from '@/lib/match-propagation'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
@@ -165,6 +166,7 @@ type AuditAction =
   | { type: 'SET_STEP'; step: AnalysisStep }
   | { type: 'SELECT_CANDIDATE'; itemId: string; supplier: Supplier; candidate: SupplierMatch }
   | { type: 'CONFIRM_ITEM'; itemId: string; supplier?: Supplier; adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string } }  // supplier + 정밀 검수 조정값
+  | { type: 'PROPAGATE_MATCH'; sourceItemId: string; targetIds: string[] }  // 동일 품목명 자동 매칭 전파 (2026-07-05)
   | { type: 'CONFIRM_ALL_AUTO_MATCHED' }
   | { type: 'AUTO_EXCLUDE_UNMATCHED' }
   | { type: 'PROCEED_TO_REPORT' }
@@ -689,6 +691,12 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         items: newItems,
         stats: calculateStats(newItems),
       }
+    }
+
+    case 'PROPAGATE_MATCH': {
+      // 확정된 source의 매칭을 동일 품목명 미확정 품목에 복사 + 확정 (재작업 제거)
+      const newItems = applyPropagation(state.items, action.sourceItemId, action.targetIds)
+      return { ...state, items: newItems, stats: calculateStats(newItems) }
     }
 
     case 'CONFIRM_ALL_AUTO_MATCHED': {
@@ -1670,8 +1678,32 @@ export function useAuditSession() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }).catch((e) => console.warn('confirmItem DB 저장 실패:', e))
+
+      // (2026-07-05) 동일 품목명 자동 매칭 전파 — 신세계 확정 시 같은 품목명 미확정 품목도
+      //   동일 상품으로 자동 매칭·확정해 반복 확정(재작업)을 없앤다. 정확 일치·미확정·비제외만.
+      if (supplier === 'SHINSEGAE') {
+        const source = state.items.find((i) => i.id === itemId)
+        const targetIds = findPropagationTargets(state.items, itemId)
+        if (source?.ssg_match && targetIds.length > 0) {
+          dispatch({ type: 'PROPAGATE_MATCH', sourceItemId: itemId, targetIds })
+          const matchBody = {
+            matched_product_id: source.ssg_match.id,
+            standard_price: source.ssg_match.standard_price,
+            match_score: source.ssg_match.match_score,
+            match_status: 'manual_matched',
+            is_excluded: false,
+          }
+          for (const tid of targetIds) {
+            void fetch(`/api/audit-items/${tid}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(matchBody),
+            }).catch((e) => console.warn('동일품목 전파 저장 실패:', e))
+          }
+        }
+      }
     },
-    [],
+    [state.items],
   )
 
   const confirmAllAutoMatched = useCallback(() => {
