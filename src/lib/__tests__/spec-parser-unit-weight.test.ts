@@ -33,6 +33,22 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
     expect(r.unitWeightG).toBe(200)
   })
 
+  // (2026-07-05) 괄호 밖 주 무게 = 1 발주단위 총량 — 괄호 안은 개당/구성 참고정보
+  it('EA 1kg(8±2g,90ea 이상): 1팩(EA)=1kg — 괄호 밖 무게 우선 (개당 8g 아님)', () => {
+    const r = parseOrderUnit('EA 1kg(8±2g,90ea 이상)')
+    expect(r.unitType).toBe('EA')
+    expect(r.unitWeightG).toBe(1000) // 괄호 안 "2g" 오인 방지
+  })
+
+  it('EA 2kg(약50개입): 1팩=2kg (괄호 밖 무게 우선)', () => {
+    const r = parseOrderUnit('EA 2kg(약50개입)')
+    expect(r.unitWeightG).toBe(2000)
+  })
+
+  it('회귀: PK.(40g*72ea)는 괄호 밖 무게 없음 → 40×72=2880 유지', () => {
+    expect(parseOrderUnit('PK.(40g*72ea)').unitWeightG).toBe(2880)
+  })
+
   it('PK.(개당60~68g/30ea_국내산): 개당 평균64g × 30ea = 1920g/팩', () => {
     const r = parseOrderUnit('PK.(개당60~68g/30ea_국내산)')
     expect(r.unitType).toBe('PK')

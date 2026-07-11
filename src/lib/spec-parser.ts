@@ -493,15 +493,29 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
     result.perPackEa = parseFloat(eaMatch[1])
   }
 
+  // (2026-07-05) 괄호 밖 주 무게 — "EA 1kg(8±2g,90ea 이상)"·"PK 2kg(...)"에서 괄호 밖 "1kg"이
+  //   1 발주단위(1EA/1PK) 총 무게다. 괄호 안(8±2g/90ea)은 개당·구성 참고정보일 뿐이므로,
+  //   괄호 밖 무게가 있으면 그것을 최우선으로 쓴다. (없으면 기존 개당×개수 로직)
+  const outer = trimmed.replace(/\([^)]*\)/g, ' ')
+  const outerWMatch = outer.match(/(\d+(?:\.\d+)?)\s*(kg|g)(?![a-z])/i)
+  let outerWeightG: number | null = null
+  if (outerWMatch) {
+    const val = parseFloat(outerWMatch[1])
+    outerWeightG = /kg/i.test(outerWMatch[2]) ? val * 1000 : val
+  }
+
   // 3. 1 발주 단위당 무게(g) 산출
   if (result.unitType === 'KG') {
     // KG 발주: 괄호 안 개당 무게는 참고정보일 뿐, 1발주단위 = 1kg
     result.unitWeightG = 1000
   } else if (result.unitType === 'EA') {
-    // 1개당 무게 = perSizeG
-    result.unitWeightG = result.perSizeG
+    // 괄호 밖 무게(1EA 총량) 우선, 없으면 1개당 무게(perSizeG)
+    result.unitWeightG = outerWeightG ?? result.perSizeG
   } else if (result.unitType === 'PK') {
-    if (result.perSizeG !== null && result.perPackEa !== null) {
+    if (outerWeightG !== null) {
+      // 괄호 밖 무게 = 1팩 총량 (예: "PK 2kg(...)")
+      result.unitWeightG = outerWeightG
+    } else if (result.perSizeG !== null && result.perPackEa !== null) {
       // 팩당 무게 = 개당무게 × 팩당개수
       result.unitWeightG = result.perSizeG * result.perPackEa
     } else if (result.perSizeG !== null) {
@@ -511,8 +525,10 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
       result.unitWeightG = null
     }
   } else if (result.unitType === 'BOX') {
-    // 박스당 무게 미상 (내부 개수/무게 없으면 산출 불가)
-    if (result.perSizeG !== null && result.perPackEa !== null) {
+    // 박스당 무게: 괄호 밖 무게 우선, 없으면 내부 개수×무게
+    if (outerWeightG !== null) {
+      result.unitWeightG = outerWeightG
+    } else if (result.perSizeG !== null && result.perPackEa !== null) {
       result.unitWeightG = result.perSizeG * result.perPackEa
     } else {
       result.unitWeightG = null
