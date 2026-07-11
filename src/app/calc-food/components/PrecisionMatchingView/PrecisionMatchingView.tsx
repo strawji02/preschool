@@ -25,6 +25,7 @@ import {
 } from '@/lib/unit-conversion'
 import { parseOrderUnit } from '@/lib/spec-parser'
 import type { ReferenceProduct } from '@/lib/naver-shopping'
+import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
@@ -47,6 +48,8 @@ interface PrecisionMatchingViewProps {
   onProceedToReport: () => void
   /** 개별 품목 비교불가 토글 (2026-07-04) — 확정 품목도 검토 중 비교불가 처리 가능 */
   onToggleExclude?: (itemId: string, reason?: string) => void
+  /** 상이 매칭 충돌 통일 (2026-07-05) — 동일 품목명 그룹을 선택 상품으로 일괄 재확정 */
+  onResolveConflict?: (nameKey: string, chosenProductId: string) => void
   onReload?: () => void
   /** 거래명세표 재확인/수정 모달 트리거 (2026-05-10) */
   onOpenInvoiceReview?: () => void
@@ -334,11 +337,15 @@ export function PrecisionMatchingView({
   onAutoExcludeUnmatched,
   onProceedToReport,
   onToggleExclude,
+  onResolveConflict,
   onReload,
   onOpenInvoiceReview,
 }: PrecisionMatchingViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
+  // (2026-07-05) 동일 품목명·상이 확정매칭 충돌 감지 + 통일 모달
+  const conflicts = useMemo(() => findMatchConflicts(items), [items])
+  const [conflictOpen, setConflictOpen] = useState(false)
   // (2026-05-11) 좌측 패널의 정렬된 visible idx 동기화 (가나다/금액순 정렬 반영)
   // ItemListPanel이 자체 sort 후 이 ref를 업데이트 → Confirm 시 부모가 정렬 순서대로 다음 idx 결정
   const sortedVisibleIndicesRef = useRef<number[]>([])
@@ -524,6 +531,16 @@ export function PrecisionMatchingView({
               </span>
             )
           })()}
+          {/* (2026-07-05) 동일 품목명 상이 매칭 충돌 경고 */}
+          {onResolveConflict && conflicts.length > 0 && (
+            <button
+              onClick={() => setConflictOpen(true)}
+              className="ml-2 inline-flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-2.5 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100"
+              title="동일 품목명이 서로 다른 신세계 상품으로 확정됨 — 확인 후 통일"
+            >
+              ⚠️ 상이 매칭 {conflicts.length}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">필터:</span>
@@ -709,6 +726,14 @@ export function PrecisionMatchingView({
         onPageChange={setPdfCurrentPage}
         highlightRowIndex={selectedIndex}
       />
+
+      {conflictOpen && onResolveConflict && (
+        <MatchConflictModal
+          conflicts={conflicts}
+          onResolve={onResolveConflict}
+          onClose={() => setConflictOpen(false)}
+        />
+      )}
 
       <KeyboardHandler
         onPrev={moveToPrev}
@@ -1344,6 +1369,79 @@ function FinanceCardCompact({
 /* (2026-07-04, Phase 1) 검수자가 수동으로 하던 "품명 웹검색 → 이미지 */
 /*   확인 → 시중가 점검"을 자동화. 온디맨드 버튼으로만 조회.          */
 /* ────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 상이 매칭 충돌 통일 모달 (2026-07-05)                          */
+/*   동일 품목명이 다른 신세계 상품으로 확정된 그룹을 보여주고,      */
+/*   사용자가 올바른 상품을 선택하면 그룹 전체를 통일 재확정한다.    */
+/* ────────────────────────────────────────────────────────── */
+function MatchConflictModal({
+  conflicts,
+  onResolve,
+  onClose,
+}: {
+  conflicts: MatchConflict[]
+  onResolve: (nameKey: string, productId: string) => void
+  onClose: () => void
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">⚠️ 동일 품목 · 상이 매칭 {conflicts.length}건</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
+            <X size={20} />
+          </button>
+        </div>
+        <p className="mb-4 text-sm text-gray-500">
+          같은 품목명이 서로 다른 신세계 상품으로 확정됐습니다. 올바른 상품을 눌러 그룹 전체를 통일하세요.
+          <span className="text-gray-400"> (실제 다른 품목이면 그대로 두세요)</span>
+        </p>
+        <div className="space-y-4">
+          {conflicts.map((c) => (
+            <div key={c.nameKey} className="rounded-lg border border-gray-200 p-3">
+              <div className="mb-2 font-semibold text-gray-800">
+                {c.displayName} <span className="text-xs font-normal text-gray-400">· 총 {c.totalItems}건</span>
+              </div>
+              <div className="space-y-1.5">
+                {c.options.map((o) => (
+                  <div
+                    key={o.productId}
+                    className="flex items-center justify-between gap-2 rounded border border-gray-100 bg-gray-50 px-2.5 py-1.5"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700">
+                      {o.productName || o.productId} <span className="text-gray-400">×{o.count}</span>
+                      {o.productId === c.majorityProductId && (
+                        <span className="ml-1 rounded bg-blue-100 px-1 py-0.5 text-[10px] font-medium text-blue-700">
+                          다수
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => {
+                        onResolve(c.nameKey, o.productId)
+                        onClose()
+                      }}
+                      className="shrink-0 rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                    >
+                      이 상품으로 통일
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function WebReferencePanel({
   state,
   onSearch,

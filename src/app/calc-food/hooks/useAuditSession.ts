@@ -6,7 +6,7 @@ import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 import { estimateSsgTotal } from '@/lib/unit-conversion'
-import { findPropagationTargets, applyPropagation, findSimilarSuggestions, applySuggestions } from '@/lib/match-propagation'
+import { findPropagationTargets, applyPropagation, findSimilarSuggestions, applySuggestions, normalizeItemName } from '@/lib/match-propagation'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
@@ -1913,6 +1913,36 @@ export function useAuditSession() {
   }, [])
 
   // 비교 제외 토글 ─ 2026-04-21
+  // (2026-07-05) 상이 매칭 충돌 해결 — 동일 품목명 그룹을 선택한 상품으로 일괄 통일 재확정.
+  //   chosen 상품을 가진 확정 품목을 source로, 그룹 내 다른 상품 품목을 target으로 전파.
+  const resolveConflict = useCallback((nameKey: string, chosenProductId: string) => {
+    const source = state.items.find(
+      (i) => i.is_confirmed && i.ssg_match?.id === chosenProductId && normalizeItemName(i.extracted_name) === nameKey,
+    )
+    if (!source?.ssg_match) return
+    const targetIds = state.items
+      .filter(
+        (i) => i.is_confirmed && normalizeItemName(i.extracted_name) === nameKey && i.ssg_match?.id !== chosenProductId,
+      )
+      .map((i) => i.id)
+    if (targetIds.length === 0) return
+    dispatch({ type: 'PROPAGATE_MATCH', sourceItemId: source.id, targetIds })
+    const body = {
+      matched_product_id: source.ssg_match.id,
+      standard_price: source.ssg_match.standard_price,
+      match_score: source.ssg_match.match_score,
+      match_status: 'manual_matched',
+      is_excluded: false,
+    }
+    for (const tid of targetIds) {
+      void fetch(`/api/audit-items/${tid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch((e) => console.warn('충돌 통일 저장 실패:', e))
+    }
+  }, [state.items])
+
   const toggleExclude = useCallback((itemId: string, reason?: string) => {
     // (2026-07-04 fix) 기존엔 dispatch만 하고 DB 저장을 안 해 비교불가 처리가 유실됐다
     //   (새로고침·다음 단계에서 is_excluded=false로 복귀 → 총액검증 "비교 불가"에 미반영).
@@ -1965,6 +1995,7 @@ export function useAuditSession() {
     // 업체명 수정 / 비교 제외 (2026-04-21 추가)
     updateSupplierName,
     toggleExclude,
+    resolveConflict,
     // 엑셀 담당자 확인 단계 (2026-04-21 추가)
     confirmAndAnalyzeExcel,
     updateExcelPreviewItem,

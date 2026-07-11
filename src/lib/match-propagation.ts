@@ -110,6 +110,69 @@ export function applyPropagation(
   })
 }
 
+/* ────────────────────────────────────────────────────────── */
+/* 상이 매칭 충돌 감지 (2026-07-05)                              */
+/*   동일 품목명인데 서로 다른 신세계 상품으로 확정된 경우를 찾아   */
+/*   사용자에게 알리고 하나로 통일(수정 컨펌)할 수 있게 한다.       */
+/* ────────────────────────────────────────────────────────── */
+
+export interface MatchConflictOption {
+  productId: string
+  productName: string
+  itemIds: string[]
+  count: number
+}
+export interface MatchConflict {
+  nameKey: string // 정규화 품목명 (그룹 키)
+  displayName: string // 대표 표시명(원본)
+  options: MatchConflictOption[] // count 내림차순
+  majorityProductId: string // 다수결 상품(기본 추천)
+  totalItems: number
+}
+
+/**
+ * 동일 품목명인데 확정 매칭 상품이 2개 이상으로 갈린 그룹을 반환한다.
+ *   - 확정(is_confirmed) + 매칭(ssg_match) 품목만 대상
+ *   - 정규화 품목명으로 그룹 → 상품 id가 여러 개면 충돌
+ *   - options는 건수 내림차순, majority = 최다 건수 상품(동수 시 첫 번째)
+ */
+export function findMatchConflicts(items: ComparisonItem[]): MatchConflict[] {
+  const groups = new Map<string, { display: string; byProduct: Map<string, MatchConflictOption> }>()
+  for (const it of items) {
+    if (it.is_confirmed !== true || !it.ssg_match?.id) continue
+    const key = normalizeItemName(it.extracted_name)
+    if (!key) continue
+    let g = groups.get(key)
+    if (!g) {
+      g = { display: it.extracted_name, byProduct: new Map() }
+      groups.set(key, g)
+    }
+    const pid = it.ssg_match.id
+    let opt = g.byProduct.get(pid)
+    if (!opt) {
+      opt = { productId: pid, productName: it.ssg_match.product_name ?? '', itemIds: [], count: 0 }
+      g.byProduct.set(pid, opt)
+    }
+    opt.itemIds.push(it.id)
+    opt.count += 1
+  }
+
+  const conflicts: MatchConflict[] = []
+  for (const [key, g] of groups) {
+    if (g.byProduct.size < 2) continue // 상품이 하나면 충돌 아님
+    const options = [...g.byProduct.values()].sort((a, b) => b.count - a.count)
+    conflicts.push({
+      nameKey: key,
+      displayName: g.display,
+      options,
+      majorityProductId: options[0].productId,
+      totalItems: options.reduce((s, o) => s + o.count, 0),
+    })
+  }
+  // 충돌 심한 순(갈린 상품 수 → 건수)
+  return conflicts.sort((a, b) => b.options.length - a.options.length || b.totalItems - a.totalItems)
+}
+
 /** 유사 품목 제안 임계값 (규격 제거 후 이름 유사도) */
 export const SIMILAR_SUGGEST_THRESHOLD = 0.8
 

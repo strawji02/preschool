@@ -89,6 +89,7 @@ export default function CalcFoodPage() {
     clearExcelPreview,
     // 비교 제외 / 업체명 수정 (2026-04-21)
     toggleExclude,
+    resolveConflict,
     updateSupplierName,
     // PDF/이미지 담당자 확인 (2026-04-23)
     confirmImagePreview,
@@ -220,6 +221,7 @@ export default function CalcFoodPage() {
               onAutoExcludeUnmatched={autoExcludeUnmatched}
               onProceedToReport={proceedToReport}
               onToggleExclude={toggleExclude}
+              onResolveConflict={resolveConflict}
               onReload={() => state.sessionId && loadSession(state.sessionId)}
               onOpenInvoiceReview={() => setInvoiceModalOpen(true)}
             />
