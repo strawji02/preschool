@@ -150,6 +150,17 @@ describe('골든셋: 브랜드 노이즈 제거 (매실청 백설 → 매실청)
   })
 })
 
+describe('골든셋: 통짜 어류 분해 + 계란 동의어 (2026-07-05)', () => {
+  it('한번얼린고등어토막 → "고등어" 독립 토큰 (통짜 recall 복구)', () => {
+    const t = cleanProductQuery('한번얼린고등어토막').split(/\s+/).filter(Boolean)
+    expect(t).toContain('고등어')
+  })
+  it('목초란·대란 → 계란 동의어 확장', () => {
+    expect(expandWithSynonyms('대란')).toContain('계란')
+    expect(expandWithSynonyms('목초란')).toContain('계란')
+  })
+})
+
 describe('골든셋: 동의어 상호 확장', () => {
   it('홍두깨 ↔ 우둔', () => {
     expect(expandWithSynonyms('홍두깨')).toContain('우둔')
