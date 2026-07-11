@@ -504,6 +504,26 @@ export function PrecisionMatchingView({
               📄 명세표 재확인
             </button>
           )}
+          {/* (2026-07-05) 매칭 진행 상황 — 확정 수량 / 전체 수량.
+              완료 판정은 "미확정(비제외) 0" 기준 — 비교불가가 있어도 남은 검토가 없으면 완료. */}
+          {(() => {
+            const pending = items.filter((i) => !i.is_confirmed && !i.is_excluded).length
+            const done = pending === 0
+            return (
+              <span
+                className={cn(
+                  'ml-2 inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm font-semibold',
+                  done
+                    ? 'border-green-300 bg-green-50 text-green-700'
+                    : 'border-blue-200 bg-blue-50 text-blue-700',
+                )}
+                title="확정 수량 / 전체 품목 수량 (미확정이 0이면 완료)"
+              >
+                {done ? '✓' : '⏳'} 확정{' '}
+                <strong className="font-bold">{kpi.confirmed}</strong> / {kpi.total}
+              </span>
+            )
+          })()}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">필터:</span>
