@@ -54,7 +54,8 @@ export function ReportView({
   const [initialExtras, setInitialExtras] = useState<Record<string, unknown> | null>(null)
   // (2026-05-16) 공급율 — 신세계 견적에 곱하는 배율 (1.0 = 원가, 1.25 = 25% 마진 등)
   // 변경 절감액 = 기존 - (신세계 × supplyRate)
-  const [supplyRate, setSupplyRate] = useState<number>(1.0)
+  // (2026-07-05) 기본값 1.25 — 25% 마진 디폴트. 사용자가 SupplyRateInput에서 수정 가능.
+  const [supplyRate, setSupplyRate] = useState<number>(1.25)
   useEffect(() => {
     if (!sessionId) return
     fetch(`/api/sessions/${sessionId}`)
@@ -63,9 +64,9 @@ export function ReportView({
         if (data.success && data.session?.proposal_extras) {
           const extras = data.session.proposal_extras as Record<string, unknown>
           setInitialExtras(extras)
-          // 공급율 복원
-          const sr = typeof extras.supply_rate === 'number' ? extras.supply_rate : 1.0
-          setSupplyRate(sr > 0 ? sr : 1.0)
+          // 공급율 복원 — 저장값 있으면 그 값(사용자 수정 유지), 없으면 기본 1.25
+          const sr = typeof extras.supply_rate === 'number' ? extras.supply_rate : 1.25
+          setSupplyRate(sr > 0 ? sr : 1.25)
         }
       })
       .catch((e) => console.warn('proposal_extras 로드 실패:', e))
@@ -329,9 +330,9 @@ function SupplyRateInput({
         />
         {active && (
           <button
-            onClick={() => onChange(1.0)}
+            onClick={() => onChange(1.25)}
             className="rounded-md border border-gray-300 px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
-            title="공급율 초기화 (1.0)"
+            title="공급율 초기화 (1.25)"
           >
             ↺
           </button>
