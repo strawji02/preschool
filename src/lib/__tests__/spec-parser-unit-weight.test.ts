@@ -66,6 +66,22 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
   it('회귀: 괄호없는 단일무게 PK 500g → 500 (개수 없으면 개당=총량)', () => {
     expect(parseOrderUnit('PK 500g').unitWeightG).toBe(500)
   })
+
+  // (2026-07-16) 계란 왕란 "30EA/2,040g" — 콤마 천단위 + 총량 케이스
+  //   버그: 콤마로 "2,040"이 "040→40g"으로 읽혀 40×30=1200g(1.2kg)로 오산.
+  //   정답: 2,040g은 30알 팩의 총량 → 1발주 EA = 2040g (×30 하면 안 됨)
+  it('콤마 천단위 총량: EA 30EA/2,040g이상 → 2040 (40×30 아님, 총량)', () => {
+    expect(parseOrderUnit('EA 30EA/2,040g이상').unitWeightG).toBe(2040)
+  })
+  it('콤마 천단위 총량(이상 없음): EA 30EA/2,040g → 2040', () => {
+    expect(parseOrderUnit('EA 30EA/2,040g').unitWeightG).toBe(2040)
+  })
+  it('회귀: 개당무게(소)×개수는 그대로 곱 — PK.(40g*72ea) → 2880', () => {
+    expect(parseOrderUnit('PK.(40g*72ea)').unitWeightG).toBe(2880)
+  })
+  it('회귀: 개당무게 범위×개수는 그대로 — EA 30구,52~60g → 1680', () => {
+    expect(parseOrderUnit('EA 30구,52~60g').unitWeightG).toBe(1680)
+  })
 })
 
 // (2026-07-05) 신세계 카드 단위중량 — 개수 단위 상품(spec_unit=개/EA)의 개당무게×개수

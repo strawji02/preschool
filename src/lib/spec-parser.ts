@@ -474,12 +474,16 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
 
   // 2. 개당 무게 / 개수 추출 — (2026-07-05) 괄호가 없어도 전체 문자열에서 추출한다.
   //   계란판 "30구,52~60g_"(괄호 없음)처럼 개당무게·개수가 괄호 밖에 있는 규격 대응.
-  const parseSrc = trimmed
+  // (2026-07-16) 천단위 콤마 제거 — "2,040g"이 "040→40g"으로 잘려 읽히던 버그 방지.
+  //   숫자 사이 콤마만 제거(예: 2,040→2040). 다른 콤마(구분자)는 보존.
+  const parseSrc = trimmed.replace(/(\d),(?=\d)/g, '$1')
 
-  // 개당 무게: "52~60g" → 평균 56, "85g" → 85
+  // 개당 무게: "52~60g" → 평균 56, "85g" → 85. (범위인지 여부는 총량/개당 판정에 사용)
+  let perSizeFromRange = false
   const rangeMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
   if (rangeMatch) {
     result.perSizeG = (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2
+    perSizeFromRange = true
   } else {
     // g 뒤에 알파벳이 오지 않는 경우만 (kg 오매칭 방지).
     const singleG = parseSrc.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
@@ -493,6 +497,16 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   if (eaMatch) {
     result.perPackEa = parseFloat(eaMatch[1])
   }
+
+  // (2026-07-16) 단일 대용량 그램값은 "팩 총량"으로 판정 — "30EA/2,040g"의 2040g은
+  //   개당(68g)이 아니라 30알 팩 총량. 개당무게가 범위가 아니고 1000g 이상이면서
+  //   개수가 함께 있으면 총량으로 보고 ×개수를 하지 않는다.
+  //   (범위 "52~60g"·소량 "40g*72ea"는 개당이므로 영향 없음)
+  const perSizeIsPackTotal =
+    !perSizeFromRange &&
+    result.perSizeG !== null &&
+    result.perSizeG >= 1000 &&
+    result.perPackEa !== null
 
   // (2026-07-05) 괄호 밖 kg 총량 — "EA 1kg(8±2g,90ea)"·"EA 개당17.3G/1KG"에서 괄호 밖 "1kg"이
   //   1 발주단위 총 무게. kg는 개당무게로 쓰이는 일이 없어(관례) 최우선 총량으로 택한다.
@@ -511,6 +525,9 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   ) {
     if (outerKg !== null) {
       result.unitWeightG = outerKg
+    } else if (perSizeIsPackTotal) {
+      // "30EA/2,040g" — 2040g이 팩 총량이므로 ×개수 하지 않음
+      result.unitWeightG = result.perSizeG
     } else if (result.perSizeG !== null && result.perPackEa !== null) {
       result.unitWeightG = result.perSizeG * result.perPackEa
     } else if (result.perSizeG !== null) {
