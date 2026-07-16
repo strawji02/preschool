@@ -1455,28 +1455,56 @@ function WebReferencePanel({
     items: ReferenceProduct[]
     error?: string
   }
-  onSearch: () => void
+  onSearch: (q?: string) => void
   query?: string | null
   invoiceUnitPrice?: number | null
 }) {
   const { loading, loaded, configured, items, error } = state
+  // (2026-07-16) 사용자 직접 검색어 입력 — 기본값은 품명, 자유롭게 수정 후 검색 가능
+  const [term, setTerm] = useState<string>(query ?? '')
+  // 품목 전환 시 입력창을 새 품명으로 리셋
+  useEffect(() => {
+    setTerm(query ?? '')
+  }, [query])
+  const runSearch = () => {
+    const q = term.trim()
+    if (!q || loading) return
+    onSearch(q)
+  }
   return (
     <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-gray-600">🔎 시중 참고 (네이버 쇼핑)</span>
+      </div>
+
+      {/* 직접 검색어 입력 — 품명이 애매하면 브랜드·규격을 빼거나 다르게 입력해 재검색 */}
+      <div className="mb-2 flex items-center gap-1.5">
+        <input
+          type="text"
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              runSearch()
+            }
+          }}
+          placeholder="검색어 입력 (예: 두부 300g)"
+          className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-emerald-500"
+        />
         <button
           type="button"
-          onClick={onSearch}
-          disabled={loading}
+          onClick={runSearch}
+          disabled={loading || !term.trim()}
           className="shrink-0 rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
         >
-          {loading ? '검색 중…' : loaded ? '다시 검색' : '시중 상품 찾기'}
+          {loading ? '검색 중…' : loaded ? '다시 검색' : '검색'}
         </button>
       </div>
 
       {!loaded && !loading && (
         <p className="text-[11px] text-gray-400">
-          &ldquo;{query}&rdquo; 품명으로 시중 상품 이미지·최저가를 조회합니다.
+          검색어를 확인·수정한 뒤 <b>검색</b>을 누르면 시중 상품 이미지·최저가를 조회합니다.
         </p>
       )}
 
@@ -1596,8 +1624,9 @@ function ShinsegaeMatching({
   useEffect(() => {
     setRefState({ loading: false, loaded: false, configured: true, items: [] })
   }, [item.id])
-  const loadReference = useCallback(async () => {
-    const q = item.extracted_name?.trim()
+  const loadReference = useCallback(async (queryOverride?: string) => {
+    // 사용자가 입력창에 직접 입력한 검색어(queryOverride)가 있으면 우선, 없으면 품명
+    const q = (queryOverride ?? item.extracted_name)?.trim()
     if (!q) return
     setRefState((s) => ({ ...s, loading: true, error: undefined }))
     try {
