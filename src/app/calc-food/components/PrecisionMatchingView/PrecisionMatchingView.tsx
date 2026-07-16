@@ -1535,6 +1535,22 @@ function WebReferencePanel({
                 href={r.link || undefined}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => {
+                  // (2026-07-16) 새 탭이 아니라 새 창(팝업 윈도우)으로 열기.
+                  //   window.open에 width/height 등 창 속성을 주면 브라우저가 탭이 아닌
+                  //   별도 창으로 연다. Cmd/Ctrl+클릭 등은 기본 동작(새 탭) 유지.
+                  if (!r.link || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                  e.preventDefault()
+                  const w = 1000
+                  const h = 800
+                  const left = Math.max(0, (window.screen.width - w) / 2)
+                  const top = Math.max(0, (window.screen.height - h) / 2)
+                  window.open(
+                    r.link,
+                    '_blank',
+                    `noopener,noreferrer,popup=yes,width=${w},height=${h},left=${left},top=${top}`,
+                  )
+                }}
                 className="flex gap-2 rounded border border-gray-200 bg-white p-1.5 transition hover:border-emerald-400 hover:shadow-sm"
               >
                 {r.imageUrl ? (
