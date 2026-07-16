@@ -566,13 +566,39 @@ export function ssgUnitWeightG(
   specUnit: string | null | undefined,
   specRaw: string | null | undefined,
 ): number {
-  if (!specQuantity || !specUnit) return 0
-  const u = specUnit.toUpperCase()
-  if (u === 'KG' || u === 'L') return specQuantity * 1000
-  if (u === 'G' || u === 'ML') return specQuantity
-  // 개수 단위 — 개당무게 × 개수
-  const per = perPieceGramsFromSpec(specRaw)
-  return per ? Math.round(per * specQuantity) : 0
+  const u = (specUnit ?? '').toUpperCase()
+  // 무게/부피 단위 — spec_quantity가 곧 총량
+  if (specQuantity && (u === 'KG' || u === 'L')) return specQuantity * 1000
+  if (specQuantity && (u === 'G' || u === 'ML')) return specQuantity
+
+  // 개수 단위 — spec_raw의 그램값 사용
+  const g = perPieceGramsFromSpec(specRaw)
+  if (!g) return 0
+
+  // (2026-07-16) 그램값이 "개당"인지 "총량"인지 구분:
+  //   - 개당 표기("52~60G/개", "개당 200g")가 있으면 → 개당무게 × 개수
+  //   - 없으면("3EA_500~600G") → 그램값 자체가 팩 총량 → ×개수 하지 않음
+  //   구분 안 하면 총량형(새송이 3EA 550g)을 550×3=1650으로 과대계산.
+  const hasPerPieceMarker = /개당|\/\s*개|\/\s*구|\/\s*입|\/\s*알|\/\s*ea|\/\s*pcs/i.test(specRaw ?? '')
+  if (!hasPerPieceMarker) return Math.round(g)
+
+  //   개수: 낱개 단위(개/구/입/알/EA)면 spec_quantity, 아니면(팩/판…) spec_raw의 "N개" 파싱.
+  //   (매칭 스냅샷에 spec_quantity가 팩수(1)이거나 빠져 blank가 되던 문제 대응)
+  const PIECE_UNITS = new Set(['개', '구', '입', '알', 'EA', 'PCS'])
+  const countFromRaw = pieceCountFromSpec(specRaw)
+  const count =
+    specQuantity && PIECE_UNITS.has(u) ? specQuantity : (countFromRaw ?? specQuantity ?? 1)
+  return count > 0 ? Math.round(g * count) : 0
+}
+
+/**
+ * 규격 텍스트에서 낱개 개수(N개/구/입/알/ea)를 추출한다.
+ *   "15개, 52~60G/개" → 15,  "30구,52~60g" → 30,  "52~60G/개"(개수없음) → null
+ */
+export function pieceCountFromSpec(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  const m = raw.match(/(\d+(?:\.\d+)?)\s*(개|구|입|알|ea|pcs)(?![a-z가-힣])/i)
+  return m ? parseFloat(m[1]) : null
 }
 
 /**

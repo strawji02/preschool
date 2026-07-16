@@ -1662,10 +1662,13 @@ function ShinsegaeMatching({
     // 검수자 조정값이 명시적으로 있으면 우선 (Confirm 후 다시 진입한 케이스)
     if (item.adjusted_unit_weight_g) {
       setUnitWeightG(item.adjusted_unit_weight_g)
-    } else if (ssgMatch.spec_quantity && ssgMatch.spec_unit) {
+    } else if (ssgMatch.spec_quantity || ssgMatch.spec_unit || ssgMatch.spec_raw || matchDetail?.spec_raw) {
       // (2026-07-05) 개수 단위(개/EA/팩) 상품은 spec_raw의 개당무게 × 개수로 산출.
       //   예: 유정란 "15개, 52~60G/개" q=15 u=개 → 56×15=840g (기존엔 0으로 미표시).
-      setUnitWeightG(ssgUnitWeightG(ssgMatch.spec_quantity, ssgMatch.spec_unit, ssgMatch.spec_raw))
+      // (2026-07-16) 매칭 스냅샷(ssg_match)에 spec_raw가 누락되면 최신 상세조회(matchDetail)의
+      //   spec_raw로 폴백 — 개당무게·개수를 못 구해 단위중량이 blank로 나오던 문제 대응.
+      const rawForWeight = ssgMatch.spec_raw ?? matchDetail?.spec_raw
+      setUnitWeightG(ssgUnitWeightG(ssgMatch.spec_quantity, ssgMatch.spec_unit, rawForWeight))
     } else {
       setUnitWeightG(0)
     }
@@ -1674,7 +1677,7 @@ function ShinsegaeMatching({
     setHighlightSpec(true)
     const t = setTimeout(() => setHighlightSpec(false), 1200)
     return () => clearTimeout(t)
-  }, [ssgMatch?.id, ssgMatch?.spec_quantity, ssgMatch?.spec_unit, item.adjusted_unit_weight_g, item.adjusted_pack_unit])
+  }, [ssgMatch?.id, ssgMatch?.spec_quantity, ssgMatch?.spec_unit, ssgMatch?.spec_raw, matchDetail?.spec_raw, item.adjusted_unit_weight_g, item.adjusted_pack_unit])
 
   // 자동 환산 버튼 — 검수 총량 ÷ 신세계 단위중량 = 발주수량 자동 계산 (2026-05-10)
   const handleAutoQuantity = () => {

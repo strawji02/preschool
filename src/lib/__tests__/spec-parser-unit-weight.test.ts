@@ -105,6 +105,28 @@ describe('ssgUnitWeightG — 신세계 상품 단위중량', () => {
     expect(ssgUnitWeightG(undefined, 'KG', '1KG')).toBe(0)
   })
 
+  // (2026-07-16) 신세계 단위중량 blank 버그 — spec_quantity가 개수를 뜻하지 않거나(팩/판)
+  //   누락된 경우, spec_raw 안의 "N개" 개수를 파싱해 개당×개수로 산출해야 함.
+  it('팩단위 + spec_raw에 개수: (1, 팩, "15개, 52~60G/개") → 56×15=840', () => {
+    expect(ssgUnitWeightG(1, '팩', '15개, 52~60G/개')).toBe(840)
+  })
+  it('spec_quantity 누락 + spec_raw 개수: (undefined, 개, "15개, 52~60G/개") → 840', () => {
+    expect(ssgUnitWeightG(undefined, '개', '15개, 52~60G/개')).toBe(840)
+  })
+  it('판(30구) + spec_raw 개수: (1, 판, "30개, 52~60G/개") → 56×30=1680', () => {
+    expect(ssgUnitWeightG(1, '판', '30개, 52~60G/개')).toBe(1680)
+  })
+  it('회귀: 조각단위 spec_quantity 우선 — (15, 개, "15개, 52~60G/개") → 840', () => {
+    expect(ssgUnitWeightG(15, '개', '15개, 52~60G/개')).toBe(840)
+  })
+  // (2026-07-16) 개당 표기(/개·개당) 없으면 g는 "팩 총량" — ×개수 하지 않음
+  it('총량형(개당표기 없음): (3, EA, "3EA_500~600G 내외") → 550 (×3 아님, 총량)', () => {
+    expect(ssgUnitWeightG(3, 'EA', '3EA_500~600G 내외')).toBe(550)
+  })
+  it('총량형 단일EA: (1, EA, "1EA, 500~718G") → 609 (범위 평균, 총량)', () => {
+    expect(ssgUnitWeightG(1, 'EA', '1EA, 500~718G')).toBe(609)
+  })
+
   it('perPieceGramsFromSpec: 범위 평균 / 단일 / 없음', () => {
     expect(perPieceGramsFromSpec('52~60G/개')).toBe(56)
     expect(perPieceGramsFromSpec('개당 200g')).toBe(200)
