@@ -2099,6 +2099,18 @@ function ShinsegaeMatching({
                 <CheckCircle2 size={14} /> Confirm
               </button>
             </div>
+
+            {/* (2026-07-16) 매칭된 상태에서도 시중 참고 검색 — 신세계 상품이 매칭돼 있어도
+                검수자가 시중가(네이버 쇼핑)를 교차 확인할 수 있게 하단에 검색 패널 노출.
+                매칭 없을 때(!ssgMatch)의 패널과 동일 컴포넌트·상태(refState/loadReference) 공유. */}
+            <div className="mt-2">
+              <WebReferencePanel
+                state={refState}
+                onSearch={loadReference}
+                query={item.extracted_name}
+                invoiceUnitPrice={item.extracted_unit_price}
+              />
+            </div>
           </>
         )}
       </div>
