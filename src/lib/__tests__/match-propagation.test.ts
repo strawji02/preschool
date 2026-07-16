@@ -42,18 +42,20 @@ describe('normalizeItemName', () => {
   })
 })
 
-describe('findPropagationTargets — 동일 품목명 미확정만', () => {
+describe('findPropagationTargets — 동일 품목명 미확정 (비교불가 포함)', () => {
   const items = [
     item({ id: 'src', name: '특등급국산콩콩나물_1kg', confirmed: true, matched: true }), // 방금 확정한 source
     item({ id: 'a', name: '특등급국산콩콩나물_1kg' }), // 동일명 미확정 → 대상
     item({ id: 'b', name: '특등급국산콩콩나물_1kg', confirmed: true }), // 이미 확정 → 제외
-    item({ id: 'c', name: '특등급국산콩콩나물_1kg', excluded: true }), // 비교불가 → 제외
+    item({ id: 'c', name: '특등급국산콩콩나물_1kg', excluded: true }), // 비교불가 동일명 → 대상(매칭+해제)
     item({ id: 'd', name: '특등급국산콩나물_500g' }), // 이름 다름 → 제외
     item({ id: 'e', name: '  특등급국산콩콩나물_1kg  ' }), // 공백만 다름 → 대상
   ]
 
-  it('동일명 미확정·비제외만 대상 (a, e)', () => {
-    expect(findPropagationTargets(items, 'src').sort()).toEqual(['a', 'e'])
+  // (2026-07-16) 동일 품명이면 비교불가(is_excluded)여도 전파 대상.
+  //   비교불가는 대개 "매칭 못 찾음"이라 붙은 것 — 쌍둥이가 확정되면 함께 매칭·해제돼야 함.
+  it('동일명 미확정은 비교불가 포함 대상 (a, c, e), 확정된 b만 제외', () => {
+    expect(findPropagationTargets(items, 'src').sort()).toEqual(['a', 'c', 'e'])
   })
 
   it('source가 매칭 없으면 전파 안 함', () => {

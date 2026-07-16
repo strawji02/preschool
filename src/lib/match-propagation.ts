@@ -10,7 +10,9 @@ import type { ComparisonItem } from '@/types/audit'
  * 안전장치:
  *   - 품목명 **정확 일치**(공백/대소문자 정규화)만 대상 — 오매칭 방지
  *   - 이미 확정된 품목은 건드리지 않음(사용자가 다른 매칭을 골랐을 수 있음)
- *   - 비교불가(is_excluded)로 명시 제외한 품목도 건드리지 않음
+ *   - (2026-07-16) 비교불가(is_excluded)는 대상에 **포함** — 대개 "매칭 못 찾음"으로
+ *     붙은 상태이므로, 동일 품명 쌍둥이가 확정되면 함께 매칭·비교불가 해제한다.
+ *     (applyPropagation이 is_excluded=false로 되돌린다)
  */
 
 /** 품목명 정규화 — 앞뒤 공백 제거 + 연속 공백 1칸 + 소문자 */
@@ -65,7 +67,8 @@ export function nameSimilarity(a?: string | null, b?: string | null): number {
 
 /**
  * 확정된 source의 매칭을 전파할 대상 품목 id 목록을 반환한다.
- * 대상 = source와 품목명이 정확히 같고, 아직 미확정이며 비교불가가 아닌 품목.
+ * 대상 = source와 품목명이 정확히 같고, 아직 미확정인 품목.
+ *   (2026-07-16) 비교불가(is_excluded)도 대상 — 동일 품명이면 함께 매칭·해제한다.
  */
 export function findPropagationTargets(items: ComparisonItem[], sourceId: string): string[] {
   const source = items.find((i) => i.id === sourceId)
@@ -77,7 +80,6 @@ export function findPropagationTargets(items: ComparisonItem[], sourceId: string
       (t) =>
         t.id !== sourceId &&
         t.is_confirmed !== true &&
-        t.is_excluded !== true &&
         normalizeItemName(t.extracted_name) === key,
     )
     .map((t) => t.id)
