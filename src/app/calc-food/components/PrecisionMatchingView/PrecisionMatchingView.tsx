@@ -1169,7 +1169,9 @@ function ExistingItemDetail({
   )
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-white shadow-sm">
+    // (2026-07-16) flex-1 제거 — 카드가 내용 높이에만 맞도록(shrink-0). 남는 세로 공간은
+    //   아래 신세계 매칭 패널이 사용. 기존엔 flex-1로 상단을 다 채워 빈 공간이 컸음.
+    <section className="flex min-h-0 shrink-0 flex-col rounded-xl border bg-white shadow-sm">
       {/* 헤더 — 타이틀 + 출처 클릭 버튼 (모달 트리거) */}
       <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-sm font-semibold text-gray-700">
         <div className="flex shrink-0 items-center gap-2">
@@ -1223,7 +1225,7 @@ function ExistingItemDetail({
           )
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-3 py-2">
+      <div className="px-3 py-2">
         {/* 제품명 + 규격/단위 chips (출처 제거 — 헤더로 이동) */}
         {/* (2026-07-04) 품명 맨 앞 거래명세표 순번(#N) — 좌측 리스트 #{idx+1}과 동일 체계 */}
         <h3 className="flex items-baseline gap-2 break-words text-2xl font-bold leading-tight text-gray-900">
