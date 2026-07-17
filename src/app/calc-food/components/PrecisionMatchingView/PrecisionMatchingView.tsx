@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   ArrowLeft, ArrowRight, ChevronDown, Search, Package, Loader2, AlertTriangle,
   FileImage, CheckCircle2, CheckCircle, Tag, MapPin, Snowflake, Boxes, X, RefreshCw,
-  ExternalLink, MessageSquare, Ban, Eye,
+  ExternalLink, MessageSquare, Ban, Eye, Copy, Check,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { ComparisonItem, SupplierMatch, Supplier } from '@/types/audit'
@@ -1463,6 +1463,66 @@ function MatchConflictModal({
   )
 }
 
+/* (2026-07-16) 상품명 복사 버튼 — AI 후보/검색결과가 <button>이라 내부 텍스트를
+   드래그 선택·복사할 수 없어(클릭=선택 트리거), 클립보드 복사 버튼을 제공한다.
+   부모가 <button>이므로 중첩 <button> 금지 → span[role=button]으로 구현하고
+   stopPropagation으로 부모 onSelect가 안 터지게 한다. */
+function CopyNameButton({ text, dark = false }: { text: string; dark?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const doCopy = (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const write =
+      navigator.clipboard?.writeText(text) ??
+      Promise.reject(new Error('clipboard unavailable'))
+    write
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1200)
+      })
+      .catch(() => {
+        // 클립보드 API 미지원/차단 시 폴백 — 임시 textarea + execCommand
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = text
+          ta.style.position = 'fixed'
+          ta.style.opacity = '0'
+          document.body.appendChild(ta)
+          ta.select()
+          document.execCommand('copy')
+          document.body.removeChild(ta)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1200)
+        } catch {
+          /* noop */
+        }
+      })
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={doCopy}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') doCopy(e)
+      }}
+      title="상품명 복사 (네이버 검색용)"
+      aria-label="상품명 복사"
+      className={cn(
+        'inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium transition',
+        copied
+          ? 'bg-emerald-500 text-white'
+          : dark
+          ? 'text-gray-300 ring-1 ring-white/20 hover:bg-white/10 hover:text-white'
+          : 'text-gray-500 ring-1 ring-gray-300 hover:bg-gray-100 hover:text-gray-800',
+      )}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? '복사됨' : '복사'}
+    </span>
+  )
+}
+
 function WebReferencePanel({
   state,
   onSearch,
@@ -2638,7 +2698,10 @@ function CandidatesAndSearchPanel({
                         )}
                       </div>
                     </div>
-                    <span className="self-center text-[11px] font-medium text-blue-300 underline">선택</span>
+                    <div className="flex shrink-0 flex-col items-end justify-between gap-1 py-0.5">
+                      <span className="text-[11px] font-medium text-blue-300 underline">선택</span>
+                      <CopyNameButton text={r.product_name} dark />
+                    </div>
                   </button>
                 )
               })}
@@ -2748,6 +2811,8 @@ function CandidateCard({
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1">
               {/* (2026-07-04) 코드는 이미지 자리 아래로 이동해 모든 후보에 크게 표시. 여기선 상태 배지만. */}
+              {/* (2026-07-16) 상품명 복사 — 네이버 검색용 */}
+              <CopyNameButton text={candidate.product_name} />
               {isSelected && (
                 <span className="inline-flex rounded bg-blue-600 px-1.5 py-0 text-[10px] font-semibold text-white">
                   현재 매칭
