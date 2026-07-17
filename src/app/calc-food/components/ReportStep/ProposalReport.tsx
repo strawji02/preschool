@@ -11,8 +11,9 @@
  * - PDF 출력: window.print() + @media print
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Printer, Loader2, Save, FileText, ArrowLeft } from 'lucide-react'
+import { Printer, Loader2, Save, FileText, FileBarChart2, ArrowLeft } from 'lucide-react'
 import { downloadProposalPptx } from './proposal-pptx'
+import { downloadProfitReportPptx } from './profit-pptx'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import {
@@ -469,6 +470,28 @@ export function ProposalReport({
     }
   }
 
+  // 영업자 손익 보고서 PPT — 파트너 예상 수익 = 신세계 공급 연매출 × 배분율(15%)
+  const [profitLoading, setProfitLoading] = useState(false)
+  const handleDownloadProfit = async () => {
+    setProfitLoading(true)
+    try {
+      await downloadProfitReportPptx({
+        proposedTo,
+        period,
+        annualSupplyRevenue: annualSsgCost,
+        annualSavings,
+        savingsPercent,
+        childrenCount,
+        ssgPeriod: ssgPeriod ?? undefined,
+      })
+    } catch (e) {
+      console.error('손익 보고서 다운로드 실패:', e)
+      alert('손익 보고서 다운로드 실패: ' + (e instanceof Error ? e.message : 'Unknown'))
+    } finally {
+      setProfitLoading(false)
+    }
+  }
+
   return (
     <div className="bg-gray-100 print:bg-white">
       {/* 인쇄 시 숨김: 액션 툴바 */}
@@ -498,10 +521,20 @@ export function ProposalReport({
           <button
             onClick={handleDownloadPptx}
             disabled={pptxLoading}
+            title="유치원 원장 제출용 급식 제안서 (2페이지 · 편집 가능)"
             className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 disabled:opacity-60"
           >
             {pptxLoading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
-            PPT 다운로드 (편집 가능)
+            ① 유치원 제출용 제안서
+          </button>
+          <button
+            onClick={handleDownloadProfit}
+            disabled={profitLoading}
+            title="급식을 공급하는 영업자용 예상 손익 보고서 (1페이지 · 편집 가능)"
+            className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-100 disabled:opacity-60"
+          >
+            {profitLoading ? <Loader2 size={16} className="animate-spin" /> : <FileBarChart2 size={16} />}
+            ② 영업자 손익 보고서
           </button>
           <button
             onClick={handlePrint}
