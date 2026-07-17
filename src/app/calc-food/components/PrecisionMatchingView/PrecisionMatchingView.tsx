@@ -1084,12 +1084,22 @@ function ItemListPanel({
                    - 코드 배지: 더 큰 폰트 (10→11px) + 두꺼운 grid weight + tracking
                    - 품목명: 12px → 13px, 더 넓은 영역 (수량·단가가 위로 이동해 확보된 여백 활용) */}
                 {hasMatch && it.ssg_match && (
-                  <div className="mt-1.5 flex items-center gap-2 rounded-md border-l-[3px] border-blue-500 bg-blue-50/80 px-2 py-1.5">
+                  // (2026-07-16) 비교불가면 검토했던 신세계 상품을 "정상 매칭"이 아니라
+                  //   "검토 후 제외됨"으로 구분 표시 — 회색 톤·취소선·절감배지 제거·제외 라벨.
+                  //   정보(무엇을 검토했는지)는 남기되 정상 매칭과 시각적으로 확실히 구분.
+                  <div
+                    className={cn(
+                      'mt-1.5 flex items-center gap-2 rounded-md border-l-[3px] px-2 py-1.5',
+                      isExcluded ? 'border-gray-300 bg-gray-100' : 'border-blue-500 bg-blue-50/80',
+                    )}
+                  >
                     {it.ssg_match.product_code && (
                       <span
                         className={cn(
                           'inline-flex shrink-0 items-center rounded px-2 py-0.5 font-mono text-[11px] font-bold tracking-wider shadow-sm',
-                          it.is_confirmed
+                          isExcluded
+                            ? 'bg-gray-400 text-white'
+                            : it.is_confirmed
                             ? 'bg-blue-600 text-white'
                             : 'bg-amber-500 text-white',
                         )}
@@ -1098,20 +1108,29 @@ function ItemListPanel({
                       </span>
                     )}
                     <span
-                      className="min-w-0 flex-1 truncate text-[13px] font-medium text-blue-900"
+                      className={cn(
+                        'min-w-0 flex-1 truncate text-[13px] font-medium',
+                        isExcluded ? 'text-gray-400 line-through' : 'text-blue-900',
+                      )}
                       title={it.ssg_match.product_name || ''}
                     >
                       {it.ssg_match.product_name || '신세계 매칭'}
                     </span>
-                    {sav !== 0 && (
-                      <span
-                        className={cn(
-                          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold',
-                          isSaving ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700',
-                        )}
-                      >
-                        {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))}
+                    {isExcluded ? (
+                      <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">
+                        검토 후 비교 제외
                       </span>
+                    ) : (
+                      sav !== 0 && (
+                        <span
+                          className={cn(
+                            'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                            isSaving ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700',
+                          )}
+                        >
+                          {isSaving ? '▼' : '▲'} {formatCurrency(Math.abs(sav))}
+                        </span>
+                      )
                     )}
                   </div>
                 )}
