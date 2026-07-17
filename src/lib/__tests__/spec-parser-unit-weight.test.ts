@@ -82,6 +82,19 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
   it('회귀: 개당무게 범위×개수는 그대로 — EA 30구,52~60g → 1680', () => {
     expect(parseOrderUnit('EA 30구,52~60g').unitWeightG).toBe(1680)
   })
+
+  // (2026-07-16) 미니꿀호떡 "400G*6EA/BOX", 단위 EA — 400g짜리 EA가 박스당 6개.
+  //   버그: 6EA를 "한 EA 안의 개수"로 오인해 400×6=2400g(2.4kg)로 오산.
+  //   정답: 주문단위(EA)와 세는 단위(EA)가 같으면 6은 상자 묶음수 → 1EA=400g.
+  it('주문EA + N EA/BOX: EA 400G*6EA/BOX → 400 (×6 아님, 1EA당)', () => {
+    expect(parseOrderUnit('EA 400G*6EA/BOX').unitWeightG).toBe(400)
+  })
+  it('주문BOX + N EA: BOX 400G*6EA → 2400 (박스=6EA 곱함)', () => {
+    expect(parseOrderUnit('BOX 400G*6EA').unitWeightG).toBe(2400)
+  })
+  it('주문EA + 입 개수는 곱함: EA 25g*16입/400g → 400 (25×16)', () => {
+    expect(parseOrderUnit('EA 25g*16입/400g').unitWeightG).toBe(400)
+  })
 })
 
 // (2026-07-05) 신세계 카드 단위중량 — 개수 단위 상품(spec_unit=개/EA)의 개당무게×개수

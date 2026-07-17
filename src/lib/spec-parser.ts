@@ -494,9 +494,15 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
 
   // 팩/판당 개수: "30ea", "30개", "30구"(계란판) — 뒤에 알파벳이 오지 않는 경우
   const eaMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*(ea|개|입|구)(?![a-z])/i)
+  const eaUnitTok = eaMatch?.[2]?.toLowerCase() ?? null
   if (eaMatch) {
     result.perPackEa = parseFloat(eaMatch[1])
   }
+
+  // (2026-07-16) 주문단위와 "세는 단위"가 같으면 곱하지 않는다.
+  //   "EA 400G*6EA/BOX"(단위 EA): 6EA는 "박스당 EA 수"지 "1EA 안의 개수"가 아니므로
+  //   1 EA = 400g (×6 하면 박스 총량 2400g으로 오산). 세는 단위가 입/구/개면 내부 개수라 곱함.
+  const countedSameAsOrderUnit = result.unitType === 'EA' && eaUnitTok === 'ea'
 
   // (2026-07-16) 단일 대용량 그램값은 "팩 총량"으로 판정 — "30EA/2,040g"의 2040g은
   //   개당(68g)이 아니라 30알 팩 총량. 개당무게가 범위가 아니고 1000g 이상이면서
@@ -528,7 +534,7 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
     } else if (perSizeIsPackTotal) {
       // "30EA/2,040g" — 2040g이 팩 총량이므로 ×개수 하지 않음
       result.unitWeightG = result.perSizeG
-    } else if (result.perSizeG !== null && result.perPackEa !== null) {
+    } else if (result.perSizeG !== null && result.perPackEa !== null && !countedSameAsOrderUnit) {
       result.unitWeightG = result.perSizeG * result.perPackEa
     } else if (result.perSizeG !== null) {
       result.unitWeightG = result.perSizeG
