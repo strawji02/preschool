@@ -95,6 +95,20 @@ describe('parseOrderUnit — 발주 단위별 단위당 무게', () => {
   it('주문EA + 입 개수는 곱함: EA 25g*16입/400g → 400 (25×16)', () => {
     expect(parseOrderUnit('EA 25g*16입/400g').unitWeightG).toBe(400)
   })
+
+  // (2026-07-17) 짜요딸기요구르트 "40ML*6EA", 단위 PAK — 40mL짜리 6개가 1팩.
+  //   버그1: PAK 단위 미인식(별칭에 pak 없음) → unitType null.
+  //   버그2: ML 개당용량 미파싱(g만 인식) → 40g으로 잘못 산출(×6 누락).
+  //   정답: 40 × 6 = 240 (mL은 1:1 g 취급, 신세계 40G*6개=240g과 일치).
+  it('PAK + N ML*M EA: PAK 40ML*6EA → 240 (40×6, ml=g)', () => {
+    expect(parseOrderUnit('PAK 40ML*6EA').unitWeightG).toBe(240)
+  })
+  it('PK 소문자 ml: PK 40ml*6ea → 240', () => {
+    expect(parseOrderUnit('PK 40ml*6ea').unitWeightG).toBe(240)
+  })
+  it('회귀: ml 단일(개수 없음) PK 200ml → 200', () => {
+    expect(parseOrderUnit('PK 200ml').unitWeightG).toBe(200)
+  })
 })
 
 // (2026-07-05) 신세계 카드 단위중량 — 개수 단위 상품(spec_unit=개/EA)의 개당무게×개수

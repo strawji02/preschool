@@ -432,7 +432,7 @@ export interface OrderUnitInfo {
 const ORDER_UNIT_ALIASES: Array<{ type: string; patterns: RegExp }> = [
   { type: 'KG', patterns: /^\s*kg\b/i },
   { type: 'BOX', patterns: /^\s*(box|박스|상자)\b/i },
-  { type: 'PK', patterns: /^\s*(pk|pack|팩)\b/i },
+  { type: 'PK', patterns: /^\s*(pk|pak|pack|팩)\b/i },
   { type: 'EA', patterns: /^\s*(ea|개|입)\b/i },
 ]
 
@@ -478,15 +478,16 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   //   숫자 사이 콤마만 제거(예: 2,040→2040). 다른 콤마(구분자)는 보존.
   const parseSrc = trimmed.replace(/(\d),(?=\d)/g, '$1')
 
-  // 개당 무게: "52~60g" → 평균 56, "85g" → 85. (범위인지 여부는 총량/개당 판정에 사용)
+  // 개당 무게/용량: "52~60g" → 평균 56, "85g" → 85, "40ml" → 40. (범위인지 여부는 총량/개당 판정에 사용)
+  //   (2026-07-17) ml도 개당용량으로 인식 — "40ML*6EA"(요구르트 6입팩)의 40을 개당으로 잡아 ×6 하기 위함.
+  //   ml은 1:1로 g 취급(unitToGrams·신세계 40G*6 규칙과 일치). "g|ml" 뒤 알파벳 금지로 kg 오매칭 방지.
   let perSizeFromRange = false
-  const rangeMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
+  const rangeMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*[~～\-]\s*(\d+(?:\.\d+)?)\s*(?:g|ml)(?![a-z])/i)
   if (rangeMatch) {
     result.perSizeG = (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2
     perSizeFromRange = true
   } else {
-    // g 뒤에 알파벳이 오지 않는 경우만 (kg 오매칭 방지).
-    const singleG = parseSrc.match(/(\d+(?:\.\d+)?)\s*g(?![a-z])/i)
+    const singleG = parseSrc.match(/(\d+(?:\.\d+)?)\s*(?:g|ml)(?![a-z])/i)
     if (singleG) {
       result.perSizeG = parseFloat(singleG[1])
     }
