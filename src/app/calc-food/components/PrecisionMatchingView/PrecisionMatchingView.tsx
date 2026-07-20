@@ -26,6 +26,9 @@ import {
 import { parseOrderUnit, ssgUnitWeightG } from '@/lib/spec-parser'
 import type { ReferenceProduct } from '@/lib/naver-shopping'
 import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
+import { computeMatchingKpi } from '@/lib/matching-kpi'
+import { useSupplyRate } from '../../hooks/useSupplyRate'
+import { SupplyRateInput } from '../ReportStep/SupplyRateInput'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
   normalizeOrigin, originMatchScore, isProcessedProduct, cleanProductQuery, recoverOrigin,
@@ -359,6 +362,9 @@ export function PrecisionMatchingView({
   const [rematchResult, setRematchResult] = useState<{ rematched: number; stillUnmatched: number; total: number } | null>(null)
   // 매칭 제품 상세 (부모로 끌어올려 양쪽 패널의 commonTokens 계산용)
   const [matchDetail, setMatchDetail] = useState<ProductDetail | null>(null)
+  // 공급율 — 최종 보고서(ReportView)와 공유 (proposal_extras.supply_rate). 기본 1.25.
+  // (2026-07-21) 매칭 화면에서도 공급율 적용가로 신세계 견적·절감액 표시 + 여기서 수정 가능.
+  const { supplyRate, setSupplyRate } = useSupplyRate(sessionId ?? undefined)
 
   const runRematch = useCallback(async () => {
     if (!sessionId || rematching) return
@@ -388,44 +394,12 @@ export function PrecisionMatchingView({
 
   const currentItem = items[selectedIndex] ?? null
 
-  // KPI 계산 (2026-05-12 통일) — 비교불가 (is_excluded) 품목 분리 처리
-  // 사용자가 명시적으로 제외한 품목(특수 가공/외식 등)은 비교 의미 없음 → 절감 산출에서 제외
-  // 보고서(ReportView)와 동일 패턴 — 검수자 화면 일관성 확보
-  const kpi = useMemo(() => {
-    const included = items.filter((i) => !i.is_excluded)
-    const excluded = items.filter((i) => i.is_excluded)
-
-    // 비교 가능 (77건) — 절감 분석 대상
-    const includedExisting = included.reduce((sum, i) => sum + getExistingTotal(i), 0)
-    // 비교불가 (20건) — 거래명세표에는 있으나 비교 의미 없음 (별도 표시용)
-    const excludedExisting = excluded.reduce((sum, i) => sum + getExistingTotal(i), 0)
-    // 거래명세표 원본 합계 (97건) — 사용자가 실제 발주한 총 금액
-    const grandTotal = includedExisting + excludedExisting
-
-    // 신세계 견적은 비교 가능 품목만 (excluded 품목은 ssg_match 있어도 비교 의미 없음)
-    const ssgEstimate = included.reduce((sum, i) => sum + estimateSsgTotal(i), 0)
-    const totalSavings = includedExisting - ssgEstimate
-    const savingPercent = includedExisting > 0 ? (totalSavings / includedExisting) * 100 : 0
-
-    // 확정 카운트도 비교 가능 품목 기준 (excluded는 검수 완료이지만 매칭 확정과 다른 결정)
-    const confirmed = included.filter((i) => i.is_confirmed).length
-    return {
-      // 원본 합계 (모든 97건)
-      grandTotal,
-      // 비교 가능 (77건)
-      includedExisting,
-      includedCount: included.length,
-      // 비교불가 (20건)
-      excludedExisting,
-      excludedCount: excluded.length,
-      // 신세계 비교 분석
-      ssgEstimate,
-      totalSavings,
-      savingPercent,
-      total: items.length,
-      confirmed,
-    }
-  }, [items])
+  // KPI 계산 (2026-07-21) — computeMatchingKpi 순수함수로 추출 + 공급율 반영
+  //   기존: estimateSsgTotal(원가) 그대로 합산 → 최종 보고서(공급율 1.25 적용)와 절감액 불일치.
+  //   변경: 보고서(ProposalReport.computeCategoryStats)와 동일한 per-item 반올림 공식
+  //         Σ round(estimateSsgTotal × supplyRate) → 매칭·보고서 신세계 견적·절감액 일치.
+  //   비교불가(is_excluded)는 절감 산출에서 분리 (함수 내부 처리).
+  const kpi = useMemo(() => computeMatchingKpi(items, supplyRate), [items, supplyRate])
 
   const visibleIndices = useMemo(() => {
     return items
@@ -481,6 +455,12 @@ export function PrecisionMatchingView({
     <div className="flex h-full flex-col bg-gray-50">
       {/* ── 상단 KPI 대시보드 ── */}
       <KpiDashboard kpi={kpi} supplierName={supplierName} />
+
+      {/* 공급율 조정 (2026-07-21) — 매칭 중에도 공급율 적용가로 신세계 견적·절감액 확인.
+          최종 보고서(ReportView)와 동일 값 공유 (proposal_extras.supply_rate). */}
+      <div className="border-b bg-gray-50 px-3 py-1.5">
+        <SupplyRateInput supplyRate={supplyRate} onChange={setSupplyRate} compact />
+      </div>
 
       {/* ── 네비게이션 헤더 ── */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-white px-4 py-2">
@@ -571,6 +551,7 @@ export function PrecisionMatchingView({
           onSelect={setSelectedIndex}
           filterMode={filterMode}
           onSortedVisibleChange={onSortedVisibleChange}
+          supplyRate={supplyRate}
         />
 
         {/* 중앙(col-5): 상하 분할 — commonTokens로 동일 텍스트 색상 매칭 */}
@@ -871,12 +852,15 @@ function ItemListPanel({
   onSelect,
   filterMode,
   onSortedVisibleChange,
+  supplyRate = 1,
 }: {
   items: ComparisonItem[]
   selectedIndex: number
   onSelect: (idx: number) => void
   filterMode: FilterMode
   onSortedVisibleChange?: (sortedIdxs: number[]) => void
+  /** 공급율 — 신세계 견적·절감 배지에 적용 (KPI·보고서와 통일, 2026-07-21) */
+  supplyRate?: number
 }) {
   // (2026-05-11) selectedIndex 변경 시 좌측 패널 자동 스크롤 — Confirm 후 다음 품목으로 이동
   const listContainerRef = useRef<HTMLDivElement>(null)
@@ -986,7 +970,8 @@ function ItemListPanel({
         {filtered.map(({ it, idx }) => {
           const isSelected = idx === selectedIndex
           const total = getExistingTotal(it)
-          const ssgEst = estimateSsgTotal(it)
+          // 공급율 반영 (2026-07-21) — 상단 KPI·보고서와 동일 per-item 반올림
+          const ssgEst = Math.round(estimateSsgTotal(it) * supplyRate)
           const sav = total - ssgEst
           const isSaving = sav > 0
           const hasMatch = !!(it.cj_match || it.ssg_match)

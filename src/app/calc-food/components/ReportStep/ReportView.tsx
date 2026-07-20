@@ -9,6 +9,8 @@ import { ScenarioComparison } from './ScenarioComparison'
 import { ItemBreakdownTable } from './ItemBreakdownTable'
 import { ProposalReport, computeCategoryStats } from './ProposalReport'
 import { CategoryBreakdownCards } from './CategoryBreakdownCards'
+import { SupplyRateInput } from './SupplyRateInput'
+import { useSupplyRate } from '../../hooks/useSupplyRate'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
@@ -50,42 +52,9 @@ export function ReportView({
   // 'proposal' = 고객 제출용 제안서 (인포그래픽)
   const [mode, setMode] = useState<'analysis' | 'proposal'>('analysis')
 
-  // 세션 진입 시 저장된 proposal_extras 로드
-  const [initialExtras, setInitialExtras] = useState<Record<string, unknown> | null>(null)
-  // (2026-05-16) 공급율 — 신세계 견적에 곱하는 배율 (1.0 = 원가, 1.25 = 25% 마진 등)
-  // 변경 절감액 = 기존 - (신세계 × supplyRate)
-  // (2026-07-05) 기본값 1.25 — 25% 마진 디폴트. 사용자가 SupplyRateInput에서 수정 가능.
-  const [supplyRate, setSupplyRate] = useState<number>(1.25)
-  useEffect(() => {
-    if (!sessionId) return
-    fetch(`/api/sessions/${sessionId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && data.session?.proposal_extras) {
-          const extras = data.session.proposal_extras as Record<string, unknown>
-          setInitialExtras(extras)
-          // 공급율 복원 — 저장값 있으면 그 값(사용자 수정 유지), 없으면 기본 1.25
-          const sr = typeof extras.supply_rate === 'number' ? extras.supply_rate : 1.25
-          setSupplyRate(sr > 0 ? sr : 1.25)
-        }
-      })
-      .catch((e) => console.warn('proposal_extras 로드 실패:', e))
-  }, [sessionId])
-
-  // 공급율 변경 시 DB 저장 (debounce)
-  useEffect(() => {
-    if (!sessionId) return
-    if (supplyRate === 1.0 && !initialExtras) return  // 초기 1.0은 저장 X
-    const t = setTimeout(() => {
-      const nextExtras = { ...(initialExtras ?? {}), supply_rate: supplyRate }
-      fetch(`/api/sessions/${sessionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposal_extras: nextExtras }),
-      }).catch((e) => console.warn('supply_rate 저장 실패:', e))
-    }, 600)
-    return () => clearTimeout(t)
-  }, [supplyRate, sessionId, initialExtras])
+  // 공급율 — 매칭 화면(PrecisionMatchingView)과 공유 (proposal_extras.supply_rate).
+  // (2026-07-21) useSupplyRate 훅으로 로드/저장 캡슐화 — 두 화면 단일 소스. 기본 1.25.
+  const { supplyRate, setSupplyRate, initialExtras } = useSupplyRate(sessionId ?? undefined)
 
   const excludedItems = items.filter(i => i.is_excluded)
   const includedItems = items.filter(i => !i.is_excluded)
@@ -267,77 +236,5 @@ export function ReportView({
         </div>
       </div>
     </div>
-  )
-}
-
-/**
- * 공급율 입력 컴포넌트 (2026-05-16)
- *
- * 신세계 견적에 일괄 적용되는 배율 (예: 1.25 = 25% 마진 추가).
- * 변경 절감액 = 기존 - (신세계 × supplyRate)
- *
- * 0.5 ~ 2.0 범위, 0.01 step. proposal_extras.supply_rate에 저장.
- */
-function SupplyRateInput({
-  supplyRate,
-  onChange,
-}: {
-  supplyRate: number
-  onChange: (rate: number) => void
-}) {
-  const [draft, setDraft] = useState(supplyRate.toFixed(2))
-  useEffect(() => {
-    setDraft(supplyRate.toFixed(2))
-  }, [supplyRate])
-  const active = supplyRate !== 1
-  return (
-    <section className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-          공급율
-        </span>
-        <span className="truncate text-[11px] text-gray-500" title="모든 신세계 단가에 곱하는 배율">
-          신세계 단가 ×N (예: 1.25 = 25% 마진)
-        </span>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        <input
-          type="number"
-          step="0.01"
-          min="0.5"
-          max="2"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => {
-            const n = parseFloat(draft)
-            if (Number.isFinite(n) && n >= 0.5 && n <= 2) {
-              onChange(Number(n.toFixed(2)))
-            } else {
-              setDraft(supplyRate.toFixed(2))
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              (e.target as HTMLInputElement).blur()
-            }
-          }}
-          className={cn(
-            'w-20 rounded-md border px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-2',
-            active
-              ? 'border-blue-400 bg-blue-50 text-blue-700 focus:border-blue-500 focus:ring-blue-200'
-              : 'border-gray-300 bg-white text-gray-700 focus:border-blue-500 focus:ring-blue-200',
-          )}
-        />
-        {active && (
-          <button
-            onClick={() => onChange(1.25)}
-            className="rounded-md border border-gray-300 px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
-            title="공급율 초기화 (1.25)"
-          >
-            ↺
-          </button>
-        )}
-      </div>
-    </section>
   )
 }
