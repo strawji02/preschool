@@ -1,50 +1,58 @@
 /**
- * 영업자(파트너) 예상 손익 보고서 PPT 다운로드 (PptxGenJS) — 16:9 1슬라이드
+ * 영업자(파트너) 손익 보고서 PPT — 계약식(제4조) + 마진율 민감도 (16:9 1슬라이드)
  *
- * 급식 제안서(원장 제출용)와 별도로, 해당 유치원에 급식을 공급하는 영업자에게
- * 제공할 1장짜리 예상 손익 보고서. 리포트 데이터에서 일반화되어 생성된다.
+ * 급식 제안서(원장 제출용)와 별도로, 급식을 공급하는 영업자에게 제공할
+ * "마진율에 따른 내 수익 vs 유치원 제공 서비스" 비교 보고서.
  *
- *   파트너 연 수익 = 신세계 공급 연매출(annualSsgCost) × 배분율(15%)
+ *   영업자 정산금 = 신세계 원가 × (마진율 m − 플랫폼수수료 5%)
+ *   유치원 판매가 = 원가 × (1 + m)
+ *   유치원 제공 서비스(절감 환원) = 원장 현재가 − 판매가
+ *
+ * 마진율 민감도 표는 보고서 작성자가 설정한 현재 공급율(supplyRate)을 중심으로
+ * ±3%×3단계(총 7행) 동적 생성하며, 현재 행을 강조한다.
  *
  * 구성:
- *   1. 헤더 navy band ("{유치원명} — 영업자 예상 손익 보고서")
- *   2. HERO 3카드 (연 수익 / 월 평균 / 원아당)
- *   3. 산출 근거 (공급 연매출 × 배분율 = 연 수익)
- *   4. 수익 구조 (절감액은 부가서비스 환원 → 파트너 수익과 별개 / 업무=영업만)
- *   5. 확장 시나리오 (3곳 / 5곳 / 10곳)
+ *   1. 헤더 navy band
+ *   2. HERO 2카드 (현재 마진 기준 영업자 연 정산금 / 유치원 제공 서비스)
+ *   3. 마진율 민감도 표 (마진율 · 판매가 · 유치원 제공 서비스 · 영업자 정산금(매출대비%))
+ *   4. 계산 근거 + trade-off 요약 + 각주
  */
 import { formatCurrency, formatNumber } from '@/lib/format'
-import { computePartnerProfit, PARTNER_SHARE_RATE } from '@/lib/partner-profit'
+import {
+  computePartnerProfit,
+  computeMarginSensitivity,
+  PLATFORM_FEE_RATE,
+} from '@/lib/partner-profit'
 
 export interface ProfitPptxData {
   proposedTo: string
   period: string
-  /** 신세계 공급 연매출 (= annualSsgCost) — 파트너 배분 기준 */
+  /** 현재 공급율 기준 신세계 판매가(연) = annualSsgCost = 원가 × supplyRate */
   annualSupplyRevenue: number
-  /** 연간 절감액 (원장 부가서비스 환원분 — 파트너 수익과 별개) */
+  /** 현재 공급율 (1+m) — 작성자가 설정한 값 (민감도 표 중심) */
+  supplyRate: number
+  /** 원장 현재가(비교가능, 연) — 유치원 제공 서비스 기준 */
+  annualOurCost: number
+  /** 현재 마진 기준 연간 절감액 (참고) */
   annualSavings: number
   savingsPercent: number
   childrenCount: number
-  /** 신세계 DB 단가 기준 연월 (푸터 표시용) */
+  /** 신세계 DB 단가 기준 연월 (푸터) */
   ssgPeriod?: string
-  /** 배분율 (기본 15%) */
-  shareRate?: number
+  /** 플랫폼 수수료율 (기본 5%) */
+  platformFeeRate?: number
 }
 
 const C = {
   navy: '1A2B5C',
   blueHero: '2563EB',
-  blueDark: '1E3A8A',
   blueText: '1E3A8A',
-  blueLight: 'DBEAFE',
-  amberSoft: 'FEF3C7',
-  amber: 'F59E0B',
-  amberDark: 'B45309',
   emerald50: 'ECFDF5',
-  emerald500: '10B981',
   emeraldText: '047857',
+  emerald600: '059669',
+  amberSoft: 'FEF3C7',
+  amberDark: 'B45309',
   slate700: '334155',
-  slate500: '64748B',
   slate100: 'F1F5F9',
   white: 'FFFFFF',
   gray900: '111827',
@@ -57,22 +65,35 @@ const C = {
   border: 'CBD5E1',
 }
 
+const pct = (v: number) => `${(v * 100).toFixed(1)}%`
+const mLabel = (m: number) => `${Math.round(m * 100)}%`
+
 export async function downloadProfitReportPptx(data: ProfitPptxData) {
   const PptxGenJS = (await import('pptxgenjs')).default
   const pptx = new PptxGenJS()
 
   pptx.layout = 'LAYOUT_WIDE' // 13.333 × 7.5 inch
-  pptx.title = `${data.proposedTo} 영업자 예상 손익 보고서`
+  pptx.title = `${data.proposedTo} 영업자 손익 보고서`
   pptx.author = '신세계푸드'
   pptx.company = '신세계푸드'
 
-  const shareRate = data.shareRate ?? PARTNER_SHARE_RATE
+  const fee = data.platformFeeRate ?? PLATFORM_FEE_RATE
+  const purchaseCost = data.supplyRate !== 0 ? data.annualSupplyRevenue / data.supplyRate : 0
+
+  // 현재 마진 기준 파트너 손익
   const profit = computePartnerProfit({
     annualSupplyRevenue: data.annualSupplyRevenue,
+    supplyRate: data.supplyRate,
     childrenCount: data.childrenCount,
-    shareRate,
+    platformFeeRate: fee,
   })
-  const sharePctLabel = `${(shareRate * 100).toFixed(shareRate * 100 % 1 === 0 ? 0 : 1)}%`
+  // 마진율 민감도 (현재 공급율 중심 ±3%×3단계)
+  const rows = computeMarginSensitivity({
+    purchaseCost,
+    currentSupplyRate: data.supplyRate,
+    kindergartenCurrentCost: data.annualOurCost,
+    platformFeeRate: fee,
+  })
 
   const s = pptx.addSlide()
   s.background = { color: C.white }
@@ -80,156 +101,106 @@ export async function downloadProfitReportPptx(data: ProfitPptxData) {
   const PAGE_W = 13.333
   const MARGIN = 0.6
   const CONTENT_W = PAGE_W - MARGIN * 2 // 12.13
-  const BORDER_W = 1.5
 
   // ── (1) 헤더 navy band ──
-  s.addShape('rect', {
-    x: 0, y: 0, w: PAGE_W, h: 0.85,
-    fill: { color: C.navy }, line: { type: 'none' },
+  s.addShape('rect', { x: 0, y: 0, w: PAGE_W, h: 0.82, fill: { color: C.navy }, line: { type: 'none' } })
+  s.addText(`${data.proposedTo || '유치원'} — 영업자 손익 보고서`, {
+    x: 0.7, y: 0.22, w: 8.8, h: 0.42, fontSize: 21, bold: true, color: C.white, fontFace: 'Pretendard',
   })
-  s.addText(`${data.proposedTo || '유치원'} — 영업자 예상 손익 보고서`, {
-    x: 0.7, y: 0.24, w: 9.5, h: 0.42,
-    fontSize: 21, bold: true, color: C.white, fontFace: 'Pretendard',
-  })
-  s.addText(`원아 ${formatNumber(data.childrenCount)}명 · 배분율 ${sharePctLabel} · ${data.period}`, {
-    x: 9.3, y: 0.30, w: 3.5, h: 0.32,
-    fontSize: 11, color: 'BFDBFE', align: 'right', fontFace: 'Pretendard',
+  s.addText(`현재 마진율 ${mLabel(profit.marginRate)} · 원아 ${formatNumber(data.childrenCount)}명 · ${data.period}`, {
+    x: 8.6, y: 0.28, w: 4.1, h: 0.32, fontSize: 11, color: 'BFDBFE', align: 'right', fontFace: 'Pretendard',
   })
 
-  // ── (2) HERO 3카드: 연 수익 / 월 평균 / 원아당 ──
-  const heroY = 1.15
-  const heroH = 1.55
-  const heroGap = 0.22
-  const heroW = (CONTENT_W - heroGap * 2) / 3 // 약 3.90
+  // ── (2) HERO 2카드 (현재 마진 기준) ──
+  const heroY = 1.05
+  const heroH = 1.35
+  const heroGap = 0.28
+  const heroW = (CONTENT_W - heroGap) / 2
 
-  const heroCards: { label: string; value: string; sub: string; fill: string; valColor: string; labelColor: string; subColor: string }[] = [
-    {
-      label: '파트너 연 예상 수익',
-      value: formatCurrency(profit.annual),
-      sub: `공급 연매출 × 배분율 ${sharePctLabel}`,
-      fill: C.blueHero, valColor: C.white, labelColor: 'BFDBFE', subColor: 'BFDBFE',
-    },
-    {
-      label: '월 평균',
-      value: formatCurrency(profit.monthly),
-      sub: '연 수익 ÷ 12개월',
-      fill: C.white, valColor: C.blueText, labelColor: C.gray500, subColor: C.gray500,
-    },
-    {
-      label: '원아 1명당 (연)',
-      value: formatCurrency(profit.perChild),
-      sub: `원아 ${formatNumber(data.childrenCount)}명 기준`,
-      fill: C.white, valColor: C.gray900, labelColor: C.gray500, subColor: C.gray500,
-    },
-  ]
-  heroCards.forEach((c, i) => {
-    const x = MARGIN + i * (heroW + heroGap)
-    const isHero = i === 0
-    s.addShape('roundRect', {
-      x, y: heroY, w: heroW, h: heroH,
-      fill: { color: c.fill },
-      line: isHero ? { type: 'none' } : { color: C.border, width: BORDER_W },
-      rectRadius: 0.12,
-    })
-    s.addText(c.label, {
-      x: x + 0.25, y: heroY + 0.20, w: heroW - 0.5, h: 0.28,
-      fontSize: 11, bold: true, color: c.labelColor, charSpacing: 1,
-    })
-    s.addText(c.value, {
-      x: x + 0.25, y: heroY + 0.55, w: heroW - 0.5, h: 0.62,
-      fontSize: isHero ? 30 : 26, bold: true, color: c.valColor, fontFace: 'Pretendard',
-    })
-    s.addText(c.sub, {
-      x: x + 0.25, y: heroY + 1.20, w: heroW - 0.5, h: 0.25,
-      fontSize: 10, color: c.subColor,
-    })
+  // 좌: 영업자 연 정산금 (blue)
+  s.addShape('roundRect', { x: MARGIN, y: heroY, w: heroW, h: heroH, fill: { color: C.blueHero }, line: { type: 'none' }, rectRadius: 0.12 })
+  s.addText(`영업자 연 예상 정산금  (마진 ${mLabel(profit.marginRate)})`, {
+    x: MARGIN + 0.25, y: heroY + 0.18, w: heroW - 0.5, h: 0.28, fontSize: 11, bold: true, color: 'BFDBFE', charSpacing: 1,
+  })
+  s.addText(formatCurrency(profit.annual), {
+    x: MARGIN + 0.25, y: heroY + 0.50, w: heroW - 0.5, h: 0.55, fontSize: 30, bold: true, color: C.white, fontFace: 'Pretendard',
+  })
+  s.addText(`월 ${formatCurrency(profit.monthly)}  ·  매출대비 ${pct(profit.revenuePctOfSales)}  ·  원아당 ${formatCurrency(profit.perChild)}`, {
+    x: MARGIN + 0.25, y: heroY + 1.05, w: heroW - 0.5, h: 0.24, fontSize: 10, color: 'BFDBFE',
   })
 
-  // ── (3) 산출 근거 box ──
-  const calcY = heroY + heroH + 0.28 // 2.98
-  const calcH = 1.05
-  s.addShape('roundRect', {
-    x: MARGIN, y: calcY, w: CONTENT_W, h: calcH,
-    fill: { color: C.gray50 }, line: { color: C.border, width: BORDER_W }, rectRadius: 0.10,
+  // 우: 유치원 제공 서비스 (emerald)
+  const hx2 = MARGIN + heroW + heroGap
+  s.addShape('roundRect', { x: hx2, y: heroY, w: heroW, h: heroH, fill: { color: C.emerald50 }, line: { color: '6EE7B7', width: 1.5 }, rectRadius: 0.12 })
+  s.addText('유치원 제공 서비스 (절감 환원, 연)', {
+    x: hx2 + 0.25, y: heroY + 0.18, w: heroW - 0.5, h: 0.28, fontSize: 11, bold: true, color: C.emeraldText, charSpacing: 1,
   })
-  s.addText('산출 근거', {
-    x: MARGIN + 0.25, y: calcY + 0.16, w: 3.0, h: 0.26,
-    fontSize: 12, bold: true, color: C.gray900,
+  s.addText(formatCurrency(data.annualSavings), {
+    x: hx2 + 0.25, y: heroY + 0.50, w: heroW - 0.5, h: 0.55, fontSize: 30, bold: true, color: C.emerald600, fontFace: 'Pretendard',
   })
-  // 계산식: 공급 연매출 × 배분율 = 연 수익 (가로 배치)
+  s.addText(`원장 현재가 ${formatCurrency(data.annualOurCost)} 대비 ▼${data.savingsPercent.toFixed(1)}%`, {
+    x: hx2 + 0.25, y: heroY + 1.05, w: heroW - 0.5, h: 0.24, fontSize: 10, color: C.emeraldText,
+  })
+
+  // ── (3) 마진율 민감도 표 ──
+  const tblY = heroY + heroH + 0.28 // 2.68
+  s.addText('마진율 시나리오 — 내 수익 vs 유치원 제공 서비스', {
+    x: MARGIN, y: tblY, w: CONTENT_W, h: 0.30, fontSize: 13, bold: true, color: C.gray900,
+  })
+
+  const header = ['마진율', '유치원 판매가', '🏫 유치원 제공 서비스', '💼 영업자 연 정산금', '매출대비'].map((t) => ({
+    text: t,
+    options: { bold: true, color: C.white, fill: { color: C.navy }, fontSize: 11, align: 'center' as const, valign: 'middle' as const },
+  }))
+
+  const bodyRows = rows.map((r) => {
+    const cur = r.isCurrent
+    const baseFill = cur ? 'DBEAFE' : C.white
+    const cell = (text: string, align: 'left' | 'right' | 'center', color: string, bold = false) => ({
+      text,
+      options: {
+        align, valign: 'middle' as const, fontSize: cur ? 12 : 11, bold: bold || cur, color,
+        fill: { color: baseFill },
+      },
+    })
+    return [
+      cell(cur ? `${mLabel(r.marginRate)} ★` : mLabel(r.marginRate), 'center', cur ? C.blueText : C.gray700, true),
+      cell(formatCurrency(r.salePrice), 'right', C.gray700),
+      cell(formatCurrency(r.kindergartenService), 'right', r.kindergartenService >= 0 ? C.emeraldText : 'DC2626', true),
+      cell(formatCurrency(r.partnerSettlement), 'right', C.blueText, true),
+      cell(pct(r.partnerPctOfSales), 'center', C.gray700),
+    ]
+  })
+
+  const tableH = 3.05
+  s.addTable([header, ...bodyRows], {
+    x: MARGIN, y: tblY + 0.36, w: CONTENT_W, h: tableH,
+    colW: [1.55, 2.75, 3.0, 3.0, 1.83],
+    border: { type: 'solid', color: C.border, pt: 0.5 },
+    rowH: tableH / (bodyRows.length + 1),
+    valign: 'middle', fontFace: 'Pretendard',
+  })
+
+  // ── (4) 근거 + trade-off + 각주 ──
+  const noteY = tblY + 0.36 + tableH + 0.14
   s.addText(
     [
-      { text: '신세계 공급 연매출  ', options: { color: C.gray500, fontSize: 11 } },
-      { text: formatCurrency(data.annualSupplyRevenue), options: { color: C.gray900, bold: true, fontSize: 15 } },
-      { text: '   ×   배분율  ', options: { color: C.gray500, fontSize: 11 } },
-      { text: sharePctLabel, options: { color: C.blueText, bold: true, fontSize: 15 } },
-      { text: '   =   ', options: { color: C.gray500, fontSize: 11 } },
-      { text: formatCurrency(profit.annual), options: { color: C.blueHero, bold: true, fontSize: 17 } },
-      { text: ' / 년', options: { color: C.gray500, fontSize: 11 } },
+      { text: '계산 근거  ', options: { bold: true, color: C.gray900, fontSize: 10 } },
+      {
+        text: `영업자 정산금 = 신세계 원가 ${formatCurrency(purchaseCost)} × (마진율 − 플랫폼수수료 ${pct(fee)})  ·  판매가 = 원가 × (1 + 마진율)  ·  유치원 제공 서비스 = 원장 현재가 − 판매가`,
+        options: { color: C.gray500, fontSize: 10 },
+      },
     ],
-    { x: MARGIN + 0.25, y: calcY + 0.50, w: CONTENT_W - 0.5, h: 0.42, valign: 'middle' },
+    { x: MARGIN, y: noteY, w: CONTENT_W, h: 0.26, valign: 'middle' },
+  )
+  s.addText(
+    '마진율을 3%p 올릴 때마다 영업자 수익은 늘고, 그만큼 유치원 제공 서비스(절감 환원)는 줄어듭니다. 영업 난이도와 수익의 균형점을 선택하세요.',
+    { x: MARGIN, y: noteY + 0.28, w: CONTENT_W, h: 0.26, fontSize: 10.5, bold: true, color: C.slate700, valign: 'middle' },
   )
 
-  // ── (4) 수익 구조 확인 + (5) 확장 시나리오 (2열 배치) ──
-  const rowY = calcY + calcH + 0.28 // 4.31
-  const rowH = 2.30
-  const colGap = 0.28
-  const colW = (CONTENT_W - colGap) / 2 // 5.92
-
-  // (4) 수익 구조 — 좌측 (emerald 톤)
-  s.addShape('roundRect', {
-    x: MARGIN, y: rowY, w: colW, h: rowH,
-    fill: { color: C.emerald50 }, line: { color: '6EE7B7', width: BORDER_W }, rectRadius: 0.10,
-  })
-  s.addText('수익 구조 (원장 절감액과 별개)', {
-    x: MARGIN + 0.25, y: rowY + 0.16, w: colW - 0.5, h: 0.28,
-    fontSize: 12, bold: true, color: C.emeraldText,
-  })
-  const structBullets = [
-    `절감액 ${formatCurrency(data.annualSavings)}(▼${data.savingsPercent.toFixed(1)}%)은 전액 유치원 부가서비스로 환원 → 파트너 수익과 무관`,
-    `파트너 수익은 신세계 공급가에 포함된 마진의 ${sharePctLabel} 배분에서 발생`,
-    '파트너 업무 = 영업(명세서 수령·제안서 전달)뿐, 운영은 플랫폼 담당',
-  ]
-  structBullets.forEach((t, i) => {
-    s.addText(t, {
-      x: MARGIN + 0.30, y: rowY + 0.56 + i * 0.55, w: colW - 0.55, h: 0.52,
-      fontSize: 10.5, color: C.gray700, valign: 'top',
-      bullet: { code: '2022', indent: 12 },
-    })
-  })
-
-  // (5) 확장 시나리오 — 우측 (amber 톤)
-  const scX = MARGIN + colW + colGap
-  s.addShape('roundRect', {
-    x: scX, y: rowY, w: colW, h: rowH,
-    fill: { color: C.amberSoft }, line: { color: 'FCD34D', width: BORDER_W }, rectRadius: 0.10,
-  })
-  s.addText('확장 시나리오 (거래처 확대 시 연 수익)', {
-    x: scX + 0.25, y: rowY + 0.16, w: colW - 0.5, h: 0.28,
-    fontSize: 12, bold: true, color: C.amberDark,
-  })
-  const scRowH = 0.50
-  const scRowY0 = rowY + 0.58
-  profit.scenarios.forEach((sc, i) => {
-    const y = scRowY0 + i * (scRowH + 0.06)
-    s.addShape('roundRect', {
-      x: scX + 0.25, y, w: colW - 0.5, h: scRowH,
-      fill: { color: C.white, transparency: 20 }, line: { type: 'none' }, rectRadius: 0.06,
-    })
-    s.addText(`거래처 ${sc.count}곳`, {
-      x: scX + 0.42, y, w: 2.5, h: scRowH,
-      fontSize: 12, bold: true, color: C.gray700, valign: 'middle',
-    })
-    s.addText(`${formatCurrency(sc.annual)} / 년`, {
-      x: scX + colW - 3.4, y, w: 3.1, h: scRowH,
-      fontSize: 13, bold: true, color: C.amberDark, align: 'right', valign: 'middle',
-    })
-  })
-
-  // ── 푸터 ──
   s.addText(
-    `본 손익 보고서는 ${data.ssgPeriod ?? data.period} 신세계 단가 기준 공급 매출 × 배분율 ${sharePctLabel}로 산출한 예상치입니다. 실제 조건은 계약 시 서면 안내됩니다.`,
-    { x: 0.5, y: 7.18, w: 12.33, h: 0.22, fontSize: 9, color: C.gray400, align: 'center' },
+    `본 손익 보고서는 ${data.ssgPeriod ?? data.period} 신세계 단가·계약식(제4조) 기준 예상치입니다. 플랫폼 수수료 ${pct(fee)}(원가 대비) 적용. 발표자료의 '매출 15%'는 마진 20% 근사치이며 실제 정산은 마진율 연동입니다.`,
+    { x: 0.5, y: 7.2, w: 12.33, h: 0.2, fontSize: 8.5, color: C.gray400, align: 'center' },
   )
 
   const fileName = `${data.proposedTo || '유치원'} 영업자 손익 보고서_${data.period.replace(/\s/g, '')}.pptx`

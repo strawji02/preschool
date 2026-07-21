@@ -470,7 +470,8 @@ export function ProposalReport({
     }
   }
 
-  // 영업자 손익 보고서 PPT — 파트너 예상 수익 = 신세계 공급 연매출 × 배분율(15%)
+  // 영업자 손익 보고서 PPT — 계약식(제4조): 영업자 정산금 = 원가 × (마진율 − 플랫폼 5%)
+  //   마진율 민감도 표는 현재 공급율(supplyRate)을 중심으로 ±3%×3단계 동적 생성
   const [profitLoading, setProfitLoading] = useState(false)
   const handleDownloadProfit = async () => {
     setProfitLoading(true)
@@ -478,7 +479,9 @@ export function ProposalReport({
       await downloadProfitReportPptx({
         proposedTo,
         period,
-        annualSupplyRevenue: annualSsgCost,
+        annualSupplyRevenue: annualSsgCost, // 현재 공급율 기준 판매가 = 원가 × supplyRate
+        supplyRate,                          // 작성자가 설정한 현재 공급율 (중심)
+        annualOurCost,                       // 원장 현재가(비교가능, 연) — 유치원 제공 서비스 기준
         annualSavings,
         savingsPercent,
         childrenCount,
