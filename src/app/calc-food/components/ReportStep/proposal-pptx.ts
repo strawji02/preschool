@@ -357,7 +357,7 @@ export async function downloadProposalPptx(data: ProposalPptxData) {
       x: x + cardW - 1.05, y: catY + 0.40, w: 0.90, h: 0.26,
       fill: { color: C.gray100 }, line: { type: 'none' }, rectRadius: 0.13,
     })
-    s1.addText(`${isSaving ? '▼' : '▲'} ${stat.savingsPercent.toFixed(1)}%`, {
+    s1.addText(`${isSaving ? '▼' : '▲'} ${Math.abs(stat.savingsPercent).toFixed(1)}%`, {
       x: x + cardW - 1.05, y: catY + 0.40, w: 0.90, h: 0.26,
       fontSize: 8, bold: true, color: C.gray700, align: 'center', valign: 'middle',
     })

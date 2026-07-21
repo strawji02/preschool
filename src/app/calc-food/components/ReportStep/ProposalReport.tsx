@@ -179,8 +179,10 @@ export function computeCategoryStats(items: ComparisonItem[], supplyRate: number
     }
   }
   for (const stat of map.values()) {
-    // (2026-05-17) per-item round 후 정수 합 — 추가 round 불필요
-    stat.savings = Math.max(0, stat.ourCost - stat.ssgCost)
+    // (2026-07-22) 정직 표시 — clamp(Math.max(0,·)) 제거.
+    //   신세계가 더 비싼 카테고리는 순손실(음수)로 표시해야 카드 합 == 헤드라인 절감액.
+    //   이전 clamp는 음수를 0으로 감춰 "카드 합 ≠ 헤드라인"(예: 농산 -54,233 누락) 발생.
+    stat.savings = stat.ourCost - stat.ssgCost
     stat.savingsPercent = stat.ourCost > 0 ? (stat.savings / stat.ourCost) * 100 : 0
     // 상위 3건만 (절감액 큰 순)
     stat.topItems = itemsByCategory.get(stat.category)!

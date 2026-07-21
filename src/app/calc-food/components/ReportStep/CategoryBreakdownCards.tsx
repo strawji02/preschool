@@ -98,7 +98,7 @@ function CategoryCard({ stat }: { stat: CategoryStat }) {
                 isSaving ? 'bg-gray-100 text-gray-700' : 'bg-red-100 text-red-700',
               )}
             >
-              {isSaving ? '▼' : '▲'} {stat.savingsPercent.toFixed(1)}%
+              {isSaving ? '▼' : '▲'} {Math.abs(stat.savingsPercent).toFixed(1)}%
             </span>
           </div>
           {/* (3) 큰 절감액 */}

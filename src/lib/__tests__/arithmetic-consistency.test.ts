@@ -210,6 +210,47 @@ describe('computeCategoryStats — per-item Math.round (2026-05-17)', () => {
 })
 
 // ──────────────────────────────────────────────────────────────
+// 1-b. 정직 표시 — 신세계가 더 비싼 카테고리(순손실)도 clamp 없이 반영
+//   (2026-07-22) 사용자 신고: 카테고리 카드 합 ≠ 헤드라인 절감액 (54,233원 차이)
+//   원인: stat.savings = Math.max(0, ourCost - ssgCost) 로 음수 카테고리를 0으로 잘라
+//         카드 합(클램프)이 헤드라인(Σourcost-Σssgcost)보다 큼.
+//   수정: clamp 제거 → 순손실 카테고리는 음수(추가비용)로 표시, 카드 합 = 헤드라인.
+// ──────────────────────────────────────────────────────────────
+describe('정직 표시 — 순손실 카테고리 clamp 제거 (2026-07-22)', () => {
+  /** 농산: 신세계가 더 비쌈(순손실), 축산: 절감 */
+  function buildWithLossCategory(): ComparisonItem[] {
+    return [
+      // 농산 — our 1000 < ssg 1200 → 순손실 -200 (clamp되면 0)
+      makeItem({
+        id: 'loss', name: '흙당근', qty: 1, unit_price: 1000, total: 1000,
+        ssg: { standard_price: 1200, spec_quantity: 1, spec_unit: 'KG', category: '농산' },
+      }),
+      // 축산 — our 2000 > ssg 1500 → 절감 +500
+      makeItem({
+        id: 'save', name: '돼지고기', qty: 1, unit_price: 2000, total: 2000,
+        ssg: { standard_price: 1500, spec_quantity: 1, spec_unit: 'KG', category: '축산' },
+      }),
+    ]
+  }
+
+  it('순손실 카테고리 savings는 음수 (0으로 clamp 안 함)', () => {
+    const stats = computeCategoryStats(buildWithLossCategory(), 1.0)
+    const nong = stats.find((s) => s.category === '농산')!
+    expect(nong.savings).toBe(-200)
+    expect(nong.savingsPercent).toBeCloseTo(-20, 6) // -200/1000
+  })
+
+  it('Σ 카드 savings == 헤드라인(Σourcost - Σssgcost) — 합계 정합', () => {
+    const stats = computeCategoryStats(buildWithLossCategory(), 1.0)
+    const sumOur = stats.reduce((s, c) => s + c.ourCost, 0)
+    const sumSsg = stats.reduce((s, c) => s + c.ssgCost, 0)
+    const sumCards = stats.reduce((s, c) => s + c.savings, 0)
+    expect(sumCards).toBe(sumOur - sumSsg) // 300 = 3000 - 2700
+    expect(sumCards).toBe(300)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────
 // 2. 엑셀 export 정합성 — 화면 vs 엑셀 SUM 동일
 // ──────────────────────────────────────────────────────────────
 // excel-utils의 내부 함수 직접 import 불가 (file scope) — 동일 로직 재현하여 계약 검증
