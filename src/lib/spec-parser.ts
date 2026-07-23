@@ -465,8 +465,12 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   const trimmed = spec.trim()
 
   // 1. 발주 단위 타입 판별 (문자열 시작 부분 기준)
+  //   (2026-07-23) 보관/카테고리 접두 태그 제거 후 판별 — 단위 컬럼이 없는 명세서는 규격에
+  //   "[냉동] PK.(250g*5ea)"·"[실온] KG(개당100g)"·"[돼지고기(국산) 냉동] PK.(...)"처럼
+  //   보관조건이 앞에 붙는다. 이 "[...]" 접두가 발주단위(PK/KG) 인식을 막아 총량이 축소되던 버그.
+  const unitHead = trimmed.replace(/^\s*(?:\[[^\]]*\]\s*)+/, '')
   for (const { type, patterns } of ORDER_UNIT_ALIASES) {
-    if (patterns.test(trimmed)) {
+    if (patterns.test(unitHead)) {
       result.unitType = type
       break
     }
