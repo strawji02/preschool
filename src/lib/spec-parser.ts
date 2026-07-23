@@ -505,7 +505,11 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   // (2026-07-16) 주문단위와 "세는 단위"가 같으면 곱하지 않는다.
   //   "EA 400G*6EA/BOX"(단위 EA): 6EA는 "박스당 EA 수"지 "1EA 안의 개수"가 아니므로
   //   1 EA = 400g (×6 하면 박스 총량 2400g으로 오산). 세는 단위가 입/구/개면 내부 개수라 곱함.
-  const countedSameAsOrderUnit = result.unitType === 'EA' && eaUnitTok === 'ea'
+  // (2026-07-23) 정밀화 — "Nea"가 "/BOX(박스 묶음수)"로 이어질 때만 곱하지 않는다.
+  //   명세서가 발주단위를 coarse "EA"로 기록해도 "250g*5ea"(팩 내 5개)는 곱해야 5kg가 된다.
+  //   즉 "400G*6EA/BOX"→400(유지), "250g*5ea"→1250(곱함).
+  const countIsBoxGrouping = /(?:ea|개|입|구)\s*\/\s*(?:box|박스|상자)/i.test(parseSrc)
+  const countedSameAsOrderUnit = result.unitType === 'EA' && eaUnitTok === 'ea' && countIsBoxGrouping
 
   // (2026-07-16) 단일 대용량 그램값은 "팩 총량"으로 판정 — "30EA/2,040g"의 2040g은
   //   개당(68g)이 아니라 30알 팩 총량. 개당무게가 범위가 아니고 1000g 이상이면서
