@@ -7,6 +7,7 @@ import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } f
 import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 import { estimateSsgTotal } from '@/lib/unit-conversion'
 import { findPropagationTargets, applyPropagation, findSimilarSuggestions, applySuggestions, normalizeItemName } from '@/lib/match-propagation'
+import { canConfirmItem, healConfirmedWithoutMatch } from '@/lib/confirm-guard'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
@@ -338,11 +339,13 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         totalPages: action.failedCount,
       }
 
-    case 'LOAD_SESSION':
+    case 'LOAD_SESSION': {
+      // (2026-07-23 A안) 자가치유 — 과거 오염된 "무매칭 확정" 품목을 미확정으로 복원
+      const healedItems = healConfirmedWithoutMatch(action.items)
       return {
         ...initialState,
         sessionId: action.sessionId,
-        items: action.items,
+        items: healedItems,
         pageTotals: action.pageTotals,
         pageSourceFiles: action.pageSourceFiles,
         totalPages: action.totalPages,
@@ -350,8 +353,9 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         supplierName: action.supplierName,
         currentStep: action.currentStep,
         status: action.enterStatus,
-        stats: calculateStats(action.items),
+        stats: calculateStats(healedItems),
       }
+    }
 
     case 'START_EXTEND':
       // 추가 업로드 시작: 기존 세션 유지하되 진행률 표시를 위해 status='processing' 전환
@@ -644,6 +648,9 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
     case 'CONFIRM_ITEM': {
       const newItems = state.items.map((item) => {
         if (item.id !== action.itemId) return item
+
+        // (2026-07-23 A안 방어) 매칭 없으면 확정하지 않음 — confirmItem 콜백 외 dispatch 경로 대비
+        if (!canConfirmItem(item, action.supplier)) return item
 
         // 정밀 검수 조정값 머지 (precision view에서 발주수량/단위중량/포장단위 수정 후 Confirm)
         const adj = action.adjustments
@@ -1666,6 +1673,12 @@ export function useAuditSession() {
       supplier?: Supplier,
       adjustments?: { adjusted_quantity?: number; adjusted_unit_weight_g?: number; adjusted_pack_unit?: string },
     ) => {
+      // (2026-07-23 A안) 무매칭 확정 방지 — 매칭 없는 품목은 Enter를 눌러도 확정하지 않는다.
+      //   dispatch·DB저장·전파의 공통 초크포인트에서 차단(무매칭 상태가 DB로 새지 않도록).
+      //   UI는 이 호출 뒤 다음 품목으로 이동하므로, 무매칭에서 Enter = "확정 없이 넘어가기"가 된다.
+      const target = state.items.find((i) => i.id === itemId)
+      if (target && !canConfirmItem(target, supplier)) return
+
       dispatch({ type: 'CONFIRM_ITEM', itemId, supplier, adjustments })
       // DB 저장: 매칭 상태 + 정밀 검수 조정값 (있으면)
       // (2026-05-12) is_excluded=false 자동 해제 — 사용자가 비교불가 처리한 품목을
