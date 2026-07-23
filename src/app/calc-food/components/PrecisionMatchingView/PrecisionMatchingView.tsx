@@ -21,9 +21,10 @@ import type { PageImage } from '@/lib/pdf-processor'
 import { PdfModal } from '../SplitView/PdfModal'
 import { formatCurrency, formatNumber, formatWeight } from '@/lib/format'
 import {
-  parseSpecToGrams, pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
+  pricePerKg, computeShinsegaePerKg, computeSavings, estimateSsgTotal,
 } from '@/lib/unit-conversion'
-import { parseOrderUnit, ssgUnitWeightG } from '@/lib/spec-parser'
+import { ssgUnitWeightG } from '@/lib/spec-parser'
+import { resolveInvoiceUnitWeightG } from '@/lib/invoice-unit-weight'
 import type { ReferenceProduct } from '@/lib/naver-shopping'
 import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
 import { computeMatchingKpi } from '@/lib/matching-kpi'
@@ -127,37 +128,8 @@ function HighlightedText({
   )
 }
 
-/**
- * 단위가 무게/부피 단위 자체일 때 1 단위 = N 그램으로 환산.
- * spec/품목명에 단위중량이 없어도 단위가 KG/G/L/ML이면 발주수량 자체가 총량.
- * (예: "청피망 단위 KG 발주 1" → 1KG = 1,000g)
- */
-function unitToGrams(unit: string | undefined): number | null {
-  if (!unit) return null
-  const u = unit.toUpperCase().trim()
-  if (u === 'KG') return 1000
-  if (u === 'G') return 1
-  if (u === 'L') return 1000
-  if (u === 'ML') return 1
-  return null
-}
-
-/**
- * spec/품목명에 무게/부피 단위 키워드가 단독으로 있을 때 1 단위 환산.
- * parseSpecToGrams는 "1KG" 같이 숫자가 붙은 패턴을 잡지만, "상품 KG" 같이
- * 단독 키워드만 있는 경우는 못 잡음 → 이 함수로 fallback.
- *
- * 예: spec="상품 KG, 한국Wn※국내산" + unit=EA  → 1000g (1KG짜리 봉지로 간주)
- */
-function specToUnitFallback(text: string | undefined | null): number | null {
-  if (!text) return null
-  const t = text.toUpperCase()
-  if (/\bKG\b/.test(t)) return 1000
-  if (/\bML\b/.test(t)) return 1
-  if (/\bL\b/.test(t)) return 1000
-  if (/\bG\b/.test(t)) return 1
-  return null
-}
+// unitToGrams / specToUnitFallback / resolveInvoiceUnitWeightG 는
+// @/lib/invoice-unit-weight 로 추출 (규격 우선 파싱 + 테스트). 2026-07-23
 
 /**
  * 발주 단위(KG/EA/PK/BOX) 기반 총 발주 무게(g) + kg당 단가 산출.
@@ -180,26 +152,7 @@ function computeInvoiceWeight(item: ComparisonItem): {
   }
 }
 
-/**
- * 기존 업체(거래명세표) 품목의 "1 발주 단위당 무게(g)" 결정.
- *
- * 발주 단위(KG/EA/PK/BOX)를 최우선으로 인식 — "KG(약300g_국내산)"처럼 단위 뒤에
- * 괄호 참고정보가 붙어도 KG 발주로 보고 1,000g 반환.
- * (버그 fix: unitToGrams는 정확 일치만 해서 "KG(...)"를 놓치고, 다음 순위인
- *  parseSpecToGrams가 괄호 안 300g을 단위중량으로 오인 → 300×1.5=450g 오류)
- * parseOrderUnit이 산출 불가일 때만 기존 체인으로 fallback.
- */
-function resolveInvoiceUnitWeightG(item: ComparisonItem): number | null {
-  const unitSpec = [item.extracted_unit, item.extracted_spec].filter(Boolean).join(' ')
-  return (
-    parseOrderUnit(unitSpec).unitWeightG ??
-    unitToGrams(item.extracted_unit) ??
-    parseSpecToGrams(item.extracted_spec) ??
-    parseSpecToGrams(item.extracted_name) ??
-    specToUnitFallback(item.extracted_spec) ??
-    specToUnitFallback(item.extracted_name)
-  )
-}
+// resolveInvoiceUnitWeightG 는 @/lib/invoice-unit-weight 로 추출됨 (규격 우선 파싱).
 
 /* ────────────────────────────────────────────────────────── */
 /* 단순 환산 절감액 (후보별) — 표준가 × 수량                     */

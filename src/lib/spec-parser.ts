@@ -494,7 +494,9 @@ export function parseOrderUnit(spec: string): OrderUnitInfo {
   }
 
   // 팩/판당 개수: "30ea", "30개", "30구"(계란판) — 뒤에 알파벳이 오지 않는 경우
-  const eaMatch = parseSrc.match(/(\d+(?:\.\d+)?)\s*(ea|개|입|구)(?![a-z])/i)
+  //   (2026-07-23) 오차표기 "85±5ea"·"90~100개" → 기준값(85·90)을 개수로. 오차/상한은 무시.
+  //   (명세서 "PK.(11.5g,85±5ea)"에서 5ea 대신 85를 팩당 개수로 잡기 위함)
+  const eaMatch = parseSrc.match(/(\d+(?:\.\d+)?)(?:\s*[±~～]\s*\d+(?:\.\d+)?)?\s*(ea|개|입|구)(?![a-z])/i)
   const eaUnitTok = eaMatch?.[2]?.toLowerCase() ?? null
   if (eaMatch) {
     result.perPackEa = parseFloat(eaMatch[1])
