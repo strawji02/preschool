@@ -51,6 +51,8 @@ const EXCEL_EXT = /\.(xlsx|xls|xlsm)$/i
 
 export default function SettlementWorkspace() {
   const fileInput = useRef<HTMLInputElement>(null)
+  /** dragleave가 자식 요소로 이동할 때도 발생하므로 깊이를 세서 깜빡임을 막는다 */
+  const dragDepth = useRef(0)
   const [files, setFiles] = useState<File[]>([])
   const [dragging, setDragging] = useState(false)
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
@@ -91,9 +93,65 @@ export default function SettlementWorkspace() {
   }, [])
 
   /**
-   * 붙여넣기 업로드 — 탐색기에서 파일을 복사(Ctrl+C)한 뒤 화면에서 Ctrl+V.
-   * `clipboardData.files`에 파일이 담기는지는 브라우저·OS에 따라 다르다.
-   * Windows Chrome에서는 동작하고, 안 되는 환경에서는 드래그나 파일 선택을 쓰면 된다.
+   * 드래그&드롭 — **페이지 전체**를 드롭 대상으로 잡는다.
+   *
+   * 처음엔 드롭존 div에만 핸들러를 달았는데 동작하지 않았다. 요소 단위로 달면
+   * (1) 조금만 빗나가도 브라우저가 파일을 열어버리고 (2) 자식 요소 위를 지날 때
+   * dragleave가 튀어 상태가 흔들린다. window에 달면 어디에 떨어뜨려도 받는다.
+   *
+   * `dragover`에서 preventDefault를 하지 않으면 브라우저가 기본 동작(파일 열기)을
+   * 하므로 반드시 필요하다. dragenter/dragover 둘 다 막는 게 표준 권장이다.
+   *
+   * 깊이 카운터를 쓰는 이유: dragleave는 자식 요소로 이동할 때도 발생해서
+   * 단순히 false로 만들면 하이라이트가 깜빡인다.
+   */
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files')
+
+    function onDragEnter(e: DragEvent) {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current += 1
+      setDragging(true)
+    }
+    function onDragOver(e: DragEvent) {
+      if (!hasFiles(e)) return
+      e.preventDefault() // 없으면 브라우저가 파일을 열어버린다
+    }
+    function onDragLeave(e: DragEvent) {
+      if (!hasFiles(e)) return
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (dragDepth.current === 0) setDragging(false)
+    }
+    function onDrop(e: DragEvent) {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current = 0
+      setDragging(false)
+      const dropped = Array.from(e.dataTransfer?.files ?? [])
+      if (dropped.length > 0) addFiles(dropped)
+    }
+
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [addFiles])
+
+  /**
+   * 붙여넣기 — 클립보드에 **파일 데이터**가 들어있을 때만 동작한다.
+   *
+   * ⚠️ Windows 탐색기에서 파일을 복사(Ctrl+C)한 것은 Chrome이 웹페이지에 노출하지
+   * 않는다(보안 제약). 그래서 탐색기 복붙은 원리적으로 불가능하다.
+   * 반면 스크린샷처럼 클립보드에 데이터 자체가 담긴 경우는 여기서 받힌다.
+   * 엑셀 업로드 용도로는 사실상 쓰이지 않지만, 되는 경우를 막을 이유는 없어 남긴다.
    */
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
@@ -203,56 +261,61 @@ export default function SettlementWorkspace() {
 
   return (
     <div className="mt-8 space-y-6">
+      {/*
+        드래그 중 전체 화면 안내.
+        `pointer-events-none`이 필수다 — 이 오버레이가 마우스를 받으면 dragleave/drop이
+        오버레이에서 발생해 파일 인식이 흔들린다.
+      */}
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-gray-900/20">
+          <div className="rounded-2xl border-2 border-dashed border-gray-900 bg-white px-8 py-6 text-center shadow-lg">
+            <p className="font-semibold text-gray-900">여기에 놓으세요</p>
+            <p className="mt-1 text-xs text-gray-500">화면 어디에 놓아도 됩니다</p>
+          </div>
+        </div>
+      )}
+
       {/* 1. 업로드 */}
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
         <h2 className="font-semibold text-gray-900">1. 원천 파일 업로드</h2>
 
-        <div
-          onDragOver={(e) => {
-            e.preventDefault()
-            setDragging(true)
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault()
-            setDragging(false)
-            addFiles(Array.from(e.dataTransfer.files))
-          }}
-          onClick={() => fileInput.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click()
-          }}
-          className={`mt-4 cursor-pointer rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
+        {/*
+          드래그 처리는 window 리스너가 담당한다 (위 useEffect 참고).
+          요소에 직접 달면 조금만 빗나가도 브라우저가 파일을 열어버린다.
+          클릭 경로는 label + 숨은 input — 같은 저장소의 /calc-food UploadZone과 동일한 패턴.
+        */}
+        <label
+          className={`mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
             dragging
-              ? 'border-gray-900 bg-gray-50'
+              ? 'border-gray-900 bg-gray-100'
               : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
           }`}
         >
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            accept=".xlsx,.xls,.xlsm"
+            className="hidden"
+            onChange={(e) => {
+              addFiles(Array.from(e.target.files ?? []))
+              e.target.value = '' // 같은 파일 다시 선택 가능하게
+            }}
+          />
           <p className="text-sm font-medium text-gray-700">
-            여기로 파일을 끌어다 놓거나 <span className="underline">클릭해서 선택</span>
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            탐색기에서 파일을 복사한 뒤 <kbd className="rounded border border-gray-300 bg-gray-50 px-1">Ctrl</kbd>
-            +<kbd className="rounded border border-gray-300 bg-gray-50 px-1">V</kbd> 로 붙여넣어도 됩니다
+            {dragging ? (
+              '여기에 놓으세요'
+            ) : (
+              <>
+                파일을 <span className="underline">화면 아무 곳에나</span> 끌어다 놓거나 클릭해서
+                선택하세요
+              </>
+            )}
           </p>
           <p className="mt-3 text-xs text-gray-400">
             신세계 품목 시트 + CJ 집계표 · 통합 파일 1개도 가능 · .xlsx / .xls / .xlsm
           </p>
-        </div>
-
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          accept=".xlsx,.xls,.xlsm"
-          className="hidden"
-          onChange={(e) => {
-            addFiles(Array.from(e.target.files ?? []))
-            e.target.value = '' // 같은 파일 다시 선택 가능하게
-          }}
-        />
+        </label>
 
         {files.length > 0 && (
           <ul className="mt-4 space-y-2">
