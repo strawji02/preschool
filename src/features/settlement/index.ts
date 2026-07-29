@@ -69,6 +69,20 @@ export {
 } from './report/workbook'
 
 export {
+  buildDeclarationLines,
+  buildDeclarationSheet,
+  calcNameWithholding,
+  DECLARATION_COL,
+  type DeclarationPartner,
+  type DeclarationLine,
+  type DeclarationTotals,
+  type DeclarationLinesResult,
+  type DeclarationSheet,
+  type DeclarationSheetInput,
+  type NameWithholding,
+} from './report/declaration-sheet'
+
+export {
   buildSettlementSheet,
   venueDisplayName,
   REPORT_COL,

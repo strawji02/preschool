@@ -51,4 +51,19 @@ export {
   type SplitValidationResult,
 } from './calc/split-declaration'
 
+// 지급명세서도 순수 계산이라 화면에서 미리보기·검증에 쓸 수 있다
+export {
+  buildDeclarationLines,
+  buildDeclarationSheet,
+  calcNameWithholding,
+  DECLARATION_COL,
+  type DeclarationPartner,
+  type DeclarationLine,
+  type DeclarationTotals,
+  type DeclarationLinesResult,
+  type DeclarationSheet,
+  type DeclarationSheetInput,
+  type NameWithholding,
+} from './report/declaration-sheet'
+
 export type { SettlementSource, TaxBreakdown } from './parse/types'

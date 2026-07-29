@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { DeductionSheet } from '../calc/deduction'
+import type { DeclarationSheet } from './declaration-sheet'
 import { REPORT_COL, type SettlementSheet } from './settlement-sheet'
 
 /**
@@ -35,6 +36,13 @@ export interface WorkbookOptions {
    * "지난달 공제 1,696,500이 뭐였지?"를 답할 수 없다. Q 합계만으로는 근거가 안 남는다.
    */
   deductionSheet?: DeductionSheet | null
+  /**
+   * 사업소득 지급명세서 (docs §6-3). 있으면 세 번째 시트로 붙인다.
+   *
+   * 세무사 제출용이라 **주민번호 열은 빈칸**으로 나간다 — 담당자가 다운로드 후
+   * 직접 채운다 (docs §7: 주민번호는 저장하지 않는다).
+   */
+  declarationSheet?: DeclarationSheet | null
 }
 
 export function buildSettlementWorkbook(
@@ -57,6 +65,25 @@ export function buildSettlementWorkbook(
     dws['!cols'] = [{ wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 30 }]
     applyMoneyFormat(dws)
     XLSX.utils.book_append_sheet(wb, dws, '사업자공제 상세')
+  }
+
+  // 신고할 소득이 없으면(전원 신고액 0) 빈 명세서를 붙이지 않는다
+  const declaration = options.declarationSheet
+  if (declaration && declaration.lines.length > 0) {
+    const nws = XLSX.utils.aoa_to_sheet(declaration.rows as unknown[][])
+    nws['!merges'] = declaration.merges.map((m) => ({ s: { ...m.s }, e: { ...m.e } }))
+    nws['!cols'] = [
+      { wch: 6 }, // 구분
+      { wch: 12 }, // 성명
+      { wch: 14 }, // 사업소득액
+      { wch: 12 }, // 소득세
+      { wch: 12 }, // 지방소득세
+      { wch: 12 }, // 소득세계
+      { wch: 14 }, // 실지급액
+      { wch: 18 }, // 주민번호 — 손으로 채울 자리라 넉넉히
+    ].map((c) => c)
+    applyMoneyFormat(nws)
+    XLSX.utils.book_append_sheet(wb, nws, '사업소득 신고내역')
   }
 
   return wb

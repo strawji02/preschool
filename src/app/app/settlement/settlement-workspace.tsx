@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
   DEDUCTION_CATEGORIES,
+  buildDeclarationLines,
   calcSettlement,
   sumDeductionItems,
+  type DeclarationSplit,
   type DeductionItem,
   type PartnerType,
   type SettlementResult,
@@ -57,6 +59,8 @@ export default function SettlementWorkspace() {
   const [dragging, setDragging] = useState(false)
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
   const [deductions, setDeductions] = useState<Record<string, DeductionItem[]>>({})
+  /** 분할 신고 명의 (docs §4). 비어 있으면 영업자 본인 명의로 신고한다. */
+  const [splits, setSplits] = useState<Record<string, DeclarationSplit[]>>({})
   const [period, setPeriod] = useState(defaultPeriod())
   const [busy, setBusy] = useState<'analyze' | 'download' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -204,6 +208,7 @@ export default function SettlementWorkspace() {
     try {
       const fd = buildFormData()
       fd.append('deductionItems', JSON.stringify(deductions))
+      fd.append('splits', JSON.stringify(splits))
       fd.append('period', period)
 
       const res = await fetch('/api/settlement/report', { method: 'POST', body: fd })
@@ -258,6 +263,28 @@ export default function SettlementWorkspace() {
     }
     return { preTax, netPay, declared, deduction }
   }, [settlements])
+
+  /**
+   * 지급명세서 미리보기 (docs §6-3).
+   *
+   * 서버가 다운로드 시점에 같은 함수로 다시 만든다. 여기서 미리 보여주는 이유는
+   * **분할 합계가 틀리면 다운로드가 막히기 때문**이다 — 눌러보고 실패하는 대신
+   * 입력하는 즉시 어긋난 금액을 알려준다.
+   */
+  const declaration = useMemo(
+    () =>
+      buildDeclarationLines(
+        (analysis?.partners ?? []).map((p) => ({
+          partnerName: p.partnerName,
+          declared: settlements.get(p.partnerId)?.declared ?? 0,
+          splits: splits[p.partnerId],
+        }))
+      ),
+    [analysis, settlements, splits]
+  )
+
+  /** 분할 합계 불일치는 마감 차단 사유다 (docs §4) */
+  const splitBlocked = declaration.warnings.some((w) => w.includes('마감할 수 없습니다'))
 
   return (
     <div className="mt-8 space-y-6">
@@ -522,9 +549,113 @@ export default function SettlementWorkspace() {
             )}
           </section>
 
-          {/* 5. 다운로드 */}
+          {/* 5. 분할 신고 + 지급명세서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">5. 내역서 다운로드</h2>
+            <h2 className="font-semibold text-gray-900">5. 사업소득 지급명세서</h2>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              세무사 제출용입니다. 비워 두면 영업자 본인 명의로 신고합니다. 여러 명 명의로
+              나눠 신고하려면 아래에 성명과 금액을 넣으세요 — <strong>합계가 신고액과
+              정확히 같아야</strong> 내역서를 만들 수 있습니다.
+              <br />
+              <span className="text-gray-400">
+                주민번호 칸은 빈칸으로 출력됩니다. 저장하지 않으니 다운로드 후 직접
+                채워 주세요.
+              </span>
+            </p>
+
+            <div className="mt-4 space-y-4">
+              {analysis.partners.map((p) => {
+                const declared = settlements.get(p.partnerId)?.declared ?? 0
+                return (
+                  <SplitEditor
+                    key={p.partnerId}
+                    partnerName={p.partnerName}
+                    declared={declared}
+                    splits={splits[p.partnerId] ?? []}
+                    onChange={(next) =>
+                      setSplits((prev) => ({ ...prev, [p.partnerId]: next }))
+                    }
+                  />
+                )
+              })}
+            </div>
+
+            {declaration.warnings.length > 0 && (
+              <ul
+                className={`mt-4 space-y-1 rounded-lg px-4 py-3 text-xs ${
+                  splitBlocked ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'
+                }`}
+              >
+                {declaration.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            )}
+
+            {declaration.lines.length > 0 && (
+              <div className="mt-5 overflow-x-auto">
+                <p className="mb-2 text-xs font-medium text-gray-500">
+                  신고 내역 미리보기 — 내역서의{' '}
+                  <span className="text-gray-900">사업소득 신고내역</span> 시트로 나갑니다
+                </p>
+                <table className="w-full min-w-[620px] text-right text-sm">
+                  <thead className="border-b border-gray-200 text-xs text-gray-500">
+                    <tr>
+                      <th className="py-2 text-left font-medium">성명</th>
+                      <th className="py-2 font-medium">사업소득액</th>
+                      <th className="py-2 font-medium">소득세</th>
+                      <th className="py-2 font-medium">지방소득세</th>
+                      <th className="py-2 font-medium">소득세계</th>
+                      <th className="py-2 font-medium">실지급액</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {declaration.lines.map((l) => (
+                      <tr key={`${l.partnerName}-${l.seq}`}>
+                        <td className="py-2 text-left">
+                          <span className="font-medium text-gray-900">{l.name}</span>
+                          {l.name !== l.partnerName && (
+                            <span className="ml-2 text-xs text-gray-400">
+                              {l.partnerName} 분할
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 tabular-nums">{won(l.amount)}</td>
+                        <td className="py-2 tabular-nums">{won(l.incomeTax)}</td>
+                        <td className="py-2 tabular-nums">{won(l.localTax)}</td>
+                        <td className="py-2 tabular-nums">{won(l.taxTotal)}</td>
+                        <td className="py-2 font-semibold tabular-nums text-gray-900">
+                          {won(l.netPay)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-300 text-sm font-semibold">
+                    <tr>
+                      <td className="py-2 text-left">계</td>
+                      <td className="py-2 tabular-nums">{won(declaration.totals.amount)}</td>
+                      <td className="py-2 tabular-nums">
+                        {won(declaration.totals.incomeTax)}
+                      </td>
+                      <td className="py-2 tabular-nums">{won(declaration.totals.localTax)}</td>
+                      <td className="py-2 tabular-nums">{won(declaration.totals.taxTotal)}</td>
+                      <td className="py-2 tabular-nums text-gray-900">
+                        {won(declaration.totals.netPay)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                  ⚠️ 이 표의 <strong>실지급액은 사업소득액 − 소득세계</strong>입니다. 위 4번
+                  표의 실지급(세전 − 세금)과는 값이 다릅니다 — 원본 엑셀도 같은 방식입니다.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* 6. 다운로드 */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 className="font-semibold text-gray-900">6. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="text-sm">
                 <span className="mb-1 block text-xs text-gray-500">정산 기간</span>
@@ -539,7 +670,7 @@ export default function SettlementWorkspace() {
               <button
                 type="button"
                 onClick={download}
-                disabled={busy !== null || !analysis.canClose}
+                disabled={busy !== null || !analysis.canClose || splitBlocked}
                 className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy === 'download' ? '생성 중…' : '엑셀 다운로드'}
@@ -549,14 +680,123 @@ export default function SettlementWorkspace() {
                   매핑 누락을 해결해야 내역서를 만들 수 있습니다
                 </span>
               )}
+              {analysis.canClose && splitBlocked && (
+                <span className="text-xs text-red-600">
+                  분할 신고 합계를 신고액과 맞춰야 내역서를 만들 수 있습니다
+                </span>
+              )}
             </div>
             <p className="mt-3 text-xs leading-relaxed text-gray-500">
               기존 <code className="rounded bg-gray-100 px-1">집계표_정산용</code> 시트와 같은
               레이아웃으로 만듭니다. 열 위치가 동일하니 나란히 놓고 대조해 보세요.
+              <br />
+              시트 3개가 들어갑니다 —{' '}
+              <span className="font-medium text-gray-700">집계표_정산용</span> ·{' '}
+              <span className="font-medium text-gray-700">사업자공제 상세</span> ·{' '}
+              <span className="font-medium text-gray-700">사업소득 신고내역</span>
             </p>
           </section>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * 영업자 한 명의 분할 신고 명의 편집 (docs §4).
+ *
+ * 남은 금액을 항상 보여준다 — 합계가 신고액과 1원이라도 다르면 마감이 막히므로,
+ * 사용자가 계산기를 두드리지 않아도 되게 한다.
+ */
+function SplitEditor({
+  partnerName,
+  declared,
+  splits,
+  onChange,
+}: {
+  partnerName: string
+  declared: number
+  splits: DeclarationSplit[]
+  onChange: (splits: DeclarationSplit[]) => void
+}) {
+  const total = splits.reduce((sum, s) => sum + s.amount, 0)
+  const remain = declared - total
+  const active = splits.length > 0
+
+  function update(index: number, patch: Partial<DeclarationSplit>) {
+    onChange(splits.map((s, i) => (i === index ? { ...s, ...patch } : s)))
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium text-gray-900">{partnerName}</span>
+        <span className="text-sm tabular-nums text-gray-700">
+          신고액 <span className="font-semibold">{won(declared)}</span>원
+          {active && (
+            <span className={remain === 0 ? 'ml-3 text-gray-500' : 'ml-3 text-red-600'}>
+              {remain === 0 ? '분할 합계 일치' : `남은 금액 ${won(remain)}원`}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {active && (
+        <ul className="mt-3 space-y-2">
+          {splits.map((split, i) => (
+            <li key={i} className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={split.name}
+                onChange={(e) => update(i, { name: e.target.value })}
+                placeholder="성명"
+                className="w-32 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+              />
+              <input
+                type="number"
+                step={1}
+                value={split.amount}
+                onChange={(e) => update(i, { amount: Number(e.target.value) || 0 })}
+                placeholder="금액"
+                className="w-36 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none"
+              />
+              {remain !== 0 && (
+                <button
+                  type="button"
+                  onClick={() => update(i, { amount: split.amount + remain })}
+                  className="text-xs text-gray-400 hover:text-gray-900"
+                  title="남은 금액을 이 행에 채웁니다"
+                >
+                  남은 금액 채우기
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onChange(splits.filter((_, x) => x !== i))}
+                className="text-xs text-gray-400 hover:text-red-600"
+              >
+                삭제
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        onClick={() =>
+          onChange([
+            ...splits,
+            // 첫 행은 영업자 본인 이름과 전액을 채워 둔다 — 대부분 본인 + 가족 형태다
+            splits.length === 0
+              ? { name: partnerName, amount: declared }
+              : { name: '', amount: 0 },
+          ])
+        }
+        className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+      >
+        {active ? '+ 명의 추가' : '분할 신고 설정'}
+      </button>
     </div>
   )
 }

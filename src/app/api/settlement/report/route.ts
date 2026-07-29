@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
+  buildDeclarationSheet,
   buildDeductionSheet,
   buildSettlementSheet,
   buildSettlementWorkbook,
@@ -9,6 +10,7 @@ import {
   readUploadedWorkbook,
   runSettlement,
   sumDeductionItems,
+  type DeclarationSplit,
   type DeductionItem,
 } from '@/features/settlement'
 import * as XLSX from 'xlsx'
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest) {
   for (const [partnerId, items] of Object.entries(itemsByPartner)) {
     deductions[partnerId] = sumDeductionItems(items)
   }
+  const splitsByPartner = parseSplits(form.get('splits'))
   const periodLabel = String(form.get('period') ?? '').trim()
 
   try {
@@ -83,7 +86,27 @@ export async function POST(request: NextRequest) {
         items: itemsByPartner[p.partnerId] ?? [],
       }))
     )
-    const wb = buildSettlementWorkbook(sheet, { deductionSheet })
+    // 사업소득 지급명세서 (docs §6-3). 본사는 정산 대상이 아니라 여기 들어오지 않는다.
+    const declarationSheet = buildDeclarationSheet({
+      periodLabel: periodLabel || '기간미지정',
+      partners: result.partners.map((p) => ({
+        partnerName: p.partnerName,
+        declared: p.settlement.declared,
+        splits: splitsByPartner[p.partnerId],
+      })),
+    })
+
+    // 분할 합계가 신고액과 다르면 파일을 내주지 않는다. 틀린 신고 금액이 세무사에게
+    // 넘어가면 되돌리기 어렵다 (docs §4 — 불일치 시 마감 차단).
+    const blocking = declarationSheet.warnings.filter((w) => w.includes('마감할 수 없습니다'))
+    if (blocking.length > 0) {
+      return NextResponse.json(
+        { success: false, error: blocking.join(' / ') },
+        { status: 409 }
+      )
+    }
+
+    const wb = buildSettlementWorkbook(sheet, { deductionSheet, declarationSheet })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
     const fileName = `정산내역서_${periodLabel || '기간미지정'}.xlsx`
 
@@ -106,6 +129,40 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  }
+}
+
+/**
+ * 분할 신고 `{ "<partnerId>": [{ name, amount }, ...] }` 형태 (docs §4).
+ *
+ * 합계 검증은 `buildDeclarationSheet`가 하므로 여기서는 형태만 정리한다.
+ * 성명이 빈 줄과 금액 0인 줄은 사용자가 추가만 하고 안 채운 것이라 버린다.
+ */
+function parseSplits(
+  raw: FormDataEntryValue | null
+): Record<string, DeclarationSplit[]> {
+  if (typeof raw !== 'string' || raw.trim() === '') return {}
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, DeclarationSplit[]> = {}
+    for (const [partnerId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(value)) continue
+      const splits = value
+        .map((v): DeclarationSplit | null => {
+          if (!v || typeof v !== 'object') return null
+          const row = v as Record<string, unknown>
+          const name = typeof row.name === 'string' ? row.name.trim() : ''
+          const amount = typeof row.amount === 'number' ? row.amount : Number(row.amount)
+          if (name === '' || !Number.isFinite(amount) || amount === 0) return null
+          return { name, amount: Math.trunc(amount) }
+        })
+        .filter((s): s is DeclarationSplit => s !== null)
+      if (splits.length > 0) out[partnerId] = splits
+    }
+    return out
+  } catch {
+    return {}
   }
 }
 
