@@ -30,6 +30,13 @@ export {
   type SplitValidationResult,
 } from './calc/split-declaration'
 
+export {
+  loadSettlementMaster,
+  type PartnerRecord,
+  type VenueRecord,
+  type SettlementMaster,
+} from './data/master'
+
 export { parseShinsegaeSheet } from './parse/shinsegae'
 export { parseCjSheet } from './parse/cj'
 export { aggregateByPartner } from './parse/aggregate'
