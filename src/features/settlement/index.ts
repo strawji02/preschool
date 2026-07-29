@@ -31,6 +31,22 @@ export {
 } from './calc/split-declaration'
 
 export {
+  buildSettlementWorkbook,
+  writeSettlementXlsx,
+  type WorkbookOptions,
+} from './report/workbook'
+
+export {
+  buildSettlementSheet,
+  venueDisplayName,
+  REPORT_COL,
+  type ReportVenueLine,
+  type ReportPartnerBlock,
+  type SettlementSheet,
+  type SheetMerge,
+} from './report/settlement-sheet'
+
+export {
   loadSettlementMaster,
   type PartnerRecord,
   type VenueRecord,
