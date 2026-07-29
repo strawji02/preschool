@@ -13,10 +13,9 @@ const MODULES: ModuleCard[] = [
   {
     title: '급식 정산',
     description:
-      '신세계·CJ 원천 데이터를 올려 유치원 청구액과 영업자 지급액을 계산하고, 홈택스·영업자·세무사용 엑셀을 뽑습니다.',
+      '신세계·CJ 원천 데이터를 올려 영업자별 지급액을 계산하고 정산 내역서를 뽑습니다. 지급명세서·홈택스 양식은 개발 중입니다.',
     href: '/app/settlement',
     status: '개발 중',
-    disabled: true,
   },
   {
     title: '급식 단가 비교',

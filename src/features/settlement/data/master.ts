@@ -1,3 +1,6 @@
+// 클라이언트 컴포넌트가 실수로 이 모듈을 import하면 빌드가 실패한다.
+// service_role 키를 다루는 코드가 브라우저 번들에 들어가는 것을 구조적으로 막는다.
+import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { PartnerType } from '../calc/settlement-formula'
 import type { PartnerMapping, SettlementSource } from '../parse/types'

@@ -31,6 +31,27 @@ export {
 } from './calc/split-declaration'
 
 export {
+  detectSheetKind,
+  pickSourceSheets,
+  type UploadedSheet,
+  type UploadedWorkbook,
+  type PickedSheet,
+  type PickSheetsResult,
+} from './service/pick-sheets'
+
+export { readUploadedWorkbook, isExcelUpload } from './service/read-upload'
+
+export {
+  runSettlement,
+  type SettlementRunRequest,
+  type SettlementRunResult,
+  type PartnerSummary,
+  type ExcludedSummary,
+  type UnmappedSummary,
+  type SourceSummary,
+} from './service/run-settlement'
+
+export {
   buildSettlementWorkbook,
   writeSettlementXlsx,
   type WorkbookOptions,

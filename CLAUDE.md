@@ -32,6 +32,9 @@ src/lib/                   범용 유틸 (format, cn, supabase)
 **규칙**
 1. `features/settlement` ↔ `features/comparison` **직접 import 금지**. 공유는 `features/shared` 또는 `lib` 경유.
 2. 각 feature는 `index.ts` barrel로만 노출. 내부 파일 직접 import 금지.
+   - **클라이언트 컴포넌트는 `client.ts` barrel을 쓴다.** `index.ts`에는 service_role
+     접근 코드가 섞여 있어 브라우저 번들에 서버 코드가 끌려 들어간다.
+     서버 전용 모듈에는 `import 'server-only'`를 걸어 빌드가 실패하게 둔다.
 3. 신규 정산 코드만 새 구조로 작성. 기존 `calc-food`는 건드릴 일 있을 때 점진 이동.
 
 ## 개발 규칙 (공통)
