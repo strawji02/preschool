@@ -1,0 +1,30 @@
+# 배포에서 제외할 것 (2026-07-29)
+#
+# 저장소 루트에 텔레그램 사진과 업무 문서(거래명세서·사업제안서 등)가 쌓여 있다.
+# 빌드에 전혀 쓰이지 않고, 외부 배포 환경에 올릴 이유가 없다.
+# git 추적 중인 루트 파일과는 겹치지 않는다(확인 완료).
+
+# 루트에 쌓인 이미지·문서
+/*.jpg
+/*.jpeg
+/*.png
+/*.gif
+/*.webp
+/*.xlsx
+/*.xls
+/*.pptx
+/*.docx
+/*.pdf
+/*.hwp
+/*.hwpx
+/*.html
+/*.csv
+
+# 임시 스크립트·산출물
+/make_profit_ppt.py
+/embed-progress.log
+/.playwright-mcp
+/supabase/.temp
+
+# 개발 문서 (빌드 불필요)
+/docs
