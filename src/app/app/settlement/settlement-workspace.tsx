@@ -1,10 +1,13 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
+  DEDUCTION_CATEGORIES,
   calcSettlement,
+  sumDeductionItems,
+  type DeductionItem,
   type PartnerType,
   type SettlementResult,
 } from '@/features/settlement/client'
@@ -44,33 +47,64 @@ interface AnalyzeResponse {
 
 const won = (n: number) => n.toLocaleString('ko-KR')
 
+const EXCEL_EXT = /\.(xlsx|xls|xlsm)$/i
+
 export default function SettlementWorkspace() {
   const fileInput = useRef<HTMLInputElement>(null)
   const [files, setFiles] = useState<File[]>([])
+  const [dragging, setDragging] = useState(false)
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
-  const [deductions, setDeductions] = useState<Record<string, number>>({})
+  const [deductions, setDeductions] = useState<Record<string, DeductionItem[]>>({})
   const [period, setPeriod] = useState(defaultPeriod())
   const [busy, setBusy] = useState<'analyze' | 'download' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
-  /** 공제액을 반영한 산식 결과 — 입력이 바뀌면 즉시 다시 계산된다 */
-  const settlements = useMemo(() => {
-    const map = new Map<string, SettlementResult>()
-    for (const p of analysis?.partners ?? []) {
-      map.set(
-        p.partnerId,
-        calcSettlement({
-          costTotal: p.costTotal,
-          costVat: p.costVat,
-          priceTotal: p.priceTotal,
-          priceVat: p.priceVat,
-          partnerType: p.partnerType,
-          businessDeduction: deductions[p.partnerId] ?? 0,
-        })
+  /** 파일 추가 — 같은 파일을 두 번 넣지 않는다 (이름+크기로 판별) */
+  const addFiles = useCallback((incoming: readonly File[]) => {
+    const excel = incoming.filter((f) => EXCEL_EXT.test(f.name))
+    const skipped = incoming.length - excel.length
+
+    if (excel.length === 0) {
+      setError(
+        skipped > 0
+          ? '엑셀 파일(.xlsx/.xls/.xlsm)만 올릴 수 있습니다.'
+          : '읽을 수 있는 파일이 없습니다.'
       )
+      return
     }
-    return map
-  }, [analysis, deductions])
+
+    setFiles((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`))
+      const added = excel.filter((f) => !seen.has(`${f.name}:${f.size}`))
+      if (added.length === 0) {
+        setNotice('이미 추가된 파일입니다.')
+        return prev
+      }
+      setError(null)
+      setNotice(
+        `${added.length}개 추가${skipped > 0 ? ` (엑셀이 아닌 ${skipped}개는 무시)` : ''}`
+      )
+      return [...prev, ...added]
+    })
+    setAnalysis(null)
+  }, [])
+
+  /**
+   * 붙여넣기 업로드 — 탐색기에서 파일을 복사(Ctrl+C)한 뒤 화면에서 Ctrl+V.
+   * `clipboardData.files`에 파일이 담기는지는 브라우저·OS에 따라 다르다.
+   * Windows Chrome에서는 동작하고, 안 되는 환경에서는 드래그나 파일 선택을 쓰면 된다.
+   */
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const pasted = Array.from(e.clipboardData?.files ?? [])
+      if (pasted.length === 0) return
+      e.preventDefault()
+      addFiles(pasted)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [addFiles])
 
   function buildFormData(): FormData {
     const fd = new FormData()
@@ -80,11 +114,12 @@ export default function SettlementWorkspace() {
 
   async function analyze() {
     if (files.length === 0) {
-      setError('엑셀 파일을 선택해 주세요.')
+      setError('엑셀 파일을 올려주세요.')
       return
     }
     setBusy('analyze')
     setError(null)
+    setNotice(null)
     setAnalysis(null)
     try {
       const res = await fetch('/api/settlement/analyze', {
@@ -110,7 +145,7 @@ export default function SettlementWorkspace() {
     setError(null)
     try {
       const fd = buildFormData()
-      fd.append('deductions', JSON.stringify(deductions))
+      fd.append('deductionItems', JSON.stringify(deductions))
       fd.append('period', period)
 
       const res = await fetch('/api/settlement/report', { method: 'POST', body: fd })
@@ -133,35 +168,123 @@ export default function SettlementWorkspace() {
     }
   }
 
+  /** 공제액을 반영한 산식 결과 — 항목이 바뀌면 즉시 다시 계산된다 */
+  const settlements = useMemo(() => {
+    const map = new Map<string, SettlementResult>()
+    for (const p of analysis?.partners ?? []) {
+      map.set(
+        p.partnerId,
+        calcSettlement({
+          costTotal: p.costTotal,
+          costVat: p.costVat,
+          priceTotal: p.priceTotal,
+          priceVat: p.priceVat,
+          partnerType: p.partnerType,
+          businessDeduction: sumDeductionItems(deductions[p.partnerId] ?? []),
+        })
+      )
+    }
+    return map
+  }, [analysis, deductions])
+
   const totals = useMemo(() => {
     let preTax = 0
     let netPay = 0
     let declared = 0
+    let deduction = 0
     for (const s of settlements.values()) {
       preTax += s.preTax
       netPay += s.netPay
       declared += s.declared
+      deduction += s.businessDeduction
     }
-    return { preTax, netPay, declared }
+    return { preTax, netPay, declared, deduction }
   }, [settlements])
 
   return (
     <div className="mt-8 space-y-6">
-      {/* 업로드 */}
+      {/* 1. 업로드 */}
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
         <h2 className="font-semibold text-gray-900">1. 원천 파일 업로드</h2>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            accept=".xlsx,.xls,.xlsm"
-            onChange={(e) => {
-              setFiles(Array.from(e.target.files ?? []))
-              setAnalysis(null)
-            }}
-            className="text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:text-gray-700 hover:file:bg-gray-50"
-          />
+
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragging(true)
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragging(false)
+            addFiles(Array.from(e.dataTransfer.files))
+          }}
+          onClick={() => fileInput.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click()
+          }}
+          className={`mt-4 cursor-pointer rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
+            dragging
+              ? 'border-gray-900 bg-gray-50'
+              : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+          }`}
+        >
+          <p className="text-sm font-medium text-gray-700">
+            여기로 파일을 끌어다 놓거나 <span className="underline">클릭해서 선택</span>
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            탐색기에서 파일을 복사한 뒤 <kbd className="rounded border border-gray-300 bg-gray-50 px-1">Ctrl</kbd>
+            +<kbd className="rounded border border-gray-300 bg-gray-50 px-1">V</kbd> 로 붙여넣어도 됩니다
+          </p>
+          <p className="mt-3 text-xs text-gray-400">
+            신세계 품목 시트 + CJ 집계표 · 통합 파일 1개도 가능 · .xlsx / .xls / .xlsm
+          </p>
+        </div>
+
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          accept=".xlsx,.xls,.xlsm"
+          className="hidden"
+          onChange={(e) => {
+            addFiles(Array.from(e.target.files ?? []))
+            e.target.value = '' // 같은 파일 다시 선택 가능하게
+          }}
+        />
+
+        {files.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {files.map((f) => (
+              <li
+                key={`${f.name}:${f.size}`}
+                className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"
+              >
+                <span className="truncate text-gray-700">
+                  {f.name}
+                  <span className="ml-2 text-xs text-gray-400">
+                    {(f.size / 1024).toFixed(0)}KB
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiles((prev) =>
+                      prev.filter((x) => `${x.name}:${x.size}` !== `${f.name}:${f.size}`)
+                    )
+                    setAnalysis(null)
+                  }}
+                  className="ml-3 shrink-0 text-xs text-gray-400 hover:text-red-600"
+                >
+                  제거
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-4 flex items-center gap-3">
           <button
             type="button"
             onClick={analyze}
@@ -170,16 +293,21 @@ export default function SettlementWorkspace() {
           >
             {busy === 'analyze' ? '분석 중…' : '분석'}
           </button>
+          {files.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setFiles([])
+                setAnalysis(null)
+                setNotice(null)
+              }}
+              className="text-sm text-gray-500 hover:text-gray-900"
+            >
+              전체 지우기
+            </button>
+          )}
+          {notice && <span className="text-xs text-gray-500">{notice}</span>}
         </div>
-        {files.length > 0 && (
-          <ul className="mt-3 space-y-1 text-xs text-gray-500">
-            {files.map((f) => (
-              <li key={f.name}>
-                {f.name} · {(f.size / 1024).toFixed(0)}KB
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       {error && (
@@ -190,7 +318,7 @@ export default function SettlementWorkspace() {
 
       {analysis && (
         <>
-          {/* 판별 결과 */}
+          {/* 2. 판별 결과 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
             <h2 className="font-semibold text-gray-900">2. 판별된 원천 시트</h2>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -230,15 +358,34 @@ export default function SettlementWorkspace() {
             )}
           </section>
 
-          {/* 정산 결과 */}
+          {/* 3. 사업자공제 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">3. 영업자별 정산</h2>
+            <h2 className="font-semibold text-gray-900">3. 사업자공제 입력</h2>
             <p className="mt-1 text-xs text-gray-500">
-              사업자공제는 매월 수기 입력입니다. 값을 바꾸면 즉시 재계산됩니다.
+              항목별로 넣으면 합계가 산식의 공제액(Q)이 됩니다. 입력 내역은 내역서의{' '}
+              <span className="font-medium">사업자공제 상세</span> 시트로 함께 저장됩니다.
             </p>
 
+            <div className="mt-4 space-y-4">
+              {analysis.partners.map((p) => (
+                <DeductionEditor
+                  key={p.partnerId}
+                  partnerName={p.partnerName}
+                  items={deductions[p.partnerId] ?? []}
+                  onChange={(items) =>
+                    setDeductions((prev) => ({ ...prev, [p.partnerId]: items }))
+                  }
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* 4. 정산 결과 */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 className="font-semibold text-gray-900">4. 영업자별 정산</h2>
+
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[860px] text-right text-sm">
+              <table className="w-full min-w-[820px] text-right text-sm">
                 <thead className="border-b border-gray-200 text-xs text-gray-500">
                   <tr>
                     <th className="py-2 text-left font-medium">영업자</th>
@@ -273,21 +420,7 @@ export default function SettlementWorkspace() {
                         <td className="py-2 tabular-nums">{won(p.priceTotal)}</td>
                         <td className="py-2 tabular-nums">{won(s.platformFee)}</td>
                         <td className="py-2 tabular-nums">{won(s.vatDiff)}</td>
-                        <td className="py-2">
-                          <input
-                            type="number"
-                            min={0}
-                            step={10}
-                            value={deductions[p.partnerId] ?? 0}
-                            onChange={(e) =>
-                              setDeductions((prev) => ({
-                                ...prev,
-                                [p.partnerId]: Number(e.target.value) || 0,
-                              }))
-                            }
-                            className="w-28 rounded border border-gray-300 px-2 py-1 text-right tabular-nums focus:border-gray-500 focus:outline-none"
-                          />
-                        </td>
+                        <td className="py-2 tabular-nums">{won(s.businessDeduction)}</td>
                         <td className="py-2 tabular-nums">{won(s.preTax)}</td>
                         <td className="py-2 tabular-nums">{won(s.declared)}</td>
                         <td className="py-2 font-semibold tabular-nums text-gray-900">
@@ -300,7 +433,8 @@ export default function SettlementWorkspace() {
                 <tfoot className="border-t-2 border-gray-300 text-sm font-semibold">
                   <tr>
                     <td className="py-2 text-left">합계</td>
-                    <td colSpan={5} />
+                    <td colSpan={4} />
+                    <td className="py-2 tabular-nums">{won(totals.deduction)}</td>
                     <td className="py-2 tabular-nums">{won(totals.preTax)}</td>
                     <td className="py-2 tabular-nums">{won(totals.declared)}</td>
                     <td className="py-2 tabular-nums text-gray-900">{won(totals.netPay)}</td>
@@ -314,16 +448,20 @@ export default function SettlementWorkspace() {
                 {[...settlements.entries()].flatMap(([id, s]) =>
                   s.warnings.map((w, i) => {
                     const name = analysis.partners.find((p) => p.partnerId === id)?.partnerName
-                    return <li key={`${id}-${i}`}>{name}: {w}</li>
+                    return (
+                      <li key={`${id}-${i}`}>
+                        {name}: {w}
+                      </li>
+                    )
                   })
                 )}
               </ul>
             )}
           </section>
 
-          {/* 다운로드 */}
+          {/* 5. 다운로드 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">4. 내역서 다운로드</h2>
+            <h2 className="font-semibold text-gray-900">5. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="text-sm">
                 <span className="mb-1 block text-xs text-gray-500">정산 기간</span>
@@ -356,6 +494,84 @@ export default function SettlementWorkspace() {
           </section>
         </>
       )}
+    </div>
+  )
+}
+
+/** 영업자 한 명의 공제 항목 편집 */
+function DeductionEditor({
+  partnerName,
+  items,
+  onChange,
+}: {
+  partnerName: string
+  items: DeductionItem[]
+  onChange: (items: DeductionItem[]) => void
+}) {
+  const total = sumDeductionItems(items)
+
+  function update(index: number, patch: Partial<DeductionItem>) {
+    onChange(items.map((it, i) => (i === index ? { ...it, ...patch } : it)))
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 px-4 py-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-900">{partnerName}</span>
+        <span className="text-sm tabular-nums text-gray-700">
+          공제 합계 <span className="font-semibold">{won(total)}</span>원
+        </span>
+      </div>
+
+      {items.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {items.map((item, i) => (
+            <li key={i} className="flex flex-wrap items-center gap-2">
+              <select
+                value={item.category}
+                onChange={(e) => update(i, { category: e.target.value })}
+                className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+              >
+                {DEDUCTION_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                step={10}
+                value={item.amount}
+                onChange={(e) => update(i, { amount: Number(e.target.value) || 0 })}
+                placeholder="금액"
+                className="w-32 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none"
+              />
+              <input
+                type="text"
+                value={item.note ?? ''}
+                onChange={(e) => update(i, { note: e.target.value })}
+                placeholder="비고 (예: 6월 2회)"
+                className="min-w-[10rem] flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => onChange(items.filter((_, x) => x !== i))}
+                className="text-xs text-gray-400 hover:text-red-600"
+              >
+                삭제
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        onClick={() => onChange([...items, { category: DEDUCTION_CATEGORIES[0], amount: 0 }])}
+        className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+      >
+        + 공제 항목 추가
+      </button>
     </div>
   )
 }

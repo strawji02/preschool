@@ -35,6 +35,17 @@ export {
 } from './calc/settlement-formula'
 
 export {
+  DEDUCTION_CATEGORIES,
+  sumDeductionItems,
+  normalizeDeductionItems,
+  buildDeductionSheet,
+  type DeductionCategory,
+  type DeductionItem,
+  type PartnerDeductions,
+  type DeductionSheet,
+} from './calc/deduction'
+
+export {
   validateSplitDeclaration,
   type DeclarationSplit,
   type SplitValidationResult,

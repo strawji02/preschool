@@ -1,12 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
+  buildDeductionSheet,
   buildSettlementSheet,
+  buildSettlementWorkbook,
   isExcelUpload,
+  normalizeDeductionItems,
   readUploadedWorkbook,
   runSettlement,
-  writeSettlementXlsx,
+  sumDeductionItems,
+  type DeductionItem,
 } from '@/features/settlement'
+import * as XLSX from 'xlsx'
 
 /**
  * [정산] 영업자별 정산 내역서 다운로드 (docs §6-2).
@@ -39,7 +44,13 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const deductions = parseDeductions(form.get('deductions'))
+  // 공제 상세(항목별)를 받는다. 합계가 곧 산식의 Q이므로 서버에서 다시 더한다 —
+  // 클라이언트가 보낸 합계를 그대로 믿으면 화면과 파일의 Q가 어긋날 수 있다.
+  const itemsByPartner = parseDeductionItems(form.get('deductionItems'))
+  const deductions: Record<string, number> = {}
+  for (const [partnerId, items] of Object.entries(itemsByPartner)) {
+    deductions[partnerId] = sumDeductionItems(items)
+  }
   const periodLabel = String(form.get('period') ?? '').trim()
 
   try {
@@ -66,7 +77,14 @@ export async function POST(request: NextRequest) {
     }
 
     const sheet = buildSettlementSheet(result.blocks)
-    const bytes = writeSettlementXlsx(sheet)
+    const deductionSheet = buildDeductionSheet(
+      result.partners.map((p) => ({
+        partnerName: p.partnerName,
+        items: itemsByPartner[p.partnerId] ?? [],
+      }))
+    )
+    const wb = buildSettlementWorkbook(sheet, { deductionSheet })
+    const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
     const fileName = `정산내역서_${periodLabel || '기간미지정'}.xlsx`
 
     return new NextResponse(bytes as unknown as BodyInit, {
@@ -91,16 +109,21 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** `{ "<partnerId>": 624000 }` 형태. 숫자로 해석되지 않는 값은 무시한다. */
-function parseDeductions(raw: FormDataEntryValue | null): Record<string, number> {
+/**
+ * `{ "<partnerId>": [{ category, amount, note? }, ...] }` 형태.
+ * 항목 정리는 `normalizeDeductionItems`가 맡는다 (금액 0·항목명 없는 줄 제거).
+ */
+function parseDeductionItems(
+  raw: FormDataEntryValue | null
+): Record<string, DeductionItem[]> {
   if (typeof raw !== 'string' || raw.trim() === '') return {}
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return {}
-    const out: Record<string, number> = {}
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      const n = typeof v === 'number' ? v : Number(v)
-      if (Number.isFinite(n)) out[k] = n
+    const out: Record<string, DeductionItem[]> = {}
+    for (const [partnerId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const items = normalizeDeductionItems(value)
+      if (items.length > 0) out[partnerId] = items
     }
     return out
   } catch {
