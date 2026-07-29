@@ -2,13 +2,19 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 /**
- * @deprecated (2026-05-12) anon key 기반 SSR client.
+ * Supabase Auth용 SSR client (2026-07-29 재활성화).
  *
- * 모든 public table에 RLS가 활성화되어 anon role은 default deny.
- * server-side에서 DB 접근 시 반드시 createAdminClient (service_role) 사용.
- * 향후 Supabase Auth 도입 시점에 재활성화 검토.
+ * 2026-05-12에 `@deprecated` 처리했던 이유는 "인증이 없어 anon role이 RLS
+ * default deny에 걸린다"였다. Supabase Auth 도입으로 그 전제가 바뀌었다.
+ *
+ * ⚠️ 용도 구분 — 섞지 말 것:
+ * - 이 client: **인증 전용** (`auth.getUser()`, `exchangeCodeForSession()`).
+ *   쿠키를 읽어야 세션을 알 수 있으므로 SSR client가 필요하다.
+ * - 데이터 접근: 여전히 `createAdminClient()` (service_role). public table은
+ *   전부 RLS default deny이고 authenticated용 policy를 만들지 않았다.
  *
  * @see src/lib/supabase/admin.ts
+ * @see src/features/shared/auth
  */
 export async function createClient() {
   const cookieStore = await cookies()

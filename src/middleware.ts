@@ -21,6 +21,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkRateLimit, tierForPath } from '@/lib/ratelimit'
+import { updateSession, copyCookies } from '@/lib/supabase/middleware'
 
 // 허용 도메인 — production + Vercel preview
 // 환경변수로 추가 도메인 허용 가능 (콤마 구분)
@@ -66,9 +67,21 @@ function getClientIp(request: NextRequest): string {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // /app/* — Supabase 세션 갱신 + 미로그인 리다이렉트 (2026-07-29 추가)
+  // 보안 경계는 여기가 아니라 /app/layout.tsx의 requireUser()다.
+  if (pathname.startsWith('/app')) {
+    return appGuard(request)
+  }
+
   // /api/* 외 경로는 통과
   if (!pathname.startsWith('/api/')) {
     return NextResponse.next()
+  }
+
+  // 정산 API는 세션 필수 (미로그인 401). 라우트 핸들러에서 requireApiUser()로 재확인한다.
+  if (pathname.startsWith('/api/settlement')) {
+    const denied = await settlementApiGuard(request)
+    if (denied) return denied
   }
 
   // === Origin/Secret 검증 ===
@@ -140,7 +153,44 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
-// /api/* 만 적용 (정적 리소스/페이지는 통과)
+/**
+ * /app/* 가드 — 세션 쿠키를 갱신하고, 미로그인 사용자를 /login으로 보낸다.
+ *
+ * 화이트리스트 회수 확인은 여기서 하지 않는다 (middleware는 요청마다 도는 hot path).
+ * 그건 /app/layout.tsx의 requireUser()가 담당한다.
+ */
+async function appGuard(request: NextRequest): Promise<NextResponse> {
+  const { response, user } = await updateSession(request)
+
+  if (!user) {
+    const loginUrl = request.nextUrl.clone()
+    loginUrl.pathname = '/login'
+    loginUrl.search = ''
+    loginUrl.searchParams.set('next', request.nextUrl.pathname)
+    // 갱신된 쿠키를 리다이렉트 응답에 옮기지 않으면 세션이 어긋난다.
+    return copyCookies(response, NextResponse.redirect(loginUrl))
+  }
+
+  return response
+}
+
+/** 정산 API 세션 가드. 통과면 null, 미로그인이면 401 응답. */
+async function settlementApiGuard(
+  request: NextRequest
+): Promise<NextResponse | null> {
+  const { response, user } = await updateSession(request)
+  if (user) return null
+
+  return copyCookies(
+    response,
+    NextResponse.json(
+      { success: false, error: '로그인이 필요합니다.' },
+      { status: 401 }
+    )
+  )
+}
+
+// /api/* + /app/* 적용 (정적 리소스/공개 페이지는 통과)
 export const config = {
-  matcher: ['/api/:path*'],
+  matcher: ['/api/:path*', '/app/:path*'],
 }
