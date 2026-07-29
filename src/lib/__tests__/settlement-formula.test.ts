@@ -355,30 +355,85 @@ describe('calcSettlement 파이프라인', () => {
 })
 
 // ============================================================
-// 6. 세전이 0 이하일 때 — docs §11 미결 사항. 현재 동작을 명시적으로 고정
+// 6. 세전이 음수일 때 — docs §11, 2026-07-29 확정: **0 처리 + 경고**
 // ============================================================
-describe('세전(R)이 0 이하인 경우 (docs §11 미결 — 잠정 규칙)', () => {
-  it('신고액이 0 이하면 원천징수하지 않는다 (음수 세금 방지)', () => {
-    const r = calcWithholding({ preTax: -500_000, platformFee: 0, partnerType: 'partner' })
-    expect(r.declared).toBe(-500_000)
-    expect(r.incomeTax).toBe(0)
-    expect(r.localTax).toBe(0)
-    expect(r.netPay).toBe(-500_000)
+describe('세전(R)이 음수인 경우 — 0 처리 + 경고 (2026-07-29 확정)', () => {
+  /** 원가가 단가를 넘어 적자가 난 달 */
+  const loss = {
+    costTotal: 2_000_000,
+    costVat: 0,
+    priceTotal: 1_000_000,
+    priceVat: 0,
+    partnerType: 'cofounder' as const,
+  }
+
+  it('세전이 음수면 0으로 처리한다', () => {
+    const r = calcSettlement(loss)
+    expect(r.preTaxRaw).toBeLessThan(0)
+    expect(r.preTax).toBe(0)
   })
 
-  it('신고액이 정확히 0이면 세금은 0이다', () => {
-    const r = calcWithholding({ preTax: 0, platformFee: 0, partnerType: 'partner' })
+  it('원래 음수값을 preTaxRaw에 보존한다 (이월 정책이 정해지면 여기서 쓴다)', () => {
+    const r = calcSettlement(loss)
+    // M = −1,000,000 / O = ↑(2,000,000×5%) = 100,000 / P = 0 / Q = 0
+    expect(r.margin).toBe(-1_000_000)
+    expect(r.platformFee).toBe(100_000)
+    expect(r.preTaxRaw).toBe(-1_100_000)
+  })
+
+  it('신고액·세금·실지급 모두 0이다 — 받을 게 없으면 신고할 소득도 없다', () => {
+    const r = calcSettlement(loss)
+    expect(r.declared).toBe(0)
     expect(r.incomeTax).toBe(0)
     expect(r.localTax).toBe(0)
     expect(r.netPay).toBe(0)
   })
 
-  it('세전이 음수여도 코파운더 적립금이 크면 신고액은 양수가 될 수 있다', () => {
-    const r = calcWithholding({ preTax: -100_000, platformFee: 500_000, partnerType: 'cofounder' })
-    expect(r.declared).toBe(400_000)
-    expect(r.incomeTax).toBe(12_000)
-    expect(r.localTax).toBe(1_200)
-    expect(r.netPay).toBe(-113_200) // 세전(음수)에서 차감
+  it('코파운더라도 적립금을 신고액에 넣지 않는다 (0 처리가 우선)', () => {
+    const co = calcSettlement({ ...loss, partnerType: 'cofounder' })
+    const pt = calcSettlement({ ...loss, partnerType: 'partner' })
+    expect(co.declared).toBe(0)
+    expect(pt.declared).toBe(0)
+    expect(co.netPay).toBe(0)
+  })
+
+  it('경고를 남긴다 — 조용히 0으로 만들면 담당자가 못 알아챈다', () => {
+    const r = calcSettlement(loss)
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain('세전')
+    expect(r.warnings[0]).toContain('1,100,000') // 원래 음수 금액이 보여야 한다
+  })
+
+  it('세전이 정확히 0이면 경고하지 않는다 (음수가 아니므로)', () => {
+    const r = calcSettlement({
+      costTotal: 1_000_000,
+      costVat: 0,
+      priceTotal: 1_050_000,
+      priceVat: 0,
+      partnerType: 'partner',
+    })
+    expect(r.preTax).toBe(0) // 마진 50,000 − 적립금 50,000
+    expect(r.preTaxRaw).toBe(0)
+    expect(r.warnings).toHaveLength(0)
+    expect(r.netPay).toBe(0)
+  })
+
+  it('정상(양수) 정산에는 경고가 없다', () => {
+    for (const f of JUNE_2026) {
+      const r = run(f)
+      expect(r.warnings).toHaveLength(0)
+      expect(r.preTax).toBe(r.preTaxRaw)
+    }
+  })
+
+  it('calcWithholding은 순수 함수로 남는다 — clamp는 파이프라인 정책이다', () => {
+    // 0 처리 정책은 calcSettlement가 담당한다. 이 헬퍼는 받은 값을 그대로 계산한다.
+    // 단 신고액이 0 이하면 음수 세금이 무의미하므로 세금만 0으로 둔다.
+    const r = calcWithholding({ preTax: -500_000, platformFee: 0, partnerType: 'partner' })
+    expect(r.declared).toBe(-500_000)
+    expect(r.incomeTax).toBe(0)
+    expect(r.localTax).toBe(0)
+    expect(r.netPay).toBe(-500_000)
   })
 })
 

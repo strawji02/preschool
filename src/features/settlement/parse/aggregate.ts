@@ -21,12 +21,18 @@ export function aggregateByPartner(
 ): AggregateResult {
   const warnings: string[] = []
   const unmapped: NormalizedVenue[] = []
+  const excluded: NormalizedVenue[] = []
   const byPartner = new Map<string, PartnerTotals>()
 
   for (const venue of venues) {
     const key = venueMappingKey(venue.source, venue.businessCode)
     const partnerId = mapping[key]
 
+    // `null` = 의도적 제외(본사 등). `undefined`/`''` = 누락. 반드시 구분한다.
+    if (partnerId === null) {
+      excluded.push(venue)
+      continue
+    }
     if (!partnerId) {
       unmapped.push(venue)
       continue
@@ -61,5 +67,5 @@ export function aggregateByPartner(
     )
   }
 
-  return { partners: [...byPartner.values()], unmapped, warnings }
+  return { partners: [...byPartner.values()], unmapped, excluded, warnings }
 }

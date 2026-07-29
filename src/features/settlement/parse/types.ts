@@ -47,8 +47,15 @@ export interface ParseResult {
  */
 export type VenueMappingKey = `${SettlementSource}:${string}`
 
-/** 사업장 → 영업자 매핑. docs §10의 "매핑 키 = 사업장 코드"를 원천별로 확장한 형태. */
-export type PartnerMapping = Record<string, string>
+/**
+ * 사업장 → 영업자 매핑. docs §10의 "매핑 키 = 사업장 코드"를 원천별로 확장한 형태.
+ *
+ * 값의 의미를 셋으로 구분한다 — **누락과 의도적 제외를 섞으면 마감 검증이 무의미해진다**:
+ * - `'김영수'` 등 영업자 ID → 그 영업자에게 집계
+ * - `null` → **의도적 정산 제외** (예: `키즈웰에듀푸드(본사)`). 경고하지 않는다.
+ * - 키 자체가 없거나 빈 문자열 → **매핑 누락**. 경고하고 마감을 막는다.
+ */
+export type PartnerMapping = Record<string, string | null>
 
 export function venueMappingKey(
   source: SettlementSource,
@@ -72,5 +79,7 @@ export interface AggregateResult {
   partners: PartnerTotals[]
   /** 담당 영업자를 못 찾은 사업장. 하나라도 있으면 월 마감을 막아야 한다 (docs §8). */
   unmapped: NormalizedVenue[]
+  /** 의도적으로 정산에서 뺀 사업장 (매핑값 `null`). 정상 상태이므로 경고하지 않는다. */
+  excluded: NormalizedVenue[]
   warnings: string[]
 }

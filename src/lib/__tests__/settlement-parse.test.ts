@@ -279,6 +279,59 @@ describe('aggregateByPartner', () => {
     expect(ok.warnings).toHaveLength(0)
   })
 
+  // ── 의도적 정산 제외 (본사) — 누락과 반드시 구분해야 한다 ──
+  describe('정산 제외 (매핑값 null) — 예: 키즈웰에듀푸드(본사)', () => {
+    const withHq: NormalizedVenue[] = [
+      ...parseShinsegaeSheet([...SHINSEGAE_HEADER, SS_ROW_HQ_TAXABLE]).venues, // 88689 본사
+      ...parseShinsegaeSheet([...SHINSEGAE_HEADER, SS_ROW_INTL_EXEMPT]).venues, // 89890
+    ]
+
+    it('null로 표시한 사업장은 excluded로 분류하고 경고하지 않는다', () => {
+      const r = aggregateByPartner(withHq, {
+        'shinsegae:88689': null, // 본사 — 정산 대상 아님
+        'shinsegae:89890': '김영수',
+      })
+      expect(r.excluded).toHaveLength(1)
+      expect(r.excluded[0].businessCode).toBe('88689')
+      expect(r.unmapped).toHaveLength(0)
+      expect(r.warnings).toHaveLength(0) // 의도된 제외라서 경고 없음
+    })
+
+    it('제외된 사업장 금액은 영업자 합계에 들어가지 않는다', () => {
+      const r = aggregateByPartner(withHq, {
+        'shinsegae:88689': null,
+        'shinsegae:89890': '김영수',
+      })
+      expect(r.partners).toHaveLength(1)
+      expect(r.partners[0].costTotal).toBe(28_440) // 국제유치원 면세분만
+      expect(r.partners[0].venues).toHaveLength(1)
+    })
+
+    it('제외와 누락이 섞여 있으면 각각 분리한다 (마감 검증의 핵심)', () => {
+      const r = aggregateByPartner(withHq, {
+        'shinsegae:88689': null, // 의도적 제외
+        // 'shinsegae:89890' 누락
+      })
+      expect(r.excluded).toHaveLength(1)
+      expect(r.unmapped).toHaveLength(1)
+      expect(r.unmapped[0].businessCode).toBe('89890')
+      // 경고는 누락에 대해서만 발생해야 한다
+      expect(r.warnings).toHaveLength(1)
+      expect(r.warnings[0]).toContain('89890')
+      expect(r.warnings[0]).not.toContain('88689')
+    })
+
+    it('빈 문자열은 제외가 아니라 누락으로 본다 (실수 방지)', () => {
+      const r = aggregateByPartner(withHq, {
+        'shinsegae:88689': '',
+        'shinsegae:89890': '김영수',
+      })
+      expect(r.excluded).toHaveLength(0)
+      expect(r.unmapped).toHaveLength(1)
+      expect(r.warnings).toHaveLength(1)
+    })
+  })
+
   it('집계 결과는 calcSettlement 입력 형태와 맞는다', () => {
     const r = aggregateByPartner(venues, {
       'shinsegae:89890': '김영수',

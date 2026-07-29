@@ -119,11 +119,25 @@ export interface SettlementResult extends WithholdingResult {
   vatDiff: number
   /** 사업자공제 Q */
   businessDeduction: number
-  /** 지급액(세전) R */
+  /**
+   * 산식 그대로의 세전 지급액. **음수일 수 있다.**
+   * 이월 정책이 정해지면 이 값을 쓴다.
+   */
+  preTaxRaw: number
+  /** 실제 적용된 세전 지급액 R. 음수면 0으로 처리된다. */
   preTax: number
+  /** 사람이 확인해야 하는 사항. 비어 있어야 정상. */
+  warnings: string[]
 }
 
-/** 원천 합계 → 실지급까지 전체 파이프라인. */
+/**
+ * 원천 합계 → 실지급까지 전체 파이프라인.
+ *
+ * 세전이 음수면 **0으로 처리하고 경고**한다 (2026-07-29 확정, docs §11).
+ * 받을 게 없는 달이므로 신고할 사업소득도 없다고 본다 — 코파운더라도 적립금을
+ * 신고액에 넣지 않는다. 원래 음수값은 `preTaxRaw`에 남겨 두므로,
+ * 나중에 이월 정책이 정해지면 여기서 이어가면 된다.
+ */
 export function calcSettlement(input: SettlementInput): SettlementResult {
   const {
     costTotal,
@@ -138,14 +152,31 @@ export function calcSettlement(input: SettlementInput): SettlementResult {
   const margin = priceTotal - costTotal
   const platformFee = calcPlatformFee({ costTotal, costVat, commissionPercent })
   const vatDiff = priceVat - costVat
-  const preTax = margin - platformFee - vatDiff - businessDeduction
+  const preTaxRaw = margin - platformFee - vatDiff - businessDeduction
+
+  const warnings: string[] = []
+  const base = { margin, platformFee, vatDiff, businessDeduction, preTaxRaw }
+
+  if (preTaxRaw < 0) {
+    // 조용히 0으로 만들면 담당자가 적자를 알아채지 못한다. 반드시 경고를 남긴다.
+    warnings.push(
+      `세전 지급액이 음수(-${Math.abs(preTaxRaw).toLocaleString()}원)여서 0으로 처리했습니다. 원가·단가와 사업자공제를 확인하세요.`
+    )
+    return {
+      ...base,
+      preTax: 0,
+      declared: 0,
+      incomeTax: 0,
+      localTax: 0,
+      netPay: 0,
+      warnings,
+    }
+  }
 
   return {
-    margin,
-    platformFee,
-    vatDiff,
-    businessDeduction,
-    preTax,
-    ...calcWithholding({ preTax, platformFee, partnerType }),
+    ...base,
+    preTax: preTaxRaw,
+    ...calcWithholding({ preTax: preTaxRaw, platformFee, partnerType }),
+    warnings,
   }
 }
