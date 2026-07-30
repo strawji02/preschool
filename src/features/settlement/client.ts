@@ -52,6 +52,15 @@ export {
   formatBizRegNo,
 } from './calc/biz-reg-no'
 
+// 보고서 집계도 순수 함수다 (docs §13-2)
+export {
+  rollupByKindergarten,
+  rollupBySource,
+  type KindergartenRollup,
+  type SourceRollup,
+  type SourceRollups,
+} from './calc/report-rollup'
+
 // 마감 합계는 순수 산식이라 화면에서 미리보기로도 쓴다
 export {
   closingTotals,

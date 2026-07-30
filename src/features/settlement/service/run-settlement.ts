@@ -304,6 +304,7 @@ function buildClosingVenues(
       businessName: v.businessName,
       restaurantCode: v.restaurantCode,
       restaurantName: v.restaurantName,
+      companyName: rec?.invoice.companyName ?? null,
       partnerId,
       partnerName: partnerId ? master.partners.get(partnerId)?.name ?? null : null,
       isExcluded: rec?.isExcluded ?? false,

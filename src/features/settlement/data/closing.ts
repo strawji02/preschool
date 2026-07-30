@@ -185,6 +185,7 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
       business_name: v.businessName,
       restaurant_code: v.restaurantCode,
       restaurant_name: v.restaurantName,
+      company_name: v.companyName,
       partner_id: v.partnerId,
       partner_name: v.partnerName,
       is_excluded: v.isExcluded,
@@ -310,4 +311,93 @@ export async function listClosings(limit = 24): Promise<ClosingRecord[]> {
       updatedAt: String(row.updated_at),
     }
   })
+}
+
+/** 경영 보고서용 상세 (docs §13) */
+export interface ClosingDetail {
+  closing: ClosingRecord
+  venues: ClosingVenueRow[]
+  partners: ClosingPartnerRow[]
+}
+
+/**
+ * 마감 월의 상세 조회 — 식당·영업자 flat facts.
+ *
+ * jsonb 스냅샷이 아니라 flat 테이블을 읽는다. 스냅샷은 재현용이고, 보고서는
+ * 질의용이다 (docs §14-8). 현재 리비전의 값이 들어 있다.
+ */
+export async function loadClosingDetail(period: string): Promise<ClosingDetail | null> {
+  const closing = await loadClosing(period)
+  if (!closing) return null
+
+  const supabase = createAdminClient()
+  const [venuesRes, partnersRes] = await Promise.all([
+    supabase
+      .from('settlement_closing_venues')
+      .select(
+        'source, business_code, business_name, restaurant_code, restaurant_name, company_name, partner_id, partner_name, is_excluded, exclusion_reason, cost_supply, cost_vat, cost_exempt, cost_total, price_supply, price_vat, price_exempt, price_total'
+      )
+      .eq('period', period),
+    supabase
+      .from('settlement_closing_partners')
+      .select(
+        'partner_id, partner_name, partner_type, commission_percent, cost_total, cost_vat, price_total, price_vat, margin, platform_fee, vat_diff, business_deduction, pre_tax, declared, income_tax, local_tax, net_pay'
+      )
+      .eq('period', period),
+  ])
+  if (venuesRes.error) throw new ClosingError(`식당 확정값 조회 실패: ${venuesRes.error.message}`)
+  if (partnersRes.error) {
+    throw new ClosingError(`영업자 확정값 조회 실패: ${partnersRes.error.message}`)
+  }
+
+  const venues: ClosingVenueRow[] = (venuesRes.data ?? []).map((r) => ({
+    source: r.source as ClosingVenueRow['source'],
+    businessCode: String(r.business_code),
+    businessName: r.business_name,
+    restaurantCode: String(r.restaurant_code),
+    restaurantName: r.restaurant_name,
+    companyName: r.company_name ?? null,
+    partnerId: r.partner_id,
+    partnerName: r.partner_name,
+    isExcluded: r.is_excluded,
+    exclusionReason: r.exclusion_reason,
+    cost: {
+      taxableSupply: Number(r.cost_supply),
+      vat: Number(r.cost_vat),
+      exempt: Number(r.cost_exempt),
+      total: Number(r.cost_total),
+    },
+    price: {
+      taxableSupply: Number(r.price_supply),
+      vat: Number(r.price_vat),
+      exempt: Number(r.price_exempt),
+      total: Number(r.price_total),
+    },
+  }))
+
+  const partners: ClosingPartnerRow[] = (partnersRes.data ?? [])
+    .map((r) => ({
+      partnerId: r.partner_id,
+      partnerName: r.partner_name,
+      partnerType: r.partner_type as ClosingPartnerRow['partnerType'],
+      // numeric은 드라이버가 문자열로 줄 수 있다
+      commissionPercent: Number(r.commission_percent),
+      costTotal: Number(r.cost_total),
+      costVat: Number(r.cost_vat),
+      priceTotal: Number(r.price_total),
+      priceVat: Number(r.price_vat),
+      margin: Number(r.margin),
+      platformFee: Number(r.platform_fee),
+      vatDiff: Number(r.vat_diff),
+      businessDeduction: Number(r.business_deduction),
+      preTax: Number(r.pre_tax),
+      declared: Number(r.declared),
+      incomeTax: Number(r.income_tax),
+      localTax: Number(r.local_tax),
+      netPay: Number(r.net_pay),
+    }))
+    // 지급액이 큰 순 — 보고서는 큰 것부터 본다
+    .sort((a, b) => b.preTax - a.preTax)
+
+  return { closing, venues, partners }
 }

@@ -22,6 +22,12 @@ export interface ClosingVenueRow {
   businessName: string
   restaurantCode: string
   restaurantName: string
+  /**
+   * 계산서 상호 (예: `해밀유치원`). 원천 `businessName`(`키즈웰에듀푸드(해밀유치원)`)과
+   * 다르다. 보고서는 이걸 보여주고, **그때의 상호를 굳힌다** — 나중에 바뀌어도
+   * 마감 문서는 그대로여야 한다.
+   */
+  companyName: string | null
   /** 담당 영업자. 제외 사업장이거나 미배정이면 null */
   partnerId: string | null
   /** 그때의 영업자 이름 — 나중에 이름이 바뀌어도 마감 문서는 그대로여야 한다 */
