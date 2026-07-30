@@ -409,6 +409,33 @@ export async function listClosings(limit = 24): Promise<ClosingRecord[]> {
 }
 
 /** 경영 보고서용 상세 (docs §13) */
+/**
+ * 현재 리비전의 스냅샷 원본 (docs §8-2).
+ *
+ * 확정·마감한 달의 계산서·내역서를 **원천 파일 없이** 다시 만들 때 쓴다.
+ * 마스터가 바뀐 뒤에 다시 뽑아도 마감 당시와 같은 파일이 나와야 하므로,
+ * 여기서 나온 값으로만 만든다 — 다시 계산하지 않는다.
+ */
+export async function loadClosingSnapshot(period: string): Promise<{
+  closing: ClosingRecord
+  snapshot: Record<string, unknown>
+} | null> {
+  const closing = await loadClosing(period)
+  if (!closing) return null
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('settlement_closing_snapshots')
+    .select('snapshot')
+    .eq('period', period)
+    .eq('revision', closing.revision)
+    .maybeSingle()
+
+  if (error) throw new ClosingError(`스냅샷 조회 실패: ${error.message}`)
+  if (!data?.snapshot) return null
+  return { closing, snapshot: data.snapshot as Record<string, unknown> }
+}
+
 export interface ClosingDetail {
   closing: ClosingRecord
   venues: ClosingVenueRow[]

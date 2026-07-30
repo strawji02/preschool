@@ -6,10 +6,15 @@ import {
   buildSettlementSheet,
   buildSettlementWorkbook,
   isExcelUpload,
+  isValidPeriod,
+  loadClosingSnapshot,
   normalizeDeductionItems,
   readUploadedWorkbook,
+  rebuildClosingBlocks,
   runSettlement,
   sumDeductionItems,
+  type ClosingPartnerRow,
+  type ClosingVenueRow,
   type DeclarationSplit,
   type DeductionItem,
 } from '@/features/settlement'
@@ -24,6 +29,82 @@ import * as XLSX from 'xlsx'
  * 매핑 누락이 있으면 파일을 내주지 않는다 — 누락된 사업장의 금액이 조용히 빠진
  * 내역서는 틀린 문서이고, 그걸로 지급이 진행되면 되돌리기 어렵다 (docs §8).
  */
+/**
+ * 확정·마감된 달의 내역서를 **원천 파일 없이** 다시 받는다 (docs §8-2).
+ *
+ * 금액을 다시 계산하지 않는다 — 스냅샷에 저장된 확정값을 시트 모양으로 옮기기만
+ * 한다. 수수료율이나 담당자가 바뀐 뒤에 다시 뽑아도 마감 당시와 같은 파일이
+ * 나와야 한다.
+ */
+export async function GET(request: NextRequest) {
+  const guard = await requireApiUser()
+  if ('response' in guard) return guard.response
+
+  const period = request.nextUrl.searchParams.get('period') ?? ''
+  if (!isValidPeriod(period)) {
+    return NextResponse.json(
+      { success: false, error: '기간을 YYYY-MM 형식으로 지정해 주세요.' },
+      { status: 400 }
+    )
+  }
+
+  try {
+    const loaded = await loadClosingSnapshot(period)
+    if (!loaded) {
+      return NextResponse.json(
+        { success: false, error: '확정되지 않은 달입니다. 정산 화면에서 먼저 확정해 주세요.' },
+        { status: 404 }
+      )
+    }
+    const snap = loaded.snapshot as {
+      closingVenues?: ClosingVenueRow[]
+      closingPartners?: ClosingPartnerRow[]
+      deductionItems?: Record<string, DeductionItem[]>
+      splits?: Record<string, DeclarationSplit[]>
+    }
+    if (!Array.isArray(snap.closingVenues) || !Array.isArray(snap.closingPartners)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: '이 달의 저장분에는 내역서 정보가 없습니다. 정산 화면에서 다시 확정해 주세요.',
+        },
+        { status: 409 }
+      )
+    }
+
+    const partners = snap.closingPartners
+    const itemsByPartner = snap.deductionItems ?? {}
+    const splitsByPartner = snap.splits ?? {}
+
+    const sheet = buildSettlementSheet(rebuildClosingBlocks(snap.closingVenues, partners))
+    const deductionSheet = buildDeductionSheet(
+      partners.map((p) => ({
+        partnerName: p.partnerName,
+        items: itemsByPartner[p.partnerId] ?? [],
+      }))
+    )
+    const declarationSheet = buildDeclarationSheet({
+      periodLabel: period,
+      partners: partners.map((p) => ({
+        partnerName: p.partnerName,
+        declared: p.declared,
+        splits: splitsByPartner[p.partnerId],
+      })),
+    })
+
+    const wb = buildSettlementWorkbook(sheet, { deductionSheet, declarationSheet })
+    const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
+
+    return reportResponse(bytes, period)
+  } catch (err) {
+    console.error('[settlement/report GET]', err)
+    return NextResponse.json(
+      { success: false, error: '내역서 생성 중 오류가 발생했습니다.' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: NextRequest) {
   const guard = await requireApiUser()
   if ('response' in guard) return guard.response
@@ -108,18 +189,7 @@ export async function POST(request: NextRequest) {
 
     const wb = buildSettlementWorkbook(sheet, { deductionSheet, declarationSheet })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
-    const fileName = `정산내역서_${periodLabel || '기간미지정'}.xlsx`
-
-    return new NextResponse(bytes as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        // 한글 파일명은 filename*(RFC 5987)로 줘야 브라우저가 제대로 받는다
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-        'Cache-Control': 'no-store',
-      },
-    })
+    return reportResponse(bytes, periodLabel || '기간미지정')
   } catch (err) {
     console.error('[settlement/report]', err)
     return NextResponse.json(
@@ -186,4 +256,22 @@ function parseDeductionItems(
   } catch {
     return {}
   }
+}
+
+/**
+ * 엑셀 응답 — POST(업로드)와 GET(스냅샷)이 **같은 파일명 규칙**을 써야 한다.
+ * 두 경로에서 이름이 다르면 같은 달 파일이 두 종류로 돌아다닌다.
+ */
+function reportResponse(bytes: Uint8Array, periodLabel: string): NextResponse {
+  const fileName = `정산내역서_${periodLabel}.xlsx`
+  return new NextResponse(bytes as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      // 한글 파일명은 filename*(RFC 5987)로 줘야 브라우저가 제대로 받는다
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      'Cache-Control': 'no-store',
+    },
+  })
 }

@@ -146,6 +146,9 @@ export {
   type NameWithholding,
 } from './report/declaration-sheet'
 
+// 마감된 달의 내역서를 원천 파일 없이 되살린다 (docs §8-2)
+export { rebuildClosingBlocks } from './report/rebuild-blocks'
+
 export {
   buildSettlementSheet,
   venueDisplayName,
@@ -173,6 +176,7 @@ export {
   saveClosing,
   reopenClosing,
   loadClosing,
+  loadClosingSnapshot,
   loadClosingRevisions,
   loadClosingDetail,
   listClosings,

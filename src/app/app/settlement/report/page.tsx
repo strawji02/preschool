@@ -1,9 +1,11 @@
 import Link from 'next/link'
 import { requireUser } from '@/features/shared/auth'
 import SettlementHeader from '../settlement-header'
+import ReportDownloads from './downloads'
 import {
   listClosings,
   loadClosingDetail,
+  loadClosingSnapshot,
   loadCollection,
   rollupByKindergarten,
   rollupBySource,
@@ -51,9 +53,19 @@ export default async function ReportPage({
   const closings = await listClosings()
   // 요청한 달이 없으면 가장 최근 마감을 보여준다
   const period = requested ?? closings[0]?.period ?? null
-  const [detail, collection] = period
-    ? await Promise.all([loadClosingDetail(period), loadCollection(period)])
-    : [null, null]
+  const [detail, collection, snapshot] = period
+    ? await Promise.all([
+        loadClosingDetail(period),
+        loadCollection(period),
+        // 산출물 다시 받기용 — 계산서 장수만 쓴다 (docs §8-2)
+        loadClosingSnapshot(period),
+      ])
+    : [null, null, null]
+
+  const invoiceRows = (snapshot?.snapshot as { invoiceRows?: { taxKind: string }[] })
+    ?.invoiceRows
+  const taxableCount = invoiceRows?.filter((r) => r.taxKind === 'taxable').length ?? 0
+  const exemptCount = invoiceRows?.filter((r) => r.taxKind === 'exempt').length ?? 0
 
   return (
     <div>
@@ -113,7 +125,16 @@ export default async function ReportPage({
               {period ? `${periodLabel(period)} 마감 자료를 찾지 못했습니다.` : ''}
             </p>
           ) : (
-            <ReportBody detail={detail} collection={collection} />
+            <div className="space-y-6">
+              {period && (
+                <ReportDownloads
+                  period={period}
+                  taxableCount={taxableCount}
+                  exemptCount={exemptCount}
+                />
+              )}
+              <ReportBody detail={detail} collection={collection} />
+            </div>
           )}
         </>
       )}
