@@ -15,6 +15,8 @@ import {
   type InvoiceRow,
   type InvoiceTaxKind,
   type InvoiceVenueLine,
+  type PendingBuyer,
+  type PendingItemName,
 } from '../report/invoice-sheet'
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
 import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
@@ -96,6 +98,24 @@ export interface SettlementRunResult {
   /** 계산서 공급자(본사). 미설정이면 계산서를 만들 수 없다 */
   issuer: InvoiceParty | null
   canIssueInvoices: boolean
+  /**
+   * 화면에서 **그 자리에서 고칠 수 있게** 구조화한 미해결 항목 (docs §14-3).
+   * `invoiceProblems`와 같은 내용이지만 기계가 읽을 수 있는 형태다.
+   */
+  pending: {
+    buyers: PendingBuyer[]
+    itemNames: PendingItemName[]
+  }
+  /**
+   * 이미 쓰이고 있는 품목명 — 빈도순. 화면에서 콤보로 제시한다.
+   * 오타로 새 품목이 생기면 계산서가 쪼개지므로 기존 값을 먼저 보여주는 게 중요하다.
+   */
+  itemNameOptions: string[]
+  /**
+   * **활성 영업자 전체.** `partners`는 이번 달 데이터가 있는 영업자만 담으므로
+   * 신규 사업장에 담당자를 배정할 때 쓸 수 없다 (담당 유치원이 아직 없는 영업자가 빠진다).
+   */
+  allPartners: { partnerId: string; partnerName: string }[]
 }
 
 export async function runSettlement(
@@ -218,7 +238,29 @@ export async function runSettlement(
     issuer,
     canIssueInvoices:
       errors.length === 0 && unmapped.length === 0 && invoiceProblems.length === 0,
+    pending: invoice.pending,
+    itemNameOptions: itemNameOptions(master),
+    allPartners: [...master.partners.values()]
+      .filter((p) => p.isActive)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({ partnerId: p.id, partnerName: p.name })),
   }
+}
+
+/**
+ * 이미 등록된 품목명을 빈도순으로 모은다.
+ *
+ * 오타로 새 품목이 생기면 계산서가 두 장으로 쪼개진다(`급식재료`와 `급식재료 `).
+ * 자주 쓰는 것을 앞에 두면 사용자가 직접 타이핑할 일이 줄어든다.
+ */
+function itemNameOptions(master: SettlementMaster): string[] {
+  const counts = new Map<string, number>()
+  for (const item of master.venueItems.values()) {
+    counts.set(item.invoiceItemName, (counts.get(item.invoiceItemName) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name]) => name)
 }
 
 function toLine(v: NormalizedVenue) {
@@ -264,6 +306,7 @@ function buildInvoiceLines(
     return {
       source: v.source,
       businessCode: v.businessCode,
+      businessName: v.businessName,
       restaurantCode: v.restaurantCode,
       restaurantName: v.restaurantName,
       price: v.price,
@@ -289,5 +332,8 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     invoiceProblems: [],
     issuer: null,
     canIssueInvoices: false,
+    pending: { buyers: [], itemNames: [] },
+    itemNameOptions: [],
+    allPartners: [],
   }
 }

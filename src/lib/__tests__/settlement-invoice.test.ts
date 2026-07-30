@@ -58,6 +58,7 @@ function line(over: Partial<InvoiceVenueLine> = {}): InvoiceVenueLine {
   return {
     source: 'cj',
     businessCode: '1005',
+    businessName: '키즈웰에듀푸드(해밀유치원)',
     restaurantCode: '1000',
     restaurantName: '키즈웰에듀푸드(해밀유치원)',
     price: { taxableSupply: 0, vat: 0, exempt: 0, total: 0 },
@@ -368,5 +369,112 @@ describe('26년 6월 실합계 (docs §6-1 역검증 픽스처)', () => {
     expect(EXPECTED.taxableSupply + EXPECTED.taxableVat + EXPECTED.exempt).toBe(102_346_907)
     // 단가합계 102,359,832 − 본사 12,925 = 102,346,907
     expect(102_359_832 - 12_925).toBe(102_346_907)
+  })
+})
+
+/**
+ * 미해결 항목 구조화 (docs §14-3)
+ *
+ * 화면에서 **그 자리에서 고칠 수 있어야** 하므로 문자열 경고만으로는 부족하다.
+ * 어느 사업장·어느 식당·어느 과세구분인지 기계가 읽을 수 있게 돌려준다.
+ */
+describe('collectInvoiceRows — pending (인라인 해결용)', () => {
+  it('사업자 정보 미비는 사업장 단위로 한 번만 알려준다', () => {
+    // 같은 사업장의 식당이 3개여도 고칠 대상은 사업장 1개다
+    const { pending } = collectInvoiceRows([
+      line({ restaurantCode: '1000', buyer: null, price: { taxableSupply: 100, vat: 10, exempt: 0, total: 110 } }),
+      line({ restaurantCode: '1001', buyer: null, price: { taxableSupply: 200, vat: 20, exempt: 0, total: 220 } }),
+      line({ restaurantCode: '1002', buyer: null, price: { taxableSupply: 300, vat: 30, exempt: 0, total: 330 } }),
+    ])
+    expect(pending.buyers).toHaveLength(1)
+    expect(pending.buyers[0]).toMatchObject({
+      source: 'cj',
+      businessCode: '1005',
+      restaurantCount: 3,
+    })
+  })
+
+  it('사업자 정보 미비 사업장의 청구액 합계를 알려준다 (영향 규모)', () => {
+    const { pending } = collectInvoiceRows([
+      line({ restaurantCode: '1000', buyer: null, price: { taxableSupply: 100, vat: 10, exempt: 50, total: 160 } }),
+      line({ restaurantCode: '1001', buyer: null, price: { taxableSupply: 200, vat: 20, exempt: 0, total: 220 } }),
+    ])
+    expect(pending.buyers[0]!.priceTotal).toBe(380)
+  })
+
+  it('품목명 미지정은 식당 × 과세구분 단위로 알려준다', () => {
+    const { pending } = collectInvoiceRows([
+      line({
+        restaurantCode: '1000',
+        restaurantName: '키즈웰에듀푸드(해밀유치원)',
+        price: { taxableSupply: 100, vat: 10, exempt: 200, total: 310 },
+        itemNames: { taxable: null, exempt: null },
+      }),
+    ])
+    expect(pending.itemNames).toHaveLength(2)
+    expect(pending.itemNames.map((p) => p.taxKind).sort()).toEqual(['exempt', 'taxable'])
+    expect(pending.itemNames.find((p) => p.taxKind === 'taxable')).toMatchObject({
+      source: 'cj',
+      businessCode: '1005',
+      restaurantCode: '1000',
+      restaurantName: '키즈웰에듀푸드(해밀유치원)',
+      amount: 100,
+    })
+  })
+
+  it('한쪽만 미지정이면 그 한쪽만 나온다', () => {
+    const { pending } = collectInvoiceRows([
+      line({
+        price: { taxableSupply: 100, vat: 10, exempt: 200, total: 310 },
+        itemNames: { taxable: null, exempt: '급식재료' },
+      }),
+    ])
+    expect(pending.itemNames).toHaveLength(1)
+    expect(pending.itemNames[0]!.taxKind).toBe('taxable')
+  })
+
+  it('금액이 0이면 pending에 넣지 않는다 (거래가 없던 달이다)', () => {
+    const { pending } = collectInvoiceRows([
+      line({
+        price: { taxableSupply: 0, vat: 0, exempt: 200, total: 200 },
+        itemNames: { taxable: null, exempt: '급식재료' },
+      }),
+    ])
+    expect(pending.itemNames).toEqual([])
+  })
+
+  it('정산 제외 사업장은 pending에 넣지 않는다', () => {
+    const { pending } = collectInvoiceRows([
+      line({
+        isExcluded: true,
+        buyer: null,
+        itemNames: { taxable: null, exempt: null },
+        price: { taxableSupply: 11_750, vat: 1_175, exempt: 0, total: 12_925 },
+      }),
+    ])
+    expect(pending.buyers).toEqual([])
+    expect(pending.itemNames).toEqual([])
+  })
+
+  it('사업자 정보가 없으면 품목명은 따로 묻지 않는다 — 한 번에 하나씩 고치게 한다', () => {
+    // 사업자 정보부터 채워야 계산서가 나오므로, 품목명까지 같이 띄우면 소음이다
+    const { pending } = collectInvoiceRows([
+      line({
+        buyer: null,
+        itemNames: { taxable: null, exempt: null },
+        price: { taxableSupply: 100, vat: 10, exempt: 0, total: 110 },
+      }),
+    ])
+    expect(pending.buyers).toHaveLength(1)
+    expect(pending.itemNames).toEqual([])
+  })
+
+  it('모두 정상이면 pending이 비어 있다', () => {
+    const { pending, problems } = collectInvoiceRows([
+      line({ price: { taxableSupply: 100, vat: 10, exempt: 200, total: 310 } }),
+    ])
+    expect(pending.buyers).toEqual([])
+    expect(pending.itemNames).toEqual([])
+    expect(problems).toEqual([])
   })
 })

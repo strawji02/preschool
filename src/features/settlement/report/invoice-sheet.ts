@@ -220,6 +220,8 @@ export interface InvoiceParty {
 export interface InvoiceVenueLine {
   source: SettlementSource
   businessCode: string
+  /** 원천 사업장명. 계산서에는 쓰지 않고 화면에서 어느 유치원인지 알아보는 데 쓴다 */
+  businessName: string
   restaurantCode: string
   restaurantName: string
   /** 유치원 청구액 (단가) */
@@ -243,6 +245,30 @@ export interface InvoiceRow {
   mergedFrom: number
 }
 
+/** 사업자 정보가 없어 계산서를 만들 수 없는 사업장 */
+export interface PendingBuyer {
+  source: SettlementSource
+  businessCode: string
+  /** 원천 사업장명 — 사람이 어느 유치원인지 알아보는 단서 */
+  businessName: string
+  /** 이 사업장에 걸린 식당 수 */
+  restaurantCount: number
+  /** 청구액 합계 — 고치지 않으면 이만큼이 계산서에서 빠진다 */
+  priceTotal: number
+}
+
+/** 품목명이 지정되지 않은 식당 × 과세구분 */
+export interface PendingItemName {
+  source: SettlementSource
+  businessCode: string
+  businessName: string
+  restaurantCode: string
+  restaurantName: string
+  taxKind: InvoiceTaxKind
+  /** 이 과세구분의 청구액 */
+  amount: number
+}
+
 export interface CollectInvoiceResult {
   rows: InvoiceRow[]
   /**
@@ -252,6 +278,14 @@ export interface CollectInvoiceResult {
    * 경고를 내면 담당자가 전부 무시하게 된다.
    */
   problems: string[]
+  /**
+   * 위와 같은 내용을 **화면에서 그 자리에서 고칠 수 있게** 구조화한 것 (docs §14-3).
+   * 문자열 경고만 주면 담당자가 별도 화면을 찾아 헤매야 한다.
+   */
+  pending: {
+    buyers: PendingBuyer[]
+    itemNames: PendingItemName[]
+  }
 }
 
 const KIND_LABEL: Record<InvoiceTaxKind, string> = {
@@ -271,6 +305,9 @@ export function collectInvoiceRows(
   const groups = new Map<string, InvoiceRow>()
   const problems: string[] = []
   const kinds: InvoiceTaxKind[] = ['taxable', 'exempt']
+  // 사업장 단위로 모은다 — 식당이 3개여도 고칠 대상은 사업장 1개다
+  const pendingBuyers = new Map<string, PendingBuyer>()
+  const pendingItemNames: PendingItemName[] = []
 
   for (const line of lines) {
     // 의도적 제외는 조용히 건너뛴다 (본사 = 마케팅비)
@@ -288,6 +325,22 @@ export function collectInvoiceRows(
 
     if (!line.buyer) {
       problems.push(`${where} — 유치원 사업자 정보가 없어 계산서를 만들 수 없습니다.`)
+      // 사업자 정보부터 채워야 계산서가 나온다. 품목명까지 같이 띄우면 소음이므로
+      // 여기서 끊는다 — 한 번에 하나씩 고치게 한다.
+      const bkey = `${line.source}:${line.businessCode}`
+      const prev = pendingBuyers.get(bkey)
+      if (prev) {
+        prev.restaurantCount += 1
+        prev.priceTotal += line.price.total
+      } else {
+        pendingBuyers.set(bkey, {
+          source: line.source,
+          businessCode: line.businessCode,
+          businessName: line.businessName,
+          restaurantCount: 1,
+          priceTotal: line.price.total,
+        })
+      }
       continue
     }
 
@@ -301,6 +354,15 @@ export function collectInvoiceRows(
           `${where} — ${KIND_LABEL[kind]} 품목명이 지정되지 않았습니다 ` +
             `(${supply.toLocaleString()}원).`
         )
+        pendingItemNames.push({
+          source: line.source,
+          businessCode: line.businessCode,
+          businessName: line.businessName,
+          restaurantCode: line.restaurantCode,
+          restaurantName: line.restaurantName,
+          taxKind: kind,
+          amount: supply,
+        })
         continue
       }
 
@@ -323,7 +385,11 @@ export function collectInvoiceRows(
     }
   }
 
-  return { rows: [...groups.values()], problems }
+  return {
+    rows: [...groups.values()],
+    problems,
+    pending: { buyers: [...pendingBuyers.values()], itemNames: pendingItemNames },
+  }
 }
 
 export type InvoiceCell = string | number | null

@@ -169,6 +169,7 @@ async function main(): Promise<void> {
     return {
       source: v.source,
       businessCode: v.businessCode,
+      businessName: v.businessName,
       restaurantCode: v.restaurantCode,
       restaurantName: v.restaurantName,
       price: v.price,

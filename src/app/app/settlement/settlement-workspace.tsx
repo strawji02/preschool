@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import PendingPanel from './pending-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
@@ -48,6 +49,29 @@ interface AnalyzeResponse {
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
   canIssueInvoices: boolean
+  /** 인라인 해결용 구조화 정보 (docs §14-3) */
+  pending: {
+    buyers: {
+      source: string
+      businessCode: string
+      businessName: string
+      restaurantCount: number
+      priceTotal: number
+    }[]
+    itemNames: {
+      source: string
+      businessCode: string
+      businessName: string
+      restaurantCode: string
+      restaurantName: string
+      taxKind: 'taxable' | 'exempt'
+      amount: number
+    }[]
+  }
+  /** 기존 품목명 (빈도순) — 오타로 계산서가 쪼개지지 않게 콤보로 제시한다 */
+  itemNameOptions: string[]
+  /** 활성 영업자 전체. 이번 달 데이터가 없는 영업자도 배정할 수 있어야 한다 */
+  allPartners: { partnerId: string; partnerName: string }[]
   invoiceSummary: {
     taxableCount: number
     exemptCount: number
@@ -193,7 +217,11 @@ export default function SettlementWorkspace() {
     return fd
   }
 
-  async function analyze() {
+  /**
+   * @param keepInputs 미해결 항목을 고친 뒤 자동 재분석할 때 `true`.
+   *   사업자공제·분할신고는 사용자가 방금 입력한 값이라 지우면 안 된다.
+   */
+  async function analyze(opts?: { keepInputs?: boolean }) {
     if (files.length === 0) {
       setError('엑셀 파일을 올려주세요.')
       return
@@ -201,7 +229,7 @@ export default function SettlementWorkspace() {
     setBusy('analyze')
     setError(null)
     setNotice(null)
-    setAnalysis(null)
+    if (!opts?.keepInputs) setAnalysis(null)
     try {
       const res = await fetch('/api/settlement/analyze', {
         method: 'POST',
@@ -213,7 +241,10 @@ export default function SettlementWorkspace() {
         return
       }
       setAnalysis(json)
-      setDeductions({})
+      if (!opts?.keepInputs) {
+        setDeductions({})
+        setSplits({})
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '분석 중 오류가 발생했습니다.')
     } finally {
@@ -435,7 +466,7 @@ export default function SettlementWorkspace() {
         <div className="mt-4 flex items-center gap-3">
           <button
             type="button"
-            onClick={analyze}
+            onClick={() => void analyze()}
             disabled={busy !== null || files.length === 0}
             className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -483,18 +514,11 @@ export default function SettlementWorkspace() {
             )}
 
             {analysis.unmapped.length > 0 && (
-              <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-                <p className="font-medium">
-                  담당 영업자가 지정되지 않은 사업장 {analysis.unmapped.length}건 — 마감할 수 없습니다
-                </p>
-                <ul className="mt-2 space-y-1 text-xs">
-                  {analysis.unmapped.map((u) => (
-                    <li key={`${u.source}:${u.businessCode}`}>
-                      {u.source}:{u.businessCode} {u.businessName} (원가 {won(u.costTotal)}원)
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                담당 영업자가 지정되지 않은 사업장 {analysis.unmapped.length}건 — 아래{' '}
+                <span className="font-medium">마감 전 해결할 항목</span>에서 바로 처리할 수
+                있습니다.
+              </p>
             )}
 
             {analysis.warnings.length > 0 && (
@@ -505,6 +529,20 @@ export default function SettlementWorkspace() {
               </ul>
             )}
           </section>
+
+          {/*
+            마감 전 해결할 항목 — 번호를 붙이지 않는다.
+            순서상의 단계가 아니라 **게이트**이고, 다 통과하면 접힌 확인 카드로 바뀐다.
+          */}
+          <PendingPanel
+            unmapped={analysis.unmapped}
+            pendingBuyers={analysis.pending.buyers}
+            pendingItems={analysis.pending.itemNames}
+            splitBlocked={splitBlocked}
+            partners={analysis.allPartners}
+            itemNameOptions={analysis.itemNameOptions}
+            onResolved={() => void analyze({ keepInputs: true })}
+          />
 
           {/* 3. 사업자공제 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
