@@ -2,6 +2,7 @@ export {
   getCurrentUser,
   requireUser,
   requireAdmin,
+  requireComparisonAccess,
   type AppUser,
 } from './current-user'
 export { requireApiUser, requireApiAdmin } from './api-guard'

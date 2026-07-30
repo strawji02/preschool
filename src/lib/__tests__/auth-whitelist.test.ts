@@ -45,7 +45,7 @@ describe('normalizeEmail', () => {
 describe('lookupWhitelistEntry', () => {
   it('정규화된 이메일로 조회한다', async () => {
     mockMaybeSingle.mockResolvedValue({
-      data: { email: 'alan@planfit.ai', role: 'admin' },
+      data: { email: 'alan@planfit.ai', role: 'admin', can_access_comparison: true },
       error: null,
     })
 
@@ -53,7 +53,20 @@ describe('lookupWhitelistEntry', () => {
 
     expect(mockFrom).toHaveBeenCalledWith('app_user_whitelist')
     expect(mockEq).toHaveBeenCalledWith('email', 'alan@planfit.ai')
-    expect(entry).toEqual({ email: 'alan@planfit.ai', role: 'admin' })
+    expect(entry).toEqual({
+      email: 'alan@planfit.ai',
+      role: 'admin',
+      canAccessComparison: true,
+    })
+  })
+
+  it('can_access_comparison이 null이면 false로 읽는다', async () => {
+    mockMaybeSingle.mockResolvedValue({
+      data: { email: 'a@b.com', role: 'member', can_access_comparison: null },
+      error: null,
+    })
+    const entry = await lookupWhitelistEntry('a@b.com')
+    expect(entry!.canAccessComparison).toBe(false)
   })
 
   it('목록에 없으면 null', async () => {

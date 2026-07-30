@@ -8,6 +8,8 @@ export interface AppUser {
   name: string | null
   avatarUrl: string | null
   role: AppRole
+  /** 급식 비교 시스템 접근 권한 (migration 056) */
+  canAccessComparison: boolean
 }
 
 /**
@@ -34,6 +36,7 @@ export async function getCurrentUser(): Promise<AppUser | null> {
     name: (meta.full_name as string) ?? (meta.name as string) ?? null,
     avatarUrl: (meta.avatar_url as string) ?? (meta.picture as string) ?? null,
     role: entry.role,
+    canAccessComparison: entry.canAccessComparison,
   }
 }
 
@@ -68,7 +71,22 @@ export async function requireUser(nextPath?: string): Promise<AppUser> {
     name: (meta.full_name as string) ?? (meta.name as string) ?? null,
     avatarUrl: (meta.avatar_url as string) ?? (meta.picture as string) ?? null,
     role: entry.role,
+    canAccessComparison: entry.canAccessComparison,
   }
+}
+
+/**
+ * 급식 비교 시스템 가드 (migration 056).
+ *
+ * 화이트리스트 통과만으로는 부족하다 — `can_access_comparison`이 있어야 한다.
+ * 런처에서 카드를 숨기는 3클릭은 UX 장치일 뿐이고, **URL을 직접 쳐도 여기서 막힌다.**
+ */
+export async function requireComparisonAccess(nextPath?: string): Promise<AppUser> {
+  const user = await requireUser(nextPath)
+  if (!user.canAccessComparison) {
+    redirect('/app?error=comparison-forbidden')
+  }
+  return user
 }
 
 /** 관리자 전용 화면 가드 */

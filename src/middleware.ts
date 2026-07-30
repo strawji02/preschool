@@ -21,7 +21,29 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkRateLimit, tierForPath } from '@/lib/ratelimit'
+import { lookupWhitelistEntry } from '@/features/shared/auth'
 import { updateSession, copyCookies } from '@/lib/supabase/middleware'
+
+/**
+ * 급식 비교 시스템 API (2026-07-31).
+ *
+ * 정산만 쓰는 사용자가 URL을 직접 쳐서 거래처 단가를 보는 것을 막는다.
+ * 화면 가드(`/calc-food/layout.tsx`)만으로는 API 직접 호출을 못 막는다.
+ */
+const COMPARISON_API_PREFIXES = [
+  '/api/analyze',
+  '/api/audit-items',
+  '/api/ocr-corrections',
+  '/api/products',
+  '/api/reference-search',
+  '/api/session',
+  '/api/sessions',
+  '/api/admin',
+] as const
+
+function isComparisonApi(pathname: string): boolean {
+  return COMPARISON_API_PREFIXES.some((p) => pathname.startsWith(p))
+}
 
 // 허용 도메인 — production + Vercel preview
 // 환경변수로 추가 도메인 허용 가능 (콤마 구분)
@@ -73,6 +95,13 @@ export async function middleware(request: NextRequest) {
     return appGuard(request)
   }
 
+  // /calc-food — 2026-07-31부터 로그인 필수 (migration 056).
+  // 여기서는 세션만 확인하고 **권한 판단은 layout의 requireComparisonAccess()** 가 한다.
+  // 미들웨어에서 리다이렉트하는 이유는 UX다 — 로그인 화면으로 빨리 보낸다.
+  if (pathname.startsWith('/calc-food')) {
+    return comparisonPageGuard(request)
+  }
+
   // /api/* 외 경로는 통과
   if (!pathname.startsWith('/api/')) {
     return NextResponse.next()
@@ -81,6 +110,9 @@ export async function middleware(request: NextRequest) {
   // 정산 API는 세션 필수 (미로그인 401). 라우트 핸들러에서 requireApiUser()로 재확인한다.
   if (pathname.startsWith('/api/settlement')) {
     const denied = await settlementApiGuard(request)
+    if (denied) return denied
+  } else if (isComparisonApi(pathname)) {
+    const denied = await comparisonApiGuard(request)
     if (denied) return denied
   }
 
@@ -190,7 +222,47 @@ async function settlementApiGuard(
   )
 }
 
-// /api/* + /app/* 적용 (정적 리소스/공개 페이지는 통과)
+/**
+ * 비교 시스템 화면 가드 — 세션이 없으면 로그인으로 보낸다.
+ *
+ * 권한(`can_access_comparison`) 판단은 여기서 하지 않는다. layout의
+ * `requireComparisonAccess()`가 **보안 경계**이고, 여기는 빠른 리다이렉트용이다.
+ */
+async function comparisonPageGuard(request: NextRequest): Promise<NextResponse> {
+  const { response, user } = await updateSession(request)
+  if (user) return response
+
+  const login = new URL('/login', request.url)
+  login.searchParams.set('next', request.nextUrl.pathname)
+  return copyCookies(response, NextResponse.redirect(login))
+}
+
+/**
+ * 비교 시스템 API 가드 — 세션 + `can_access_comparison` 권한.
+ *
+ * ⚠️ 화면만 막으면 로그인한 정산 담당자가 API를 직접 호출해 거래처 단가를 볼 수 있다.
+ * 그래서 여기서 권한까지 본다 (화이트리스트 PK 조회 1회).
+ *
+ * `X-App-Secret`이 맞으면 통과시킨다 — 서버 간 호출(내부 작업·배치)을 깨지 않기 위해서다.
+ */
+async function comparisonApiGuard(request: NextRequest): Promise<NextResponse | null> {
+  const secret = process.env.APP_SHARED_SECRET
+  if (secret && request.headers.get('x-app-secret') === secret) return null
+
+  const { response, user } = await updateSession(request)
+  const deny = (message: string, status: number) =>
+    copyCookies(response, NextResponse.json({ success: false, error: message }, { status }))
+
+  if (!user?.email) return deny('로그인이 필요합니다.', 401)
+
+  const entry = await lookupWhitelistEntry(user.email)
+  if (!entry?.canAccessComparison) {
+    return deny('급식 비교 시스템 접근 권한이 없습니다.', 403)
+  }
+  return null
+}
+
+// /api/* + /app/* + /calc-food/* 적용 (정적 리소스/공개 페이지는 통과)
 export const config = {
-  matcher: ['/api/:path*', '/app/:path*'],
+  matcher: ['/api/:path*', '/app/:path*', '/calc-food', '/calc-food/:path*'],
 }

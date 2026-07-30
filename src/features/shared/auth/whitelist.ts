@@ -5,6 +5,13 @@ export type AppRole = 'admin' | 'member'
 export interface WhitelistEntry {
   email: string
   role: AppRole
+  /**
+   * 급식 비교 시스템 접근 권한 (migration 056).
+   *
+   * 화이트리스트에 있어도 기본은 `false`다 — 정산만 쓰는 사람에게는 거래처 단가를
+   * 보여주지 않는다. 런처의 3클릭 은폐는 UX 장치이고 **실제 경계는 이 값**이다.
+   */
+  canAccessComparison: boolean
 }
 
 /**
@@ -32,7 +39,7 @@ export async function lookupWhitelistEntry(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('app_user_whitelist')
-    .select('email, role')
+    .select('email, role, can_access_comparison')
     .eq('email', normalized)
     .maybeSingle()
 
@@ -43,5 +50,9 @@ export async function lookupWhitelistEntry(
   }
   if (!data) return null
 
-  return { email: data.email, role: data.role as AppRole }
+  return {
+    email: data.email,
+    role: data.role as AppRole,
+    canAccessComparison: data.can_access_comparison === true,
+  }
 }

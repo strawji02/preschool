@@ -26,6 +26,11 @@ vi.mock('@/lib/supabase/middleware', async () => {
   }
 })
 
+const mockLookup = vi.fn()
+vi.mock('@/features/shared/auth', () => ({
+  lookupWhitelistEntry: (...args: unknown[]) => mockLookup(...args),
+}))
+
 const { middleware, config } = await import('@/middleware')
 
 const FAKE_USER = { id: 'u1', email: 'alan@planfit.ai' }
@@ -48,27 +53,67 @@ beforeEach(() => {
     response: NextResponse.next(),
     user: null,
   })
+  mockLookup.mockResolvedValue({
+    email: 'alan@planfit.ai',
+    role: 'admin',
+    canAccessComparison: true,
+  })
 })
 
-describe('비교 시스템 /api/* 회귀 방어', () => {
-  it('same-origin 브라우저 요청은 그대로 통과한다', async () => {
-    const res = await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))
-    expect(res.status).not.toBe(401)
+/** 로그인 + 비교 권한이 있는 상태로 만든다 */
+function loginWithComparison(canAccessComparison = true) {
+  mockUpdateSession.mockResolvedValue({ response: NextResponse.next(), user: FAKE_USER })
+  mockLookup.mockResolvedValue({
+    email: FAKE_USER.email,
+    role: 'admin',
+    canAccessComparison,
   })
+}
 
-  it('허용 도메인 Origin 요청은 통과한다', async () => {
-    const res = await middleware(
-      req('/api/sessions', { origin: 'https://firstconsulting.site' })
-    )
-    expect(res.status).not.toBe(401)
-  })
-
-  it('Origin/Secret 없는 요청은 여전히 401', async () => {
+/**
+ * 비교 시스템 접근 정책 (2026-07-31 변경).
+ *
+ * ⚠️ **이전 정책을 의도적으로 뒤집었다.** 2026-07-30까지는 `/calc-food`와 비교 API가
+ * 로그인 없이 열려 있었고, 이 파일에도 "세션 조회를 하지 않는다"는 회귀 방어가
+ * 있었다. 거래처 단가가 담긴 데이터라 화이트리스트 안에서도 지정한 사람만 보도록
+ * 좁혔다 (migration 056, 사용자 확인).
+ */
+describe('비교 시스템 접근 정책', () => {
+  it('Origin/Secret 없는 요청은 여전히 401 (기존 방어 유지)', async () => {
     const res = await middleware(req('/api/sessions'))
     expect(res.status).toBe(401)
   })
 
+  it('미로그인 same-origin 요청은 401 — 이제 로그인이 필요하다', async () => {
+    const res = await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))
+    expect(res.status).toBe(401)
+  })
+
+  it('로그인했지만 비교 권한이 없으면 403', async () => {
+    loginWithComparison(false)
+    const res = await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))
+    expect(res.status).toBe(403)
+  })
+
+  it('권한이 있으면 통과한다', async () => {
+    loginWithComparison()
+    const res = await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))
+    expect(res.status).not.toBe(401)
+    expect(res.status).not.toBe(403)
+  })
+
+  it('X-App-Secret 서버 간 호출은 세션 없이도 통과한다 (내부 작업 보호)', async () => {
+    vi.stubEnv('APP_SHARED_SECRET', 's3cret')
+    const res = await middleware(req('/api/products', { 'x-app-secret': 's3cret' }))
+    expect(res.status).not.toBe(401)
+    expect(res.status).not.toBe(403)
+    // 세션 조회를 하지 않아야 배치가 느려지지 않는다
+    expect(mockUpdateSession).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
+  })
+
   it('rate limit 초과 시 여전히 429', async () => {
+    loginWithComparison()
     mockCheckRateLimit.mockResolvedValue({
       success: false,
       limit: 10,
@@ -79,13 +124,29 @@ describe('비교 시스템 /api/* 회귀 방어', () => {
     expect(res.status).toBe(429)
   })
 
-  it('비교 API에서는 Supabase 세션 조회를 하지 않는다 (지연·비용 회귀 방지)', async () => {
-    await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))
-    expect(mockUpdateSession).not.toHaveBeenCalled()
+  it('정산 API는 비교 권한과 무관하다 — 화이트리스트면 쓴다', async () => {
+    loginWithComparison(false)
+    const res = await middleware(
+      req('/api/settlement/closing', { 'sec-fetch-site': 'same-origin' })
+    )
+    expect(res.status).not.toBe(403)
   })
 
-  it('공개 페이지(/, /calc-food)는 matcher 대상이 아니다', () => {
-    expect(config.matcher).toEqual(['/api/:path*', '/app/:path*'])
+  it('/calc-food 미로그인은 /login으로 보낸다', async () => {
+    const res = await middleware(req('/calc-food'))
+    expect(res.status).toBe(307)
+    const location = new URL(res.headers.get('location')!)
+    expect(location.pathname).toBe('/login')
+    expect(location.searchParams.get('next')).toBe('/calc-food')
+  })
+
+  it('matcher에 /calc-food가 포함된다', () => {
+    expect(config.matcher).toEqual([
+      '/api/:path*',
+      '/app/:path*',
+      '/calc-food',
+      '/calc-food/:path*',
+    ])
   })
 })
 

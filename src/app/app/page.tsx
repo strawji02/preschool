@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { requireUser } from '@/features/shared/auth'
+import ComparisonReveal from './comparison-reveal'
 
 interface ModuleCard {
   title: string
@@ -9,19 +10,32 @@ interface ModuleCard {
   disabled?: boolean
 }
 
+/**
+ * 급식 정산 시스템의 화면들.
+ *
+ * ⚠️ **급식 비교는 여기 없다.** 권한(`can_access_comparison`)이 있는 사용자에게만
+ * 아래 `ComparisonReveal`로 따로 보여준다 (migration 056).
+ */
 const MODULES: ModuleCard[] = [
   {
     title: '급식 정산',
     description:
-      '신세계·CJ 원천 데이터를 올려 영업자별 지급액을 계산하고 정산 내역서를 뽑습니다. 지급명세서·홈택스 양식은 개발 중입니다.',
+      '신세계·CJ 원천 데이터를 올려 영업자별 지급액을 계산하고, 홈택스 계산서·정산 내역서·지급명세서를 뽑습니다.',
     href: '/app/settlement',
-    status: '개발 중',
+    status: '운영 중',
   },
   {
-    title: '급식 단가 비교',
+    title: '수금·지급',
     description:
-      '거래명세서를 업로드해 품목별 단가를 표준 단가와 비교하고 절감 가능액을 산출합니다.',
-    href: '/calc-food',
+      '유치원 입금과 영업자 지급을 기록합니다. 담당 유치원 전원 입금이 완료되면 지급 요청을 알립니다.',
+    href: '/app/settlement/collection',
+    status: '운영 중',
+  },
+  {
+    title: '경영 보고서',
+    description:
+      '마감된 달의 손익·세금·유치원별 매출을 봅니다. 발생과 현금을 나란히 놓고 미수금·미지급을 확인합니다.',
+    href: '/app/settlement/report',
     status: '운영 중',
   },
 ]
@@ -48,12 +62,29 @@ export default async function AppLauncherPage({
           해당 화면에 접근할 권한이 없습니다.
         </p>
       )}
+      {params.error === 'comparison-forbidden' && (
+        <p
+          className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+        >
+          급식 비교 시스템 접근 권한이 없습니다. 필요하면 관리자에게 요청하세요.
+        </p>
+      )}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2">
+      <h2 className="mt-8 text-sm font-medium text-gray-500">급식 정산 시스템</h2>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {MODULES.map((mod) => (
           <ModuleTile key={mod.href} {...mod} />
         ))}
       </div>
+
+      {/*
+        급식 비교는 권한이 있는 사용자에게만 넘긴다 — 권한이 없으면 이 컴포넌트가
+        아예 렌더되지 않으므로 클릭해도 나타날 것이 없다.
+      */}
+      {user.canAccessComparison && (
+        <ComparisonReveal label={user.email} />
+      )}
     </div>
   )
 }
