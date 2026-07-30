@@ -62,6 +62,9 @@ export async function POST(request: NextRequest) {
       exemptSupply: sum(invoiceRows, 'exempt', (r) => r.supply),
       /** 여러 식당이 한 장으로 합쳐진 계산서 수 (docs §6-1 해밀 사례) */
       mergedCount: invoiceRows.filter((r) => r.mergedFrom > 1).length,
+      /** 원단위 절사 (docs §6-2). 장수와 금액을 함께 보여줘야 확인이 된다 */
+      roundedCount: invoiceRows.filter((r) => r.roundingDiff > 0).length,
+      roundingTotal: result.invoiceRoundingTotal,
     }
 
     return NextResponse.json({ success: true, ...summary, invoiceSummary })

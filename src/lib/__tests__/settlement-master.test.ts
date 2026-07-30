@@ -407,7 +407,29 @@ describe('loadSettlementMaster — 계산서 공급자', () => {
       bizType: '도매 및 소매업',
       bizItem: '교재',
       email: 'kidswellfood@naver.com',
+      // 값이 없으면 `vat` — 세액에서 차감이 기본이다 (docs §6-2, migration 058)
+      roundingMode: 'vat',
     })
+  })
+
+  it('절사 방식을 설정에서 읽는다 — 세무사 협의로 바뀔 수 있다 (docs §6-2)', async () => {
+    tables['settlement_issuer'] = {
+      data: [
+        {
+          biz_reg_no: '8310503575',
+          company_name: '키즈웰에듀푸드',
+          ceo_name: '김중영',
+          address: '서울특별시 송파구 충민로66, 8층F8101호',
+          biz_type: '도매 및 소매업',
+          biz_item: '교재',
+          email: 'kidswellfood@naver.com',
+          invoice_rounding_mode: 'supply',
+        },
+      ],
+      error: null,
+    }
+    const m = await loadSettlementMaster()
+    expect(m.issuer?.roundingMode).toBe('supply')
   })
 
   it('설정이 없으면 null이다 (계산서를 만들 수 없다)', async () => {

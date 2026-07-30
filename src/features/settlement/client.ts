@@ -52,6 +52,13 @@ export {
   formatBizRegNo,
 } from './calc/biz-reg-no'
 
+// 계산서 원단위 절사도 순수 산식이다 (docs §6-2)
+export {
+  applyInvoiceRounding,
+  type InvoiceRoundingMode,
+  type RoundedInvoice,
+} from './calc/invoice-rounding'
+
 // 수금·지급도 순수 산식이다 (docs §9)
 export {
   buildCollectionSummary,

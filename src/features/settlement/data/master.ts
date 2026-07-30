@@ -2,6 +2,7 @@
 // service_role 키를 다루는 코드가 브라우저 번들에 들어가는 것을 구조적으로 막는다.
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
+import type { InvoiceRoundingMode } from '../calc/invoice-rounding'
 import type { PartnerType } from '../calc/settlement-formula'
 import type { PartnerMapping, SettlementSource } from '../parse/types'
 
@@ -32,6 +33,13 @@ export interface VenueRecord {
   isExcluded: boolean
   /** 왜 제외했는지 (예: 마케팅비). 제외가 아니면 null */
   exclusionReason: string | null
+  /**
+   * 계산서 총액을 10원 단위로 절사한다 (docs §6-2, migration 058).
+   *
+   * 유치원별 플래그로 둔 이유: 나중에 다른 곳이 추가돼도 코드를 안 고친다.
+   * 절사는 **계산서 한 장씩 각각** 적용하고, 정산은 원값을 쓴다.
+   */
+  invoiceRoundDown: boolean
   /**
    * 계산서 발행 정보 (docs §6-1). 하나라도 비어 있으면 계산서를 만들 수 없다.
    *
@@ -111,6 +119,11 @@ export interface IssuerRecord {
   bizType: string
   bizItem: string
   email: string
+  /**
+   * 원단위 절사 차액을 어디서 뺄지 (docs §6-2).
+   * **세무사 협의로 바뀔 수 있어** 코드가 아니라 설정에 둔다.
+   */
+  roundingMode: InvoiceRoundingMode
 }
 
 export interface SettlementMaster {
@@ -147,14 +160,14 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
     supabase
       .from('settlement_venues')
       .select(
-        'source, business_code, business_name, partner_id, is_excluded, exclusion_reason, biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email, email2'
+        'source, business_code, business_name, partner_id, is_excluded, exclusion_reason, invoice_round_down, biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email, email2'
       ),
     supabase
       .from('settlement_venue_items')
       .select('source, business_code, restaurant_code, restaurant_name, tax_kind, invoice_item_name'),
     supabase
       .from('settlement_issuer')
-      .select('biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email')
+      .select('biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email, invoice_rounding_mode')
       .eq('id', 1)
       .maybeSingle(),
   ])
@@ -192,6 +205,7 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
     partnerId: row.partner_id,
     isExcluded: row.is_excluded,
     exclusionReason: row.exclusion_reason ?? null,
+    invoiceRoundDown: row.invoice_round_down ?? false,
     invoice: {
       bizRegNo: row.biz_reg_no ?? null,
       companyName: row.company_name ?? null,
@@ -235,6 +249,7 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
         bizType: issuerRow.biz_type,
         bizItem: issuerRow.biz_item,
         email: issuerRow.email,
+        roundingMode: (issuerRow.invoice_rounding_mode ?? 'vat') as InvoiceRoundingMode,
       }
     : null
 

@@ -63,6 +63,7 @@ function line(over: Partial<InvoiceVenueLine> = {}): InvoiceVenueLine {
     restaurantName: '키즈웰에듀푸드(해밀유치원)',
     price: { taxableSupply: 0, vat: 0, exempt: 0, total: 0 },
     isExcluded: false,
+    roundDown: false,
     buyer: HAEMIL,
     itemNames: { taxable: '급식재료', exempt: '급식재료' },
     ...over,

@@ -92,6 +92,13 @@ export interface SettlementRunResult {
   /** 홈택스 계산서 (docs §6-1). 작성일자와 무관하므로 날짜는 출력 시점에 붙인다. */
   invoiceRows: InvoiceRow[]
   /**
+   * 계산서 원단위 절사로 깎인 금액의 총합 (docs §6-2).
+   *
+   * 정산(영업자 지급)은 **원값**을 쓰므로 이만큼이 본사 몫에서 빠진다.
+   * 영업자에게 줄 돈은 그대로 두고 회사가 흡수하는 구조다.
+   */
+  invoiceRoundingTotal: number
+  /**
    * 계산서를 만들 수 없는 항목 — 유치원 사업자 정보 미비, 식당 품목명 미지정.
    * 마감 차단 사유다 (docs §14-2). 정산 제외와 금액 0은 포함하지 않는다.
    */
@@ -209,7 +216,11 @@ export async function runSettlement(
 
   // 홈택스 계산서 (docs §6-1). 매핑 누락 사업장은 계산서 대상에서도 빠지는데,
   // 그건 이미 `unmapped`로 잡히므로 여기서 중복 경고하지 않는다.
-  const invoice = collectInvoiceRows(buildInvoiceLines(venues, master))
+  // 절사 방식은 설정에서 온다 — 세무사 협의로 바뀔 수 있다 (docs §6-2)
+  const invoice = collectInvoiceRows(
+    buildInvoiceLines(venues, master),
+    master.issuer?.roundingMode ?? 'vat'
+  )
   const issuer = master.issuer
   const invoiceProblems = [...invoice.problems]
   if (!issuer) {
@@ -243,6 +254,7 @@ export async function runSettlement(
     blocks,
     canClose: errors.length === 0 && unmapped.length === 0,
     invoiceRows: invoice.rows,
+    invoiceRoundingTotal: invoice.roundingTotal,
     invoiceProblems,
     issuer,
     canIssueInvoices:
@@ -380,6 +392,8 @@ function buildInvoiceLines(
       price: v.price,
       // 매핑 누락(사업장 미등록)도 계산서를 만들지 않는다. `unmapped`가 이미 알려준다.
       isExcluded: rec?.isExcluded ?? true,
+      // 유치원별 원단위 절사 (docs §6-2, migration 058)
+      roundDown: rec?.invoiceRoundDown ?? false,
       buyer,
       itemNames: { taxable: itemName('taxable'), exempt: itemName('exempt') },
     }
@@ -397,6 +411,7 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     blocks: [],
     canClose: false,
     invoiceRows: [],
+    invoiceRoundingTotal: 0,
     invoiceProblems: [],
     issuer: null,
     canIssueInvoices: false,

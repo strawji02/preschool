@@ -81,6 +81,9 @@ interface AnalyzeResponse {
     exemptSupply: number
     /** 여러 식당이 한 장으로 합쳐진 계산서 수 */
     mergedCount: number
+    /** 원단위 절사된 계산서 수와 깎인 총액 (docs §6-2) */
+    roundedCount: number
+    roundingTotal: number
   }
 }
 
@@ -930,6 +933,17 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                       <span className="font-medium text-gray-600">
                         {analysis.invoiceSummary.mergedCount}장
                       </span>
+                      <br />
+                    </>
+                  )}
+                  {analysis.invoiceSummary.roundedCount > 0 && (
+                    <>
+                      원단위 절사{' '}
+                      <span className="font-medium text-gray-600">
+                        {analysis.invoiceSummary.roundedCount}장 · −
+                        {won(analysis.invoiceSummary.roundingTotal)}원
+                      </span>{' '}
+                      — 정산은 원값을 쓰므로 이 금액은 본사 몫에서 빠집니다
                       <br />
                     </>
                   )}

@@ -174,12 +174,17 @@ async function main(): Promise<void> {
       restaurantName: v.restaurantName,
       price: v.price,
       isExcluded: rec?.isExcluded ?? false,
+      roundDown: rec?.invoiceRoundDown ?? false,
       buyer,
       itemNames: { taxable: itemName('taxable'), exempt: itemName('exempt') },
     }
   })
 
-  const { rows, problems } = collectInvoiceRows(lines)
+  const { rows, problems, roundingTotal } = collectInvoiceRows(
+    lines,
+    master.issuer?.roundingMode ?? 'vat'
+  )
+  if (roundingTotal > 0) console.log(`  원단위 절사: −${roundingTotal.toLocaleString()}원`)
   console.log(`\n계산서 ${rows.length}장 / 문제 ${problems.length}건`)
   for (const p of problems) console.log(`  ★ ${p}`)
 

@@ -1,4 +1,8 @@
 import type { SettlementSource, TaxBreakdown } from '../parse/types'
+import {
+  applyInvoiceRounding,
+  type InvoiceRoundingMode,
+} from '../calc/invoice-rounding'
 
 /**
  * 홈택스 전자(세금)계산서 일괄발행 엑셀 (docs/systems/settlement.md §6-1).
@@ -228,6 +232,14 @@ export interface InvoiceVenueLine {
   price: TaxBreakdown
   /** 정산 제외 사업장이면 계산서를 발행하지 않는다 */
   isExcluded: boolean
+  /**
+   * 계산서 총액을 10원 단위로 절사한다 (docs §6-2).
+   *
+   * ⚠️ **절사는 식당별이 아니라 계산서 한 장 단위다.** 여러 식당이 한 장으로
+   * 합쳐지면(해밀 사례) 합친 뒤에 한 번만 깎는다 — 식당마다 깎으면 최대
+   * 9원 × 식당수만큼 더 빠진다.
+   */
+  roundDown: boolean
   /** 계산서 정보. 필수 항목이 하나라도 없으면 null로 넘길 것 */
   buyer: InvoiceParty | null
   /** 과세구분별 품목명. 미지정이면 null */
@@ -243,6 +255,12 @@ export interface InvoiceRow {
   vat: number
   /** 몇 개 식당이 합쳐졌는지. 1이면 단독 (해밀 사례는 2) */
   mergedFrom: number
+  /**
+   * 원단위 절사로 깎인 금액 (docs §6-2). 절사 대상이 아니면 0.
+   *
+   * 정산(영업자 지급)은 원값을 쓰므로 이 금액은 **본사 몫에서 흡수된다.**
+   */
+  roundingDiff: number
 }
 
 /** 사업자 정보가 없어 계산서를 만들 수 없는 사업장 */
@@ -272,6 +290,11 @@ export interface PendingItemName {
 export interface CollectInvoiceResult {
   rows: InvoiceRow[]
   /**
+   * 원단위 절사로 깎인 금액의 총합 (docs §6-2).
+   * 정산은 원값이므로 이만큼이 본사 몫에서 빠진다.
+   */
+  roundingTotal: number
+  /**
    * 계산서를 만들 수 없는 항목. 마감 차단 사유다 (docs §14-2).
    *
    * **정산 제외와 금액 0은 문제가 아니다** — 매달 나오는 정상 상태이고,
@@ -300,7 +323,9 @@ const KIND_LABEL: Record<InvoiceTaxKind, string> = {
  * 26년 6월에 `복자유치원`이라는 상호가 3곳 있다 (docs §6-1).
  */
 export function collectInvoiceRows(
-  lines: readonly InvoiceVenueLine[]
+  lines: readonly InvoiceVenueLine[],
+  /** 차액을 어디서 뺄지. 기본 `vat` — 세무사 협의로 바뀔 수 있다 (docs §6-2) */
+  roundingMode: InvoiceRoundingMode = 'vat'
 ): CollectInvoiceResult {
   const groups = new Map<string, InvoiceRow>()
   const problems: string[] = []
@@ -308,6 +333,8 @@ export function collectInvoiceRows(
   // 사업장 단위로 모은다 — 식당이 3개여도 고칠 대상은 사업장 1개다
   const pendingBuyers = new Map<string, PendingBuyer>()
   const pendingItemNames: PendingItemName[] = []
+  // 절사 대상 계산서. **합치기가 끝난 뒤에** 한 번만 깎아야 하므로 키를 모아 둔다.
+  const roundDownKeys = new Set<string>()
 
   for (const line of lines) {
     // 의도적 제외는 조용히 건너뛴다 (본사 = 마케팅비)
@@ -380,13 +407,29 @@ export function collectInvoiceRows(
           supply,
           vat,
           mergedFrom: 1,
+          roundingDiff: 0,
         })
+        if (line.roundDown) roundDownKeys.add(key)
       }
     }
   }
 
+  // ── 원단위 절사 (docs §6-2) ──
+  // 합치기가 끝난 **계산서 한 장**을 대상으로 한다. 위 루프 안에서 깎으면
+  // 식당마다 최대 9원씩 빠져 유치원이 요청한 금액과 달라진다.
+  let roundingTotal = 0
+  for (const [key, row] of groups) {
+    if (!roundDownKeys.has(key)) continue
+    const r = applyInvoiceRounding(row, roundingMode, true)
+    row.supply = r.supply
+    row.vat = r.vat
+    row.roundingDiff = r.diff
+    roundingTotal += r.diff
+  }
+
   return {
     rows: [...groups.values()],
+    roundingTotal,
     problems,
     pending: { buyers: [...pendingBuyers.values()], itemNames: pendingItemNames },
   }
