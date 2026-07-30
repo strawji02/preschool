@@ -76,10 +76,14 @@ export {
 // 마감 합계는 순수 산식이라 화면에서 미리보기로도 쓴다
 export {
   closingTotals,
+  closingTransition,
   isValidPeriod,
   type ClosingVenueRow,
   type ClosingPartnerRow,
   type ClosingTotals,
+  type ClosingStatus,
+  type ClosingAction,
+  type ClosingTransition,
 } from './calc/closing'
 
 export {

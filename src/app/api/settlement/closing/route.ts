@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { requireApiUser } from '@/features/shared/auth'
+import { requireApiAdmin, requireApiUser } from '@/features/shared/auth'
 import {
   ClosingError,
   buildDeclarationLines,
@@ -10,10 +10,10 @@ import {
   loadClosingRevisions,
   normalizeDeductionItems,
   readUploadedWorkbook,
+  reopenClosing,
   runSettlement,
   saveClosing,
   sumDeductionItems,
-  type ClosingStatus,
   type DeclarationSplit,
 } from '@/features/settlement'
 
@@ -73,14 +73,15 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const statusRaw = String(form.get('status') ?? '')
-  if (statusRaw !== 'confirmed' && statusRaw !== 'closed') {
+  // `confirm`(확정) / `close`(마감). 마감된 달이면 데이터 계층이 거부한다 (docs §8).
+  const actionRaw = String(form.get('action') ?? '')
+  if (actionRaw !== 'confirm' && actionRaw !== 'close') {
     return NextResponse.json(
-      { success: false, error: '마감 상태가 올바르지 않습니다.' },
+      { success: false, error: '마감 동작이 올바르지 않습니다.' },
       { status: 400 }
     )
   }
-  const status: ClosingStatus = statusRaw
+  const action = actionRaw
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File)
   if (files.length === 0 || files.some((f) => !isExcelUpload(f))) {
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     const saved = await saveClosing({
       period,
-      status,
+      action,
       venues: result.closingVenues,
       partners: result.closingPartners,
       snapshot,
@@ -160,6 +161,49 @@ export async function POST(request: NextRequest) {
         success: false,
         error: err instanceof Error ? err.message : '마감 저장 중 오류가 발생했습니다.',
       },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * 마감 해제 — **admin 전용** (docs §8).
+ *
+ * 마감은 "이 숫자로 세무·지급이 끝났다"는 선언이라 저장으로는 못 바꾼다.
+ * 고쳐야 할 때는 이 경로로 열고, **사유가 이력에 남는다.**
+ *
+ * 별도 메서드(PATCH)로 둔 이유: 저장(POST)과 성격이 다르다. 실수로 섞이면
+ * 안 되는 동작이라 경로 자체를 분리한다.
+ */
+export async function PATCH(request: NextRequest) {
+  const guard = await requireApiAdmin()
+  if ('response' in guard) return guard.response
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json(
+      { success: false, error: '요청 형식이 올바르지 않습니다.' },
+      { status: 400 }
+    )
+  }
+  const req = (body ?? {}) as Record<string, unknown>
+
+  try {
+    const closing = await reopenClosing({
+      period: String(req.period ?? ''),
+      actor: guard.user.email,
+      reason: String(req.reason ?? ''),
+    })
+    return NextResponse.json({ success: true, closing })
+  } catch (err) {
+    if (err instanceof ClosingError) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 400 })
+    }
+    console.error('[settlement/closing PATCH]', err)
+    return NextResponse.json(
+      { success: false, error: '마감 해제 중 오류가 발생했습니다.' },
       { status: 500 }
     )
   }

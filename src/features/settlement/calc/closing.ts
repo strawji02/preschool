@@ -112,6 +112,70 @@ export interface ClosingTotals {
   vatDiffGap: number
 }
 
+/**
+ * 마감 상태 (docs §8). 코드에서는 영어 값을 쓴다 — 한글 문자열 비교는
+ * 인코딩 사고가 나기 쉽다.
+ */
+export type ClosingStatus = 'draft' | 'confirmed' | 'closed'
+
+/** 사용자가 누르는 동작 */
+export type ClosingAction = 'confirm' | 'close' | 'reopen'
+
+export interface ClosingTransition {
+  allowed: boolean
+  /** 거부 사유. 사용자에게 그대로 보여주므로 **다음에 뭘 해야 하는지**까지 적는다 */
+  reason: string | null
+  nextStatus: ClosingStatus | null
+}
+
+/**
+ * 상태 전이 판정 (docs §8).
+ *
+ * ```
+ * 작성중 ──확정──▶ 확정 ──마감──▶ 마감
+ *                  ▲               │
+ *                  └───── 해제 ────┘   (admin만)
+ * ```
+ *
+ * ★ **마감된 달은 저장할 수 없다.** 확정까지는 금액을 고칠 수 있지만, 마감은
+ * "이 숫자로 세무·지급이 끝났다"는 선언이다. 조용히 덮어쓰면 이미 나간 문서와
+ * 장부가 어긋난다.
+ *
+ * 그래도 고쳐야 할 때가 온다 — 세무사가 뒤늦게 오류를 찾는 일은 실제로 생긴다.
+ * 그래서 막지 않고 **해제라는 별도 동작**으로 분리한다: 권한·사유·이력이 붙는다.
+ *
+ * 순수 함수다. 권한 확인은 호출하는 쪽(API)이 한다.
+ */
+export function closingTransition(
+  current: ClosingStatus | null,
+  action: ClosingAction
+): ClosingTransition {
+  const deny = (reason: string): ClosingTransition => ({
+    allowed: false,
+    reason,
+    nextStatus: null,
+  })
+
+  if (action === 'reopen') {
+    if (current !== 'closed') {
+      return deny('마감된 달만 해제할 수 있습니다.')
+    }
+    return { allowed: true, reason: null, nextStatus: 'confirmed' }
+  }
+
+  if (current === 'closed') {
+    return deny(
+      '이미 마감된 달입니다. 수정하려면 먼저 마감을 해제해 주세요 (관리자 권한 필요).'
+    )
+  }
+
+  return {
+    allowed: true,
+    reason: null,
+    nextStatus: action === 'close' ? 'closed' : 'confirmed',
+  }
+}
+
 /** 마감 기간 — `YYYY-MM`만 받는다. `26년6월` 같은 표기는 연도가 애매하다. */
 export function isValidPeriod(period: string): boolean {
   const m = /^(\d{4})-(\d{2})$/.exec(period)

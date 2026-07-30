@@ -88,7 +88,7 @@ const won = (n: number) => n.toLocaleString('ko-KR')
 
 const EXCEL_EXT = /\.(xlsx|xls|xlsm)$/i
 
-export default function SettlementWorkspace() {
+export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const fileInput = useRef<HTMLInputElement>(null)
   /** dragleave가 자식 요소로 이동할 때도 발생하므로 깊이를 세서 깜빡임을 막는다 */
   const dragDepth = useRef(0)
@@ -109,6 +109,11 @@ export default function SettlementWorkspace() {
   >(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  /**
+   * 마감된 달이면 공제·분할 입력을 잠근다 (docs §8).
+   * 서버가 저장을 거부하므로 화면만 잠그는 게 아니라 **입력 자체를 막아** 헛수고를 없앤다.
+   */
+  const [locked, setLocked] = useState(false)
 
   /** 파일 추가 — 같은 파일을 두 번 넣지 않는다 (이름+크기로 판별) */
   const addFiles = useCallback((incoming: readonly File[]) => {
@@ -289,14 +294,14 @@ export default function SettlementWorkspace() {
    * 4개 게이트를 재검사한 뒤 스냅샷을 굳힌다. 화면 값을 그대로 저장하지 않는다.
    */
   async function saveClosing(
-    status: 'confirmed' | 'closed',
+    action: 'confirm' | 'close',
     reason: string | null
   ): Promise<boolean> {
     setError(null)
     try {
       const fd = buildFormData()
       fd.append('period', issueMonth)
-      fd.append('status', status)
+      fd.append('action', action)
       fd.append('deductionItems', JSON.stringify(deductions))
       fd.append('splits', JSON.stringify(splits))
       if (reason) fd.append('reason', reason)
@@ -309,7 +314,7 @@ export default function SettlementWorkspace() {
         setError(json?.error ?? '마감 저장에 실패했습니다.')
         return false
       }
-      setNotice(status === 'closed' ? '마감했습니다.' : '확정했습니다.')
+      setNotice(action === 'close' ? '마감했습니다.' : '확정했습니다.')
       return true
     } catch (e) {
       setError(e instanceof Error ? e.message : '마감 저장 중 오류가 발생했습니다.')
@@ -593,6 +598,7 @@ export default function SettlementWorkspace() {
                 <DeductionEditor
                   key={p.partnerId}
                   partnerName={p.partnerName}
+                  locked={locked}
                   items={deductions[p.partnerId] ?? []}
                   onChange={(items) =>
                     setDeductions((prev) => ({ ...prev, [p.partnerId]: items }))
@@ -702,6 +708,7 @@ export default function SettlementWorkspace() {
                   <SplitEditor
                     key={p.partnerId}
                     partnerName={p.partnerName}
+                    locked={locked}
                     declared={declared}
                     splits={splits[p.partnerId] ?? []}
                     onChange={(next) =>
@@ -984,7 +991,9 @@ export default function SettlementWorkspace() {
           <ClosingPanel
             period={issueMonth}
             canClose={analysis.canClose && analysis.canIssueInvoices && !splitBlocked}
+            isAdmin={isAdmin}
             onSave={saveClosing}
+            onStatusChange={setLocked}
           />
         </>
       )}
@@ -1002,11 +1011,14 @@ function SplitEditor({
   partnerName,
   declared,
   splits,
+  locked,
   onChange,
 }: {
   partnerName: string
   declared: number
   splits: DeclarationSplit[]
+  /** 마감된 달이면 수정할 수 없다 (docs §8) */
+  locked: boolean
   onChange: (splits: DeclarationSplit[]) => void
 }) {
   const total = splits.reduce((sum, s) => sum + s.amount, 0)
@@ -1038,19 +1050,21 @@ function SplitEditor({
               <input
                 type="text"
                 value={split.name}
+                disabled={locked}
                 onChange={(e) => update(i, { name: e.target.value })}
                 placeholder="성명"
-                className="w-32 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+                className="w-32 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
               />
               <input
                 type="number"
                 step={1}
                 value={split.amount}
+                disabled={locked}
                 onChange={(e) => update(i, { amount: Number(e.target.value) || 0 })}
                 placeholder="금액"
-                className="w-36 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none"
+                className="w-36 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
               />
-              {remain !== 0 && (
+              {remain !== 0 && !locked && (
                 <button
                   type="button"
                   onClick={() => update(i, { amount: split.amount + remain })}
@@ -1060,33 +1074,39 @@ function SplitEditor({
                   남은 금액 채우기
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => onChange(splits.filter((_, x) => x !== i))}
-                className="text-xs text-gray-400 hover:text-red-600"
-              >
-                삭제
-              </button>
+              {!locked && (
+                <button
+                  type="button"
+                  onClick={() => onChange(splits.filter((_, x) => x !== i))}
+                  className="text-xs text-gray-400 hover:text-red-600"
+                >
+                  삭제
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <button
-        type="button"
-        onClick={() =>
-          onChange([
-            ...splits,
-            // 첫 행은 영업자 본인 이름과 전액을 채워 둔다 — 대부분 본인 + 가족 형태다
-            splits.length === 0
-              ? { name: partnerName, amount: declared }
-              : { name: '', amount: 0 },
-          ])
-        }
-        className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
-      >
-        {active ? '+ 명의 추가' : '분할 신고 설정'}
-      </button>
+      {locked ? (
+        <p className="mt-3 text-xs text-gray-400">마감된 달이라 수정할 수 없습니다.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...splits,
+              // 첫 행은 영업자 본인 이름과 전액을 채워 둔다 — 대부분 본인 + 가족 형태다
+              splits.length === 0
+                ? { name: partnerName, amount: declared }
+                : { name: '', amount: 0 },
+            ])
+          }
+          className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+        >
+          {active ? '+ 명의 추가' : '분할 신고 설정'}
+        </button>
+      )}
     </div>
   )
 }
@@ -1095,10 +1115,13 @@ function SplitEditor({
 function DeductionEditor({
   partnerName,
   items,
+  locked,
   onChange,
 }: {
   partnerName: string
   items: DeductionItem[]
+  /** 마감된 달이면 수정할 수 없다 (docs §8) */
+  locked: boolean
   onChange: (items: DeductionItem[]) => void
 }) {
   const total = sumDeductionItems(items)
@@ -1122,8 +1145,9 @@ function DeductionEditor({
             <li key={i} className="flex flex-wrap items-center gap-2">
               <select
                 value={item.category}
+                disabled={locked}
                 onChange={(e) => update(i, { category: e.target.value })}
-                className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+                className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
               >
                 {DEDUCTION_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -1135,36 +1159,44 @@ function DeductionEditor({
                 type="number"
                 step={10}
                 value={item.amount}
+                disabled={locked}
                 onChange={(e) => update(i, { amount: Number(e.target.value) || 0 })}
                 placeholder="금액"
-                className="w-32 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none"
+                className="w-32 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-gray-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
               />
               <input
                 type="text"
                 value={item.note ?? ''}
+                disabled={locked}
                 onChange={(e) => update(i, { note: e.target.value })}
                 placeholder="비고 (예: 6월 2회)"
-                className="min-w-[10rem] flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
+                className="min-w-[10rem] flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
               />
-              <button
-                type="button"
-                onClick={() => onChange(items.filter((_, x) => x !== i))}
-                className="text-xs text-gray-400 hover:text-red-600"
-              >
-                삭제
-              </button>
+              {!locked && (
+                <button
+                  type="button"
+                  onClick={() => onChange(items.filter((_, x) => x !== i))}
+                  className="text-xs text-gray-400 hover:text-red-600"
+                >
+                  삭제
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <button
-        type="button"
-        onClick={() => onChange([...items, { category: DEDUCTION_CATEGORIES[0], amount: 0 }])}
-        className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
-      >
-        + 공제 항목 추가
-      </button>
+      {locked ? (
+        <p className="mt-3 text-xs text-gray-400">마감된 달이라 수정할 수 없습니다.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onChange([...items, { category: DEDUCTION_CATEGORIES[0], amount: 0 }])}
+          className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+        >
+          + 공제 항목 추가
+        </button>
+      )}
     </div>
   )
 }

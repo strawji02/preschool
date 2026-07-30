@@ -44,11 +44,15 @@ export interface ClosingView {
   closedAt: string | null
   closedBy: string | null
   updatedAt: string
+  /** 마감 해제 횟수. 0보다 크면 마감 후 수정이 있었다 */
+  reopenCount: number
 }
 
 export interface ClosingRevisionView {
   revision: number
   status: ClosingStatusValue
+  /** `save` = 확정·마감 저장 / `reopen` = 마감 해제 */
+  action: 'save' | 'reopen'
   reason: string | null
   createdAt: string
   createdBy: string | null
@@ -81,20 +85,27 @@ function when(iso: string | null): string {
 export default function ClosingPanel({
   period,
   canClose,
+  isAdmin,
   onSave,
+  onStatusChange,
 }: {
   /** `YYYY-MM` */
   period: string
   /** 4개 게이트를 모두 통과했는지. 서버도 다시 검사한다 */
   canClose: boolean
+  /** 마감 해제 권한 (docs §8 — admin만) */
+  isAdmin: boolean
   /** 저장 실행 — 파일·공제·분할을 붙여 보내는 건 부모가 한다 */
-  onSave: (status: 'confirmed' | 'closed', reason: string | null) => Promise<boolean>
+  onSave: (action: 'confirm' | 'close', reason: string | null) => Promise<boolean>
+  /** 마감 여부를 부모에게 알린다 — 입력 잠금에 쓴다 */
+  onStatusChange: (locked: boolean) => void
 }) {
   const [closing, setClosing] = useState<ClosingView | null>(null)
   const [revisions, setRevisions] = useState<ClosingRevisionView[]>([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState<'confirmed' | 'closed' | null>(null)
+  const [busy, setBusy] = useState<'confirm' | 'close' | 'reopen' | null>(null)
   const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -108,24 +119,53 @@ export default function ClosingPanel({
       if (json?.success) {
         setClosing(json.closing ?? null)
         setRevisions(json.revisions ?? [])
+        onStatusChange(json.closing?.status === 'closed')
       }
     } finally {
       setLoading(false)
     }
-  }, [period])
+  }, [period, onStatusChange])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  async function save(status: 'confirmed' | 'closed') {
-    setBusy(status)
+  async function save(action: 'confirm' | 'close') {
+    setBusy(action)
     try {
-      const ok = await onSave(status, reason.trim() || null)
+      const ok = await onSave(action, reason.trim() || null)
       if (ok) {
         setReason('')
         await refresh()
       }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** 마감 해제 (docs §8) — admin만, 사유 필수 */
+  async function reopen() {
+    const why = reason.trim()
+    if (why === '') return
+    setBusy('reopen')
+    setError(null)
+    try {
+      const res = await fetch('/api/settlement/closing', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period, reason: why }),
+      })
+      const json = (await res.json().catch(() => null)) as
+        | { success?: boolean; error?: string }
+        | null
+      if (!res.ok || !json?.success) {
+        setError(json?.error ?? '마감 해제에 실패했습니다.')
+        return
+      }
+      setReason('')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '마감 해제 중 오류가 발생했습니다.')
     } finally {
       setBusy(null)
     }
@@ -150,6 +190,11 @@ export default function ClosingPanel({
           {closing && (
             <span className="ml-2 text-xs font-normal text-gray-400">
               {period} · 리비전 {closing.revision}
+            </span>
+          )}
+          {closing && closing.reopenCount > 0 && (
+            <span className="ml-2 rounded bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+              마감 해제 {closing.reopenCount}회
             </span>
           )}
         </h2>
@@ -258,49 +303,106 @@ export default function ClosingPanel({
         </div>
       )}
 
-      {/* ── 저장 ── */}
-      <div className="mt-5 space-y-3 border-t border-gray-100 pt-4">
-        {needsReason && (
-          <label className="block text-sm">
-            <span className="mb-1 block text-xs text-gray-500">
-              다시 저장하는 이유 (필수) — 마감 후 수정은 이력으로 남습니다
-            </span>
-            <input
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="예: 김중영 사업자공제 누락분 반영"
-              className="w-full rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
-            />
-          </label>
-        )}
+      {error && (
+        <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      )}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void save('confirmed')}
-            disabled={busy !== null || !canClose || reasonMissing}
-            className="rounded-lg border border-gray-900 px-4 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy === 'confirmed' ? '저장 중…' : isClosed ? '확정으로 되돌리기' : '확정'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void save('closed')}
-            disabled={busy !== null || !canClose || reasonMissing}
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy === 'closed' ? '저장 중…' : isClosed ? '마감 다시 저장' : '마감'}
-          </button>
-          {!canClose && (
-            <span className="text-xs text-red-600">
-              위 4개 항목을 모두 해결해야 마감할 수 있습니다
-            </span>
-          )}
-          {canClose && reasonMissing && (
-            <span className="text-xs text-amber-700">다시 저장하는 이유를 적어 주세요</span>
-          )}
-        </div>
+      {/* ── 저장 / 해제 ── */}
+      <div className="mt-5 space-y-3 border-t border-gray-100 pt-4">
+        {isClosed ? (
+          <>
+            <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <p className="font-medium">이 달은 마감되었습니다 — 수정할 수 없습니다.</p>
+              <p className="mt-1 text-xs leading-relaxed">
+                공제·분할신고 입력이 잠겼습니다. 산출물(계산서·내역서)은 계속 받을 수
+                있습니다.
+                {isAdmin
+                  ? ' 고쳐야 하면 아래에서 마감을 해제하세요 — 이력에 남습니다.'
+                  : ' 고쳐야 하면 관리자에게 마감 해제를 요청하세요.'}
+              </p>
+            </div>
+
+            {isAdmin && (
+              <>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs text-gray-500">
+                    마감 해제 사유 (필수) — 세무 문서가 바뀌는 일이라 이력에 남습니다
+                  </span>
+                  <input
+                    type="text"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="예: 세무사 확인 결과 이동현 공제 누락"
+                    className="w-full rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void reopen()}
+                    disabled={busy !== null || reason.trim() === ''}
+                    className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busy === 'reopen' ? '해제 중…' : '마감 해제'}
+                  </button>
+                  {reason.trim() === '' && (
+                    <span className="text-xs text-amber-700">해제 사유를 적어 주세요</span>
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {needsReason && (
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs text-gray-500">
+                  다시 저장하는 이유 (필수) — 저장 이력으로 남습니다
+                </span>
+                <input
+                  type="text"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="예: 김중영 사업자공제 누락분 반영"
+                  className="w-full rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
+                />
+              </label>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void save('confirm')}
+                disabled={busy !== null || !canClose || reasonMissing}
+                className="rounded-lg border border-gray-900 px-4 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'confirm' ? '저장 중…' : '확정'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void save('close')}
+                disabled={busy !== null || !canClose || reasonMissing}
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'close' ? '저장 중…' : '마감'}
+              </button>
+              {!canClose && (
+                <span className="text-xs text-red-600">
+                  위 4개 항목을 모두 해결해야 마감할 수 있습니다
+                </span>
+              )}
+              {canClose && reasonMissing && (
+                <span className="text-xs text-amber-700">
+                  다시 저장하는 이유를 적어 주세요
+                </span>
+              )}
+            </div>
+            <p className="text-xs leading-relaxed text-gray-400">
+              <strong>확정</strong>하면 보고서·계산서가 만들어지고 금액은 계속 고칠 수
+              있습니다. <strong>마감</strong>하면 더 이상 수정할 수 없습니다.
+            </p>
+          </>
+        )}
       </div>
 
       {/* ── 이력 ── */}
@@ -313,9 +415,15 @@ export default function ClosingPanel({
             {revisions.map((r) => (
               <li key={r.revision} className="flex flex-wrap gap-2">
                 <span className="tabular-nums text-gray-400">#{r.revision}</span>
-                <span className={`rounded px-1.5 ${STATUS_STYLE[r.status]}`}>
-                  {STATUS_LABEL[r.status]}
-                </span>
+                {r.action === 'reopen' ? (
+                  <span className="rounded bg-red-100 px-1.5 font-medium text-red-700">
+                    마감 해제
+                  </span>
+                ) : (
+                  <span className={`rounded px-1.5 ${STATUS_STYLE[r.status]}`}>
+                    {STATUS_LABEL[r.status]}
+                  </span>
+                )}
                 <span className="tabular-nums">{when(r.createdAt)}</span>
                 {r.createdBy && <span className="text-gray-400">{r.createdBy}</span>}
                 {r.reason && <span className="text-gray-500">— {r.reason}</span>}

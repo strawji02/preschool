@@ -3,8 +3,11 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   closingTotals,
+  closingTransition,
   isValidPeriod,
+  type ClosingAction,
   type ClosingPartnerRow,
+  type ClosingStatus,
   type ClosingTotals,
   type ClosingVenueRow,
 } from '../calc/closing'
@@ -17,7 +20,7 @@ import {
  * 덮어쓰지 않는다. 마감 후 수정도 이력이 남아야 한다 (docs §8).
  */
 
-export type ClosingStatus = 'draft' | 'confirmed' | 'closed'
+export type { ClosingStatus }
 
 export const CLOSING_STATUS_LABEL: Record<ClosingStatus, string> = {
   draft: '작성중',
@@ -30,7 +33,8 @@ export class ClosingError extends Error {}
 export interface SaveClosingInput {
   /** `YYYY-MM` */
   period: string
-  status: ClosingStatus
+  /** `confirm`(확정) 또는 `close`(마감). 마감된 달이면 거부된다 (docs §8) */
+  action: Extract<ClosingAction, 'confirm' | 'close'>
   venues: readonly ClosingVenueRow[]
   partners: readonly ClosingPartnerRow[]
   /**
@@ -54,11 +58,15 @@ export interface ClosingRecord {
   closedAt: string | null
   closedBy: string | null
   updatedAt: string
+  /** 마감 해제 횟수. 0보다 크면 마감 후 수정이 있었다 */
+  reopenCount: number
 }
 
 export interface ClosingRevision {
   revision: number
   status: ClosingStatus
+  /** `save` = 확정·마감 저장 / `reopen` = 마감 해제 */
+  action: 'save' | 'reopen'
   reason: string | null
   createdAt: string
   createdBy: string | null
@@ -117,7 +125,9 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
 
   const existing = await supabase
     .from('settlement_closings')
-    .select('period, revision, status, confirmed_at, confirmed_by, closed_at, closed_by')
+    .select(
+      'period, revision, status, confirmed_at, confirmed_by, closed_at, closed_by, reopen_count'
+    )
     .eq('period', input.period)
     .maybeSingle()
   if (existing.error) {
@@ -125,28 +135,34 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
   }
 
   const prev = existing.data
+
+  // ★ 마감된 달은 저장할 수 없다. 해제를 거쳐야 한다 (docs §8).
+  // 화면이 버튼을 잠그지만 서버가 최종 판단한다 — API를 직접 부르면 화면을 우회한다.
+  const transition = closingTransition(
+    (prev?.status as ClosingStatus | undefined) ?? null,
+    input.action
+  )
+  if (!transition.allowed || !transition.nextStatus) {
+    throw new ClosingError(transition.reason ?? '저장할 수 없는 상태입니다.')
+  }
+  const status = transition.nextStatus
+
   const revision = (prev?.revision ?? 0) + 1
 
   // 확정·마감 시각은 **처음 도달한 때**를 남긴다. 재저장할 때마다 갱신하면
   // "언제 마감했나"를 답할 수 없다.
-  const confirmedAt =
-    input.status === 'confirmed' || input.status === 'closed'
-      ? (prev?.confirmed_at ?? now)
-      : (prev?.confirmed_at ?? null)
-  const confirmedBy =
-    input.status === 'confirmed' || input.status === 'closed'
-      ? (prev?.confirmed_by ?? input.actor)
-      : (prev?.confirmed_by ?? null)
-  const closedAt = input.status === 'closed' ? (prev?.closed_at ?? now) : (prev?.closed_at ?? null)
+  const confirmedAt = prev?.confirmed_at ?? now
+  const confirmedBy = prev?.confirmed_by ?? input.actor
+  const closedAt = status === 'closed' ? (prev?.closed_at ?? now) : (prev?.closed_at ?? null)
   const closedBy =
-    input.status === 'closed' ? (prev?.closed_by ?? input.actor) : (prev?.closed_by ?? null)
+    status === 'closed' ? (prev?.closed_by ?? input.actor) : (prev?.closed_by ?? null)
 
   const upsert = await supabase
     .from('settlement_closings')
     .upsert(
       {
         period: input.period,
-        status: input.status,
+        status,
         revision,
         ...totalsToColumns(totals),
         confirmed_at: confirmedAt,
@@ -157,7 +173,7 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
       { onConflict: 'period' }
     )
     .select(
-      'period, status, revision, updated_at, confirmed_at, confirmed_by, closed_at, closed_by'
+      'period, status, revision, updated_at, confirmed_at, confirmed_by, closed_at, closed_by, reopen_count'
     )
     .single()
   if (upsert.error) throw new ClosingError(`마감 저장 실패: ${upsert.error.message}`)
@@ -167,7 +183,8 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
     period: input.period,
     revision,
     snapshot: input.snapshot as never,
-    status: input.status,
+    status,
+    action: 'save',
     reason: input.reason ?? null,
     created_by: input.actor,
   })
@@ -238,6 +255,81 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
     closedAt: upsert.data.closed_at,
     closedBy: upsert.data.closed_by,
     updatedAt: upsert.data.updated_at,
+    reopenCount: Number(upsert.data.reopen_count ?? 0),
+  }
+}
+
+/**
+ * 마감 해제 (docs §8) — **admin 전용**. 권한 확인은 API가 한다.
+ *
+ * 마감을 `확정`으로 되돌린다. 스냅샷은 지우지 않고 **새 리비전을 쌓는다** —
+ * 마감 문서가 바뀐 사건이므로 이력에 남아야 한다.
+ *
+ * 마감 시각(`closed_at`)은 **지우지 않는다.** "한 번 마감했었다"는 사실이
+ * 사라지면 나중에 추적할 수 없다. 다시 마감하면 그 시각이 유지된다.
+ */
+export async function reopenClosing(input: {
+  period: string
+  actor: string
+  reason: string
+}): Promise<ClosingRecord> {
+  const reason = input.reason.trim()
+  if (reason === '') {
+    // 사유 없는 해제는 나중에 "왜 열었나"를 답할 수 없다
+    throw new ClosingError('마감을 해제하려면 사유를 입력해 주세요.')
+  }
+
+  const supabase = createAdminClient()
+  const existing = await supabase
+    .from('settlement_closings')
+    .select('period, status, revision, reopen_count')
+    .eq('period', input.period)
+    .maybeSingle()
+  if (existing.error) throw new ClosingError(`마감 조회 실패: ${existing.error.message}`)
+  if (!existing.data) throw new ClosingError(`${input.period} 마감 기록이 없습니다.`)
+
+  const transition = closingTransition(existing.data.status as ClosingStatus, 'reopen')
+  if (!transition.allowed || !transition.nextStatus) {
+    throw new ClosingError(transition.reason ?? '해제할 수 없는 상태입니다.')
+  }
+
+  const revision = Number(existing.data.revision) + 1
+  const update = await supabase
+    .from('settlement_closings')
+    .update({
+      status: transition.nextStatus,
+      revision,
+      reopen_count: Number(existing.data.reopen_count ?? 0) + 1,
+    })
+    .eq('period', input.period)
+    .select('*')
+    .single()
+  if (update.error) throw new ClosingError(`마감 해제 실패: ${update.error.message}`)
+
+  // 해제도 이력으로 남긴다. 스냅샷 본문은 직전 리비전과 같으므로 참조만 적는다.
+  const snap = await supabase.from('settlement_closing_snapshots').insert({
+    period: input.period,
+    revision,
+    snapshot: { reopenedFrom: Number(existing.data.revision) } as never,
+    status: transition.nextStatus,
+    action: 'reopen',
+    reason,
+    created_by: input.actor,
+  })
+  if (snap.error) throw new ClosingError(`해제 이력 저장 실패: ${snap.error.message}`)
+
+  const row = update.data as Record<string, unknown>
+  return {
+    period: String(row.period),
+    status: row.status as ClosingStatus,
+    revision: Number(row.revision),
+    totals: columnsToTotals(row),
+    confirmedAt: (row.confirmed_at as string | null) ?? null,
+    confirmedBy: (row.confirmed_by as string | null) ?? null,
+    closedAt: (row.closed_at as string | null) ?? null,
+    closedBy: (row.closed_by as string | null) ?? null,
+    updatedAt: String(row.updated_at),
+    reopenCount: Number(row.reopen_count ?? 0),
   }
 }
 
@@ -264,6 +356,7 @@ export async function loadClosing(period: string): Promise<ClosingRecord | null>
     closedAt: (row.closed_at as string | null) ?? null,
     closedBy: (row.closed_by as string | null) ?? null,
     updatedAt: String(row.updated_at),
+    reopenCount: Number(row.reopen_count ?? 0),
   }
 }
 
@@ -273,7 +366,7 @@ export async function loadClosingRevisions(period: string): Promise<ClosingRevis
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('settlement_closing_snapshots')
-    .select('revision, status, reason, created_at, created_by')
+    .select('revision, status, action, reason, created_at, created_by')
     .eq('period', period)
     .order('revision', { ascending: false })
   if (error) throw new ClosingError(`마감 이력 조회 실패: ${error.message}`)
@@ -281,6 +374,7 @@ export async function loadClosingRevisions(period: string): Promise<ClosingRevis
   return (data ?? []).map((r) => ({
     revision: r.revision,
     status: r.status as ClosingStatus,
+    action: (r.action as 'save' | 'reopen') ?? 'save',
     reason: r.reason,
     createdAt: r.created_at,
     createdBy: r.created_by,
@@ -309,6 +403,7 @@ export async function listClosings(limit = 24): Promise<ClosingRecord[]> {
       closedAt: (row.closed_at as string | null) ?? null,
       closedBy: (row.closed_by as string | null) ?? null,
       updatedAt: String(row.updated_at),
+      reopenCount: Number(row.reopen_count ?? 0),
     }
   })
 }

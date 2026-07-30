@@ -317,6 +317,7 @@
 | ①홈택스 일괄발행 | `features/settlement/report/invoice-sheet.ts` | **실데이터 역검증 완료** (88장 일치) |
 | 인라인 해결·마감 체크리스트 | `app/app/settlement/pending-panel.tsx`, `api/settlement/master` | **프로덕션 반영** (§14-3) |
 | 월 마감 + 스냅샷 | migration 053, `data/closing.ts`, `api/settlement/closing` | **프로덕션 반영** (§8, §14-1) |
+| 마감 잠금 + 해제 (admin) | migration 057, `calc/closing.ts` `closingTransition` | **프로덕션 반영** (§8-1) |
 | 경영 보고서 | `app/app/settlement/report`, `calc/report-rollup.ts` | **프로덕션 반영** (§13) |
 | 수금·지급 관리 | migration 055, `app/app/settlement/collection` | **프로덕션 반영** (§9) |
 
@@ -663,3 +664,38 @@
 - 런처에 "이번 달 어디까지 했나"(정산·계산서·수금·지급 진행률)를 띄우면 다음 할 일이
   보인다.
 - 경영 보고서에 월별 추이 표(매출·영업이익·미수금) — 마감 월이 쌓이면 의미가 생긴다.
+
+## 8-1. 마감 잠금과 해제 (2026-07-31 구현)
+
+**두 단계로 나눈 이유.** 확정하면 보고서·계산서는 나오는데 금액은 아직 고칠 수 있어야
+한다 — 세무사 확인이 며칠 걸린다. 그래서 `확정`과 `마감`을 갈랐다.
+
+```
+draft ──confirm──▶ confirmed ──close──▶ closed
+                       ▲                   │
+                       └──── reopen ───────┘   (admin만, 사유 필수)
+```
+
+| 상태 | 산출물 | 금액 수정 |
+|---|---|---|
+| `draft` | — | 자유 |
+| `confirmed` | 보고서·계산서·내역서 | **가능** (리비전이 쌓인다) |
+| `closed` | 전부 | **불가** |
+
+**마감 상태에서는 저장 자체를 거부한다** (`closingTransition`). 화면도 공제·분할
+입력을 잠그지만 **경계는 `data/closing.ts`**다 — 화면을 우회해도 막힌다.
+
+### 해제
+
+`PATCH /api/settlement/closing` — `requireApiAdmin()`. 마감은 "이 숫자로 세무·지급이
+끝났다"는 선언이라 일반 저장으로는 못 바꾼다. 경로 자체를 POST와 분리해 실수로 섞이지
+않게 했다.
+
+- **사유 필수.** 빈 문자열이면 거부한다.
+- `closed → confirmed`로만 간다. 확정 상태를 또 해제하는 건 거부한다.
+- **`closed_at`은 지우지 않는다.** "언제 처음 마감했나"가 지급·세무의 기준 시점이다.
+- `reopen_count`가 오르고, 스냅샷 이력에 `action='reopen'` 줄이 쌓인다.
+  화면 상단에 `마감 해제 N회` 배지가 붙는다.
+
+⚠️ **수금·지급(§9)은 마감 후에도 계속 입력한다.** 현금은 마감 뒤에 들어오기 때문이다.
+잠그는 건 발생(청구) 쪽 금액뿐이다.

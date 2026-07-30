@@ -6,7 +6,9 @@ import SettlementWorkspace from './settlement-workspace'
 export const dynamic = 'force-dynamic'
 
 export default async function SettlementPage() {
-  await requireUser('/app/settlement')
+  // 마감 해제는 admin만 할 수 있다 (docs §8). 화면에서도 버튼을 감춘다 —
+  // 실제 경계는 API의 `requireApiAdmin()`이다.
+  const user = await requireUser('/app/settlement')
 
   return (
     <div>
@@ -42,7 +44,7 @@ export default async function SettlementPage() {
         </div>
       </div>
 
-      <SettlementWorkspace />
+      <SettlementWorkspace isAdmin={user.role === 'admin'} />
     </div>
   )
 }
