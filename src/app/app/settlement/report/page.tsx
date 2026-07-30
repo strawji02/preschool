@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { requireUser } from '@/features/shared/auth'
+import SettlementHeader from '../settlement-header'
 import {
   listClosings,
   loadClosingDetail,
@@ -56,26 +57,19 @@ export default async function ReportPage({
 
   return (
     <div>
-      <nav className="mb-6 text-sm text-gray-500">
-        <Link href="/app" className="hover:text-gray-900">
-          업무 시스템
-        </Link>
-        <span className="mx-2">/</span>
-        <Link href="/app/settlement" className="hover:text-gray-900">
-          급식 정산
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-gray-900">경영 보고서</span>
-      </nav>
-
-      <h1 className="text-2xl font-bold text-gray-900">경영 보고서</h1>
-      <p className="mt-1 text-sm leading-relaxed text-gray-500">
-        <strong>마감된 달의 확정 숫자</strong>입니다. 나중에 담당 영업자나 수수료율이
-        바뀌어도 이 값은 달라지지 않습니다.
-      </p>
+      <SettlementHeader
+        active="report"
+        title="경영 보고서"
+        description={
+          <>
+            <strong className="font-medium text-gray-700">마감된 달의 확정 숫자</strong>
+            입니다. 나중에 담당 영업자나 수수료율이 바뀌어도 이 값은 달라지지 않습니다.
+          </>
+        }
+      />
 
       {closings.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-8 text-center">
+        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
           <p className="text-sm text-gray-600">아직 마감된 달이 없습니다.</p>
           <p className="mt-1 text-xs text-gray-400">
             정산 화면에서 원천 파일을 올리고 확정·마감하면 여기에 나타납니다.
@@ -89,8 +83,9 @@ export default async function ReportPage({
         </div>
       ) : (
         <>
-          {/* 기간 선택 */}
-          <div className="mt-6 flex flex-wrap gap-2">
+          {/* 기간 선택 — 라벨이 없으면 상태 배지처럼 보인다 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-xs font-medium text-gray-400">조회 기간</span>
             {closings.map((c) => (
               <Link
                 key={c.period}

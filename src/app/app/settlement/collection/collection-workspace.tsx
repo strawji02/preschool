@@ -175,9 +175,10 @@ export default function CollectionWorkspace({
     (data?.payouts ?? []).filter((x) => x.partnerId === p.partnerId)
 
   return (
-    <div className="mt-6 space-y-6">
-      {/* 기간 선택 */}
-      <div className="flex flex-wrap gap-2">
+    <div className="space-y-6">
+      {/* 기간 선택 — 라벨이 없으면 상태 배지처럼 보인다 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-xs font-medium text-gray-400">조회 기간</span>
         {periods.map((p) => (
           <button
             key={p}

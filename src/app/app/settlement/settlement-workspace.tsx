@@ -420,7 +420,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const splitBlocked = declaration.warnings.some((w) => w.includes('마감할 수 없습니다'))
 
   return (
-    <div className="mt-8 space-y-6">
+    <div className="space-y-6">
       {/*
         드래그 중 전체 화면 안내.
         `pointer-events-none`이 필수다 — 이 오버레이가 마우스를 받으면 dragleave/drop이
