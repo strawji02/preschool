@@ -187,6 +187,25 @@ describe('rollupBySource', () => {
     expect(r.shinsegae.excludedCost).toBe(9_955)
   })
 
+  it('제외된 매출액도 따로 세어 보여준다 — 얼마가 빠졌는지 숫자로 확인할 수 있어야 한다', () => {
+    const r = rollupBySource([
+      venue({
+        source: 'shinsegae',
+        businessCode: '88689',
+        isExcluded: true,
+        cost: { ...zero, total: 9_955 },
+        price: { ...zero, total: 12_925 },
+      }),
+    ])
+    expect(r.shinsegae.excludedPrice).toBe(12_925)
+  })
+
+  it('제외 사업장이 없으면 제외 금액은 0이다', () => {
+    const r = rollupBySource([venue({ price: { ...zero, total: 100 } })])
+    expect(r.cj.excludedCost).toBe(0)
+    expect(r.cj.excludedPrice).toBe(0)
+  })
+
   it('식당 수를 센다', () => {
     const r = rollupBySource([
       venue({ source: 'cj', restaurantCode: '1000' }),

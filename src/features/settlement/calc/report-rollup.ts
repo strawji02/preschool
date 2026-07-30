@@ -97,6 +97,11 @@ export interface SourceRollup {
   restaurantCount: number
   /** 정산제외 사업장의 매입 (마케팅비). 매출에는 안 들어가지만 매입은 실제다 */
   excludedCost: number
+  /**
+   * 매출에서 **뺀** 금액. 계산서를 발행하지 않는 내부 대체분이다.
+   * 숫자로 보여줘야 "얼마가 빠졌는지"를 확인할 수 있다.
+   */
+  excludedPrice: number
 }
 
 export type SourceRollups = Record<SettlementSource, SourceRollup>
@@ -108,6 +113,7 @@ export function rollupBySource(venues: readonly ClosingVenueRow[]): SourceRollup
     margin: 0,
     restaurantCount: 0,
     excludedCost: 0,
+    excludedPrice: 0,
   })
   // 두 원천을 항상 돌려준다 — 화면이 존재 여부를 분기하지 않게 한다
   const out: SourceRollups = { shinsegae: empty(), cj: empty() }
@@ -118,6 +124,7 @@ export function rollupBySource(venues: readonly ClosingVenueRow[]): SourceRollup
     r.costTotal += v.cost.total
     if (v.isExcluded) {
       r.excludedCost += v.cost.total
+      r.excludedPrice += v.price.total
       continue // 매출에는 넣지 않는다
     }
     r.priceTotal += v.price.total

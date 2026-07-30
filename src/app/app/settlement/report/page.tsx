@@ -140,6 +140,22 @@ function ReportBody({
   const billed = byVenue.filter((v) => !v.isExcluded)
   const excluded = byVenue.filter((v) => v.isExcluded)
 
+  // 공급사 합계 — 두 원천을 더한다. 화면이 직접 더하면 열이 늘 때마다 어긋난다.
+  const sourceTotals = (['shinsegae', 'cj'] as const).reduce(
+    (acc, s) => {
+      const r = bySource[s]
+      return {
+        restaurantCount: acc.restaurantCount + r.restaurantCount,
+        costTotal: acc.costTotal + r.costTotal,
+        priceTotal: acc.priceTotal + r.priceTotal,
+        margin: acc.margin + r.margin,
+        excludedCost: acc.excludedCost + r.excludedCost,
+        excludedPrice: acc.excludedPrice + r.excludedPrice,
+      }
+    },
+    { restaurantCount: 0, costTotal: 0, priceTotal: 0, margin: 0, excludedCost: 0, excludedPrice: 0 }
+  )
+
   return (
     <div className="mt-6 space-y-6">
       {/* ── 헤드라인 ── */}
@@ -177,11 +193,12 @@ function ReportBody({
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[560px] text-right text-sm">
             <tbody className="divide-y divide-gray-100">
-              <Row label="매출 (계산서 발행분)" value={t.revenue} />
-              <Row label="매출원가" value={-t.costOfSales} />
-              <Row label="총마진" value={t.grossMargin} bold />
-              <Row label="영업자 세전 지급액" value={-t.partnerPreTax} />
+              <Row id="pnl-revenue" label="매출 (계산서 발행분)" value={t.revenue} />
+              <Row id="pnl-cost" label="매출원가" value={-t.costOfSales} />
+              <Row id="pnl-margin" label="총마진" value={t.grossMargin} bold />
+              <Row id="pnl-pretax" label="영업자 세전 지급액" value={-t.partnerPreTax} />
               <Row
+                id="pnl-hq"
                 label="본사 몫"
                 value={t.hqShare}
                 bold
@@ -189,8 +206,8 @@ function ReportBody({
                   t.vatDiff
                 )} + 공제 ${won(t.businessDeduction)}`}
               />
-              <Row label="마케팅비 (본사 자체 소비분)" value={-t.marketingCost} />
-              <Row label="영업이익" value={t.operatingProfit} total />
+              <Row id="pnl-marketing" label="마케팅비 (본사 자체 소비분)" value={-t.marketingCost} />
+              <Row id="pnl-profit" label="영업이익" value={t.operatingProfit} total />
             </tbody>
           </table>
         </div>
@@ -233,7 +250,7 @@ function ReportBody({
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
         <h2 className="font-semibold text-gray-900">공급사별</h2>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[620px] text-right text-sm">
+          <table className="w-full min-w-[820px] text-right text-sm">
             <thead className="border-b border-gray-200 text-xs text-gray-500">
               <tr>
                 <th className="py-2 text-left font-medium">공급사</th>
@@ -242,6 +259,8 @@ function ReportBody({
                 <th className="py-2 font-medium">매출</th>
                 <th className="py-2 font-medium">마진</th>
                 <th className="py-2 font-medium">마진율</th>
+                <th className="py-2 font-medium text-gray-400">제외 매입</th>
+                <th className="py-2 font-medium text-gray-400">제외 매출</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -251,11 +270,6 @@ function ReportBody({
                   <tr key={s}>
                     <td className="py-2 text-left font-medium text-gray-900">
                       {SOURCE_LABEL[s]}
-                      {r.excludedCost > 0 && (
-                        <span className="ml-2 text-xs font-normal text-gray-400">
-                          마케팅비 매입 {won(r.excludedCost)} 포함
-                        </span>
-                      )}
                     </td>
                     <td className="py-2 tabular-nums">{r.restaurantCount}</td>
                     <td className="py-2 tabular-nums">{won(r.costTotal)}</td>
@@ -264,15 +278,44 @@ function ReportBody({
                     <td className="py-2 tabular-nums">
                       {r.priceTotal === 0 ? '—' : pct(r.margin / r.priceTotal)}
                     </td>
+                    <td className="py-2 tabular-nums text-gray-500">
+                      {r.excludedCost === 0 ? '—' : won(r.excludedCost)}
+                    </td>
+                    <td className="py-2 tabular-nums text-gray-500">
+                      {r.excludedPrice === 0 ? '—' : won(r.excludedPrice)}
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
+            <tfoot className="border-t-2 border-gray-300 text-sm font-semibold">
+              <tr>
+                <td className="py-2 text-left">합계</td>
+                <td className="py-2 tabular-nums">{sourceTotals.restaurantCount}</td>
+                <td className="py-2 tabular-nums">{won(sourceTotals.costTotal)}</td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-revenue">{won(sourceTotals.priceTotal)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">{won(sourceTotals.margin)}</td>
+                <td className="py-2 tabular-nums">
+                  {sourceTotals.priceTotal === 0
+                    ? '—'
+                    : pct(sourceTotals.margin / sourceTotals.priceTotal)}
+                </td>
+                <td className="py-2 tabular-nums text-gray-500">
+                  <PnlLink to="pnl-marketing">{won(sourceTotals.excludedCost)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums text-gray-500">
+                  {won(sourceTotals.excludedPrice)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
         <p className="mt-2 text-xs leading-relaxed text-gray-400">
-          ⚠️ 정산제외 사업장의 <strong>매입은 포함, 매출은 제외</strong>했습니다. 실제로
-          사온 물건이라 매입에서 빼면 공급사 명세와 대조가 맞지 않습니다.
+          정산제외 사업장은 <strong>매입 {won(sourceTotals.excludedCost)}원 포함</strong>,{' '}
+          <strong>매출 {won(sourceTotals.excludedPrice)}원 제외</strong>했습니다. 위 매입
+          열에는 이 금액이 들어 있고 매출 열에는 들어 있지 않습니다.
         </p>
       </section>
 
@@ -324,11 +367,21 @@ function ReportBody({
             <tfoot className="border-t-2 border-gray-300 text-sm font-semibold">
               <tr>
                 <td className="py-2 text-left">합계</td>
-                <td className="py-2 tabular-nums">{won(t.grossMargin)}</td>
-                <td className="py-2 tabular-nums">{won(t.platformFee)}</td>
-                <td className="py-2 tabular-nums">{won(t.vatDiff)}</td>
-                <td className="py-2 tabular-nums">{won(t.businessDeduction)}</td>
-                <td className="py-2 tabular-nums">{won(t.partnerPreTax)}</td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-margin">{won(t.grossMargin)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-hq">{won(t.platformFee)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-hq">{won(t.vatDiff)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-hq">{won(t.businessDeduction)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-pretax">{won(t.partnerPreTax)}</PnlLink>
+                </td>
                 <td className="py-2 tabular-nums">{won(t.declared)}</td>
                 <td className="py-2 tabular-nums">{won(t.withholding)}</td>
                 <td className="py-2 tabular-nums text-gray-900">{won(t.partnerNetPay)}</td>
@@ -337,8 +390,9 @@ function ReportBody({
           </table>
         </div>
         <p className="mt-2 text-xs leading-relaxed text-gray-400">
-          차액 합계 {won(t.grossMargin)} − 세전 합계 {won(t.partnerPreTax)} = 본사 몫{' '}
-          {won(t.hqShare)} — 항등식이 닫힙니다.
+          차액 합계 <PnlLink to="pnl-margin">{won(t.grossMargin)}</PnlLink> − 세전 합계{' '}
+          <PnlLink to="pnl-pretax">{won(t.partnerPreTax)}</PnlLink> = 본사 몫{' '}
+          <PnlLink to="pnl-hq">{won(t.hqShare)}</PnlLink>
         </p>
       </section>
 
@@ -390,13 +444,19 @@ function ReportBody({
                 <td className="py-2 text-left" colSpan={3}>
                   합계
                 </td>
-                <td className="py-2 tabular-nums">{won(t.costOfSales)}</td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-cost">{won(t.costOfSales)}</PnlLink>
+                </td>
                 <td className="py-2 tabular-nums">
                   {won(t.revenue - sumExempt(billed))}
                 </td>
                 <td className="py-2 tabular-nums">{won(sumExempt(billed))}</td>
-                <td className="py-2 tabular-nums">{won(t.revenue)}</td>
-                <td className="py-2 tabular-nums">{won(t.grossMargin)}</td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-revenue">{won(t.revenue)}</PnlLink>
+                </td>
+                <td className="py-2 tabular-nums">
+                  <PnlLink to="pnl-margin">{won(t.grossMargin)}</PnlLink>
+                </td>
                 <td className="py-2 tabular-nums">
                   {pct(t.revenue === 0 ? 0 : t.grossMargin / t.revenue)}
                 </td>
@@ -407,20 +467,13 @@ function ReportBody({
 
         {excluded.length > 0 && (
           <div className="mt-5 rounded-xl bg-gray-50 px-4 py-3">
-            <p className="text-xs font-medium text-gray-700">
-              정산 제외 — 계산서를 발행하지 않습니다
-            </p>
+            <p className="text-xs font-medium text-gray-700">정산 제외</p>
             <ul className="mt-2 space-y-1 text-xs text-gray-600">
               {excluded.map((v) => (
                 <li key={`${v.source}:${v.businessCode}`}>
-                  {v.label}
-                  <span className="ml-2 text-gray-400">
-                    {SOURCE_LABEL[v.source]} {v.businessCode}
-                  </span>
-                  <span className="ml-2 tabular-nums">매입 {won(v.costTotal)}원</span>
-                  {v.exclusionReason && (
-                    <span className="ml-2 text-gray-500">— {v.exclusionReason}</span>
-                  )}
+                  {SOURCE_LABEL[v.source]} _ {stripSourcePrefix(v.label)} : 매입{' '}
+                  <PnlLink to="pnl-marketing">{won(v.costTotal)}원</PnlLink>
+                  _마케팅비 본사_유치원 매출 계산서 미발행분
                 </li>
               ))}
             </ul>
@@ -530,6 +583,16 @@ function ReportBody({
   )
 }
 
+/**
+ * 신세계 사업장명의 `EDU)키즈_` 접두를 뗀다.
+ *
+ * 원천 시스템의 내부 표기라 보고서에서는 의미가 없다.
+ * (`venueDisplayName`이 내역서에서 하는 것과 같은 처리)
+ */
+function stripSourcePrefix(name: string): string {
+  return name.replace(/^EDU\)키즈_/, '')
+}
+
 function sumExempt(rows: readonly { priceExempt: number }[]): number {
   return rows.reduce((acc, r) => acc + r.priceExempt, 0)
 }
@@ -564,13 +627,22 @@ function Headline({
   )
 }
 
+/**
+ * 손익 워터폴 한 줄.
+ *
+ * `id`를 주면 세부 카드에서 `#id`로 건너뛸 수 있다. 이동한 행은 CSS `:target`으로
+ * 노랗게 표시된다 — 자바스크립트 없이 서버 컴포넌트에서 동작한다.
+ * `scroll-mt-24`는 상단에 가려지지 않게 여백을 준다.
+ */
 function Row({
+  id,
   label,
   value,
   bold,
   total,
   note,
 }: {
+  id?: string
   label: string
   value: number
   bold?: boolean
@@ -579,9 +651,10 @@ function Row({
 }) {
   return (
     <tr
-      className={
+      id={id}
+      className={`scroll-mt-24 target:bg-amber-100 target:ring-2 target:ring-amber-400 ${
         total ? 'border-t-2 border-gray-300 text-base font-semibold' : bold ? 'font-medium' : ''
-      }
+      }`}
     >
       <td className="py-2 text-left">
         {label}
@@ -591,5 +664,23 @@ function Row({
         {value < 0 ? `− ${won(Math.abs(value))}` : won(value)}
       </td>
     </tr>
+  )
+}
+
+/**
+ * 손익 워터폴의 같은 값으로 건너뛰는 링크.
+ *
+ * 세부 카드의 숫자가 **손익 카드의 어느 줄에서 온 것인지**를 클릭 한 번으로 잇는다.
+ * 값이 다른 항목에는 붙이지 않는다 — 잘못 이으면 대조가 틀어진다.
+ */
+function PnlLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={`#${to}`}
+      className="underline decoration-gray-300 decoration-dotted underline-offset-4 hover:decoration-gray-900"
+      title="손익 카드의 해당 줄로 이동"
+    >
+      {children}
+    </a>
   )
 }
