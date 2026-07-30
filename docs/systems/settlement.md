@@ -813,3 +813,49 @@ GET /api/settlement/report?period=2026-06
 POST(업로드)와 GET(스냅샷)이 **같은 이름 규칙**을 쓴다 (`invoiceResponse()` ·
 `reportResponse()`로 공통화). 두 경로에서 이름이 다르면 같은 달 파일이 두 종류로
 돌아다닌다.
+
+## 16. 시스템별 배포 버전 (2026-07-31 구현)
+
+두 시스템은 **한 저장소에 있지만 배포 주기가 다르다.** 정산만 고쳐도 비교 시스템까지
+같이 배포된다.
+
+예전에는 비교 화면에 `NEXT_PUBLIC_BUILD_TIME`(빌드 시각)을 찍었다. 정산만 고친
+배포에서도 이 값이 바뀌어, 비교 시스템 사용자에게 **"뭐가 바뀌었나?" 하고 찾아보게
+만드는 거짓 신호**였다.
+
+### 해결
+
+`scripts/generate-version.mjs`가 빌드 전(`prebuild`)에 git에서
+**각 시스템이 마지막으로 실제로 바뀐 커밋**을 뽑아 `src/generated/version.json`에
+쓴다.
+
+```
+정산  v26.07.31.6 · 2026-07-31 02:12 배포
+비교  v26.07.31.2 · 2026-07-31 01:34 배포
+```
+
+`v{YY}.{MM}.{DD}.{n}` — KST 날짜 + **그날 몇 번째 변경**인지. 하루에 여러 번 고치는
+일이 흔해서 날짜만으로는 구분이 안 된다.
+
+### 판별 기준 — 커밋 태그가 아니라 **경로**
+
+커밋 메시지의 `[정산]`·`[비교]` 태그는 빠뜨릴 수 있지만 **바뀐 파일은 거짓말을
+하지 않는다.**
+
+| 구분 | 경로 |
+|---|---|
+| 정산 | `features/settlement`, `app/app`, `api/settlement` |
+| 비교 | `app/calc-food`, `lib`, `api/{admin,analyze,audit-items,ocr-corrections,products,reference-search,session,sessions}` |
+| **양쪽** | `middleware.ts`, `app/layout.tsx`, `app/(public)`, `app/login`, `app/auth`, `features/shared`, `lib/supabase`, `package.json`, `next.config` |
+
+인증·미들웨어가 바뀌면 **양쪽 다 동작이 달라진다.** 한쪽에만 넣으면 다른 쪽
+사용자가 "안 바뀌었다"는 잘못된 정보를 본다.
+
+테스트(`__tests__`, `*.test.ts`)와 문서는 **제외**한다. 버전은 사용자가 보는 동작이
+언제 바뀌었나를 알려주는 것이다 — 테스트를 고쳤다고 버전이 오르면 사용자는 달라진
+걸 찾다가 시간을 버린다.
+
+### git이 없는 환경
+
+생성 결과를 `src/generated/version.json`에 **커밋해 둔다.** 빌드 환경에 git이 없으면
+스크립트가 기존 파일을 그대로 두므로 화면이 비지 않는다.

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/generate-version.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:matching": "vitest run src/lib/__tests__/",
-    "lint:migrations": "bash scripts/lint-migrations.sh"
+    "lint:migrations": "bash scripts/lint-migrations.sh",
+    "version:gen": "node scripts/generate-version.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

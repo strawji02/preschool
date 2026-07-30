@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { SETTLEMENT_VERSION } from '@/features/shared/version'
 
 /**
  * 급식 정산 시스템 공통 헤더 (2026-07-31).
@@ -38,13 +39,28 @@ export default function SettlementHeader({
 }) {
   return (
     <header className="mb-8">
-      <nav className="text-sm text-gray-400">
-        <Link href="/app" className="transition hover:text-gray-900">
-          업무 시스템
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-gray-600">급식 정산 시스템</span>
-      </nav>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <nav className="text-sm text-gray-400">
+          <Link href="/app" className="transition hover:text-gray-900">
+            업무 시스템
+          </Link>
+          <span className="mx-2">/</span>
+          <span className="text-gray-600">급식 정산 시스템</span>
+        </nav>
+
+        {/*
+          ⚠️ **빌드 시각이 아니라 정산 시스템이 마지막으로 바뀐 시각이다.**
+          비교 시스템만 고쳐서 배포하면 여기 값은 그대로 남는다 (docs §16).
+        */}
+        <p
+          className="text-xs tabular-nums text-gray-400"
+          title={`커밋 ${SETTLEMENT_VERSION.sha}`}
+        >
+          <span className="font-medium text-gray-500">{SETTLEMENT_VERSION.version}</span>
+          <span className="mx-1.5 text-gray-300">·</span>
+          {SETTLEMENT_VERSION.at} 배포
+        </p>
+      </div>
 
       <div className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">

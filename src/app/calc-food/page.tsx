@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import { useState } from 'react'
 import { ArrowLeft, RefreshCw, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import { COMPARISON_VERSION } from '@/features/shared/version'
 import { useAuditSession } from './hooks/useAuditSession'
 import { InvoiceReviewModal } from './components/InvoiceReviewModal'
 
@@ -127,8 +128,17 @@ export default function CalcFoodPage() {
 
             <h1 className="text-lg font-semibold text-gray-900">
               식자재 단가 비교
-              <span className="ml-2 text-xs font-normal text-gray-400">
-                ({process.env.NEXT_PUBLIC_BUILD_TIME || '빌드 시간'})
+              {/*
+                ⚠️ 예전에는 `NEXT_PUBLIC_BUILD_TIME`(빌드 시각)을 찍었다. 정산만
+                고쳐서 배포해도 이 값이 바뀌어, 비교 시스템 사용자에게 "뭐가
+                바뀌었나?" 하고 찾아보게 만드는 거짓 신호였다.
+                이제 **비교 시스템이 마지막으로 바뀐 시각**을 쓴다 (docs §16).
+              */}
+              <span
+                className="ml-2 text-xs font-normal tabular-nums text-gray-400"
+                title={`커밋 ${COMPARISON_VERSION.sha}`}
+              >
+                {COMPARISON_VERSION.version} · {COMPARISON_VERSION.at} 배포
               </span>
             </h1>
             {/* Phase 2: 단계 표시는 WorkflowStepper로 이동 */}
