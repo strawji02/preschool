@@ -50,9 +50,21 @@ export async function POST(request: NextRequest) {
     const workbooks = await Promise.all(files.map(readUploadedWorkbook))
     const result = await runSettlement({ workbooks })
 
-    // blocks는 응답에서 뺀다 — 식당 단위 원본 데이터라 무겁고, 화면에는 요약만 쓴다
-    const { blocks: _blocks, ...summary } = result
-    return NextResponse.json({ success: true, ...summary })
+    // blocks·invoiceRows·issuer는 응답에서 뺀다 — 식당/계산서 단위 원본이라 무겁고
+    // (계산서는 매달 88장 규모), 화면에는 장수·합계만 쓴다.
+    const { blocks: _blocks, invoiceRows, issuer: _issuer, ...summary } = result
+
+    const invoiceSummary = {
+      taxableCount: invoiceRows.filter((r) => r.taxKind === 'taxable').length,
+      exemptCount: invoiceRows.filter((r) => r.taxKind === 'exempt').length,
+      taxableSupply: sum(invoiceRows, 'taxable', (r) => r.supply),
+      taxableVat: sum(invoiceRows, 'taxable', (r) => r.vat),
+      exemptSupply: sum(invoiceRows, 'exempt', (r) => r.supply),
+      /** 여러 식당이 한 장으로 합쳐진 계산서 수 (docs §6-1 해밀 사례) */
+      mergedCount: invoiceRows.filter((r) => r.mergedFrom > 1).length,
+    }
+
+    return NextResponse.json({ success: true, ...summary, invoiceSummary })
   } catch (err) {
     console.error('[settlement/analyze]', err)
     return NextResponse.json(
@@ -63,4 +75,13 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+/** 과세구분별 합계 — 화면 요약용 */
+function sum<T extends { taxKind: string }>(
+  rows: readonly T[],
+  kind: string,
+  pick: (row: T) => number
+): number {
+  return rows.reduce((acc, r) => (r.taxKind === kind ? acc + pick(r) : acc), 0)
 }

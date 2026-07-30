@@ -1,9 +1,21 @@
 import { calcSettlement, type PartnerType, type SettlementResult } from '../calc/settlement-formula'
-import { loadSettlementMaster } from '../data/master'
+import {
+  loadSettlementMaster,
+  missingInvoiceFields,
+  venueItemKey,
+  type SettlementMaster,
+} from '../data/master'
 import { aggregateByPartner } from '../parse/aggregate'
 import { parseCjSheet } from '../parse/cj'
 import { parseShinsegaeSheet } from '../parse/shinsegae'
 import type { NormalizedVenue } from '../parse/types'
+import {
+  collectInvoiceRows,
+  type InvoiceParty,
+  type InvoiceRow,
+  type InvoiceTaxKind,
+  type InvoiceVenueLine,
+} from '../report/invoice-sheet'
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
 import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
 
@@ -68,8 +80,22 @@ export interface SettlementRunResult {
   errors: string[]
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
-  /** 마감 가능 여부 — 누락·오류가 없어야 true */
+  /**
+   * 마감 가능 여부 — **매핑** 기준이다 (누락·오류 없음).
+   * 계산서 발행 가능 여부는 `canIssueInvoices`를 따로 본다.
+   */
   canClose: boolean
+
+  /** 홈택스 계산서 (docs §6-1). 작성일자와 무관하므로 날짜는 출력 시점에 붙인다. */
+  invoiceRows: InvoiceRow[]
+  /**
+   * 계산서를 만들 수 없는 항목 — 유치원 사업자 정보 미비, 식당 품목명 미지정.
+   * 마감 차단 사유다 (docs §14-2). 정산 제외와 금액 0은 포함하지 않는다.
+   */
+  invoiceProblems: string[]
+  /** 계산서 공급자(본사). 미설정이면 계산서를 만들 수 없다 */
+  issuer: InvoiceParty | null
+  canIssueInvoices: boolean
 }
 
 export async function runSettlement(
@@ -152,6 +178,17 @@ export async function runSettlement(
     costTotal: v.cost.total,
   }))
 
+  // 홈택스 계산서 (docs §6-1). 매핑 누락 사업장은 계산서 대상에서도 빠지는데,
+  // 그건 이미 `unmapped`로 잡히므로 여기서 중복 경고하지 않는다.
+  const invoice = collectInvoiceRows(buildInvoiceLines(venues, master))
+  const issuer = master.issuer
+  const invoiceProblems = [...invoice.problems]
+  if (!issuer) {
+    invoiceProblems.push(
+      '계산서 공급자(본사) 정보가 설정되지 않아 계산서를 만들 수 없습니다.'
+    )
+  }
+
   return {
     partners,
     excluded: agg.excluded.map((v) => ({
@@ -176,11 +213,66 @@ export async function runSettlement(
     errors,
     blocks,
     canClose: errors.length === 0 && unmapped.length === 0,
+    invoiceRows: invoice.rows,
+    invoiceProblems,
+    issuer,
+    canIssueInvoices:
+      errors.length === 0 && unmapped.length === 0 && invoiceProblems.length === 0,
   }
 }
 
 function toLine(v: NormalizedVenue) {
   return { venueName: venueDisplayName(v), cost: v.cost, price: v.price }
+}
+
+/**
+ * 원천 식당 줄에 계산서 마스터를 붙인다.
+ *
+ * 필수 항목이 하나라도 빠지면 `buyer`를 **null로 넘긴다** — 부분적으로 채워진
+ * 계산서를 만들면 홈택스 업로드가 실패하거나 엉뚱한 사업자에게 발행된다.
+ */
+function buildInvoiceLines(
+  venues: readonly NormalizedVenue[],
+  master: SettlementMaster
+): InvoiceVenueLine[] {
+  const byKey = new Map(
+    master.venues.map((v) => [`${v.source}:${v.businessCode}`, v] as const)
+  )
+
+  return venues.map((v) => {
+    const rec = byKey.get(`${v.source}:${v.businessCode}`)
+    const complete = rec !== undefined && missingInvoiceFields(rec).length === 0
+    const buyer: InvoiceParty | null =
+      complete && rec
+        ? {
+            bizRegNo: rec.invoice.bizRegNo!,
+            companyName: rec.invoice.companyName!,
+            ceoName: rec.invoice.ceoName!,
+            address: rec.invoice.address!,
+            bizType: rec.invoice.bizType!,
+            bizItem: rec.invoice.bizItem!,
+            email: rec.invoice.email!,
+            email2: rec.invoice.email2,
+          }
+        : null
+
+    const itemName = (kind: InvoiceTaxKind): string | null =>
+      master.venueItems.get(
+        venueItemKey(v.source, v.businessCode, v.restaurantCode, kind)
+      )?.invoiceItemName ?? null
+
+    return {
+      source: v.source,
+      businessCode: v.businessCode,
+      restaurantCode: v.restaurantCode,
+      restaurantName: v.restaurantName,
+      price: v.price,
+      // 매핑 누락(사업장 미등록)도 계산서를 만들지 않는다. `unmapped`가 이미 알려준다.
+      isExcluded: rec?.isExcluded ?? true,
+      buyer,
+      itemNames: { taxable: itemName('taxable'), exempt: itemName('exempt') },
+    }
+  })
 }
 
 function emptyResult(base: { warnings: string[]; errors: string[] }): SettlementRunResult {
@@ -193,5 +285,9 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     errors: base.errors,
     blocks: [],
     canClose: false,
+    invoiceRows: [],
+    invoiceProblems: [],
+    issuer: null,
+    canIssueInvoices: false,
   }
 }

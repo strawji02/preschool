@@ -45,6 +45,18 @@ interface AnalyzeResponse {
   warnings: string[]
   errors: string[]
   canClose: boolean
+  /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
+  invoiceProblems: string[]
+  canIssueInvoices: boolean
+  invoiceSummary: {
+    taxableCount: number
+    exemptCount: number
+    taxableSupply: number
+    taxableVat: number
+    exemptSupply: number
+    /** 여러 식당이 한 장으로 합쳐진 계산서 수 */
+    mergedCount: number
+  }
 }
 
 const won = (n: number) => n.toLocaleString('ko-KR')
@@ -62,7 +74,14 @@ export default function SettlementWorkspace() {
   /** 분할 신고 명의 (docs §4). 비어 있으면 영업자 본인 명의로 신고한다. */
   const [splits, setSplits] = useState<Record<string, DeclarationSplit[]>>({})
   const [period, setPeriod] = useState(defaultPeriod())
-  const [busy, setBusy] = useState<'analyze' | 'download' | null>(null)
+  /**
+   * 계산서 작성일자용 연월. 월말일로 발행하므로 `YYYY-MM`만 받는다 (docs §6-1).
+   * 기본값은 지난달 — 정산은 통상 지난달분을 한다.
+   */
+  const [issueMonth, setIssueMonth] = useState(defaultIssueMonth())
+  const [busy, setBusy] = useState<
+    'analyze' | 'download' | 'invoice-taxable' | 'invoice-exempt' | null
+  >(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -222,6 +241,45 @@ export default function SettlementWorkspace() {
       const a = document.createElement('a')
       a.href = url
       a.download = `정산내역서_${period || '기간미지정'}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * 홈택스 계산서 다운로드 (docs §6-1).
+   *
+   * 과세·면세는 **양식이 다른 별개 파일**이라 한 번에 하나씩 받는다.
+   * 홈택스에도 따로 올려야 한다.
+   */
+  async function downloadInvoice(kind: 'taxable' | 'exempt') {
+    setBusy(kind === 'taxable' ? 'invoice-taxable' : 'invoice-exempt')
+    setError(null)
+    try {
+      const fd = buildFormData()
+      fd.append('kind', kind)
+      fd.append('issueMonth', issueMonth)
+
+      const res = await fetch('/api/settlement/invoice', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        setError(json?.error ?? '계산서 생성에 실패했습니다.')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const [y, m] = issueMonth.split('-')
+      const label = `${y}년 ${Number(m)}월`
+      a.download =
+        kind === 'taxable'
+          ? `(세금)계산서 발행을 위한 엑셀 파일_${label}.xlsx`
+          : `계산서 발행을 위한 엑셀 파일_${label}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -653,9 +711,157 @@ export default function SettlementWorkspace() {
             )}
           </section>
 
-          {/* 6. 다운로드 */}
+          {/* 6. 홈택스 계산서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">6. 내역서 다운로드</h2>
+            <h2 className="font-semibold text-gray-900">6. 홈택스 계산서 일괄발행</h2>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              과세는 <span className="font-medium text-gray-700">세금계산서</span>, 면세는{' '}
+              <span className="font-medium text-gray-700">계산서</span>로 양식이 달라 파일을
+              따로 내려받습니다. 홈택스에도 각각 올려야 합니다.
+              <br />
+              발행 단위는 <strong>유치원 × 품목 × 과세구분</strong>입니다 — 같은 품목이면
+              여러 식당이 한 장으로 합쳐집니다.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="text-sm">
+                <span className="mb-1 block text-xs text-gray-500">
+                  작성 연월 (월말일로 발행)
+                </span>
+                <input
+                  type="month"
+                  value={issueMonth}
+                  onChange={(e) => setIssueMonth(e.target.value)}
+                  className="rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => downloadInvoice('taxable')}
+                disabled={
+                  busy !== null ||
+                  !analysis.canIssueInvoices ||
+                  analysis.invoiceSummary.taxableCount === 0
+                }
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'invoice-taxable'
+                  ? '생성 중…'
+                  : `세금계산서 ${analysis.invoiceSummary.taxableCount}장`}
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadInvoice('exempt')}
+                disabled={
+                  busy !== null ||
+                  !analysis.canIssueInvoices ||
+                  analysis.invoiceSummary.exemptCount === 0
+                }
+                className="rounded-lg border border-gray-900 px-4 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'invoice-exempt'
+                  ? '생성 중…'
+                  : `계산서 ${analysis.invoiceSummary.exemptCount}장`}
+              </button>
+            </div>
+
+            {analysis.invoiceProblems.length > 0 && (
+              <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                <p className="font-medium">
+                  계산서를 만들 수 없는 항목 {analysis.invoiceProblems.length}건 — 마감할 수
+                  없습니다
+                </p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {analysis.invoiceProblems.map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.canIssueInvoices && (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[520px] text-right text-sm">
+                  <thead className="border-b border-gray-200 text-xs text-gray-500">
+                    <tr>
+                      <th className="py-2 text-left font-medium">구분</th>
+                      <th className="py-2 font-medium">장수</th>
+                      <th className="py-2 font-medium">공급가액</th>
+                      <th className="py-2 font-medium">세액</th>
+                      <th className="py-2 font-medium">합계</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    <tr>
+                      <td className="py-2 text-left">세금계산서 (과세)</td>
+                      <td className="py-2 tabular-nums">
+                        {analysis.invoiceSummary.taxableCount}
+                      </td>
+                      <td className="py-2 tabular-nums">
+                        {won(analysis.invoiceSummary.taxableSupply)}
+                      </td>
+                      <td className="py-2 tabular-nums">
+                        {won(analysis.invoiceSummary.taxableVat)}
+                      </td>
+                      <td className="py-2 tabular-nums">
+                        {won(
+                          analysis.invoiceSummary.taxableSupply +
+                            analysis.invoiceSummary.taxableVat
+                        )}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-left">계산서 (면세)</td>
+                      <td className="py-2 tabular-nums">
+                        {analysis.invoiceSummary.exemptCount}
+                      </td>
+                      <td className="py-2 tabular-nums">
+                        {won(analysis.invoiceSummary.exemptSupply)}
+                      </td>
+                      <td className="py-2 tabular-nums text-gray-400">—</td>
+                      <td className="py-2 tabular-nums">
+                        {won(analysis.invoiceSummary.exemptSupply)}
+                      </td>
+                    </tr>
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-300 text-sm font-semibold">
+                    <tr>
+                      <td className="py-2 text-left">유치원 청구 합계</td>
+                      <td className="py-2 tabular-nums">
+                        {analysis.invoiceSummary.taxableCount +
+                          analysis.invoiceSummary.exemptCount}
+                      </td>
+                      <td colSpan={2} />
+                      <td className="py-2 tabular-nums text-gray-900">
+                        {won(
+                          analysis.invoiceSummary.taxableSupply +
+                            analysis.invoiceSummary.taxableVat +
+                            analysis.invoiceSummary.exemptSupply
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                  {analysis.invoiceSummary.mergedCount > 0 && (
+                    <>
+                      여러 식당이 한 장으로 합쳐진 계산서{' '}
+                      <span className="font-medium text-gray-600">
+                        {analysis.invoiceSummary.mergedCount}장
+                      </span>
+                      <br />
+                    </>
+                  )}
+                  ⚠️ 정산제외 사업장(본사 등)은 계산서를 발행하지 않습니다. 위 4번 표의
+                  단가합계와 이 금액은 그만큼 차이가 납니다.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* 7. 다운로드 */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 className="font-semibold text-gray-900">7. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="text-sm">
                 <span className="mb-1 block text-xs text-gray-500">정산 기간</span>
@@ -907,4 +1113,17 @@ function defaultPeriod(): string {
   const now = new Date()
   const yy = String(now.getFullYear()).slice(2)
   return `${yy}년${now.getMonth() + 1}월`
+}
+
+/**
+ * 계산서 작성 연월 기본값 — **지난달**.
+ *
+ * 정산은 통상 지난달분을 하고, 작성일자는 그 달의 말일이다 (docs §6-1).
+ * `getMonth()`는 0-based이므로 이번 달 0-based 값이 곧 지난달 1-based 값이다.
+ */
+function defaultIssueMonth(): string {
+  const now = new Date()
+  const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+  const month = now.getMonth() === 0 ? 12 : now.getMonth()
+  return `${year}-${String(month).padStart(2, '0')}`
 }
