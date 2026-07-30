@@ -43,3 +43,7 @@ next-env.d.ts
 # llm
 .playwright-mcp/
 .serena/
+.env*.local
+# 홈택스 업로드 원본 (사업자번호·대표자명·이메일 포함 — 커밋 금지)
+계산서 발행을 위한 엑셀 파일_*.xlsx
+(세금)계산서 발행을 위한 엑셀 파일_*.xlsx
