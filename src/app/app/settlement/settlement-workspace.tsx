@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ClosingPanel from './closing-panel'
 import PendingPanel from './pending-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
@@ -278,6 +279,41 @@ export default function SettlementWorkspace() {
       setError(e instanceof Error ? e.message : '다운로드 중 오류가 발생했습니다.')
     } finally {
       setBusy(null)
+    }
+  }
+
+  /**
+   * 월 마감 저장 (docs §8).
+   *
+   * 파일·공제·분할을 함께 보낸다 — 서버가 **같은 `runSettlement`로 다시 계산**하고
+   * 4개 게이트를 재검사한 뒤 스냅샷을 굳힌다. 화면 값을 그대로 저장하지 않는다.
+   */
+  async function saveClosing(
+    status: 'confirmed' | 'closed',
+    reason: string | null
+  ): Promise<boolean> {
+    setError(null)
+    try {
+      const fd = buildFormData()
+      fd.append('period', issueMonth)
+      fd.append('status', status)
+      fd.append('deductionItems', JSON.stringify(deductions))
+      fd.append('splits', JSON.stringify(splits))
+      if (reason) fd.append('reason', reason)
+
+      const res = await fetch('/api/settlement/closing', { method: 'POST', body: fd })
+      const json = (await res.json().catch(() => null)) as
+        | { success?: boolean; error?: string }
+        | null
+      if (!res.ok || !json?.success) {
+        setError(json?.error ?? '마감 저장에 실패했습니다.')
+        return false
+      }
+      setNotice(status === 'closed' ? '마감했습니다.' : '확정했습니다.')
+      return true
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '마감 저장 중 오류가 발생했습니다.')
+      return false
     }
   }
 
@@ -940,6 +976,16 @@ export default function SettlementWorkspace() {
               <span className="font-medium text-gray-700">사업소득 신고내역</span>
             </p>
           </section>
+
+          {/*
+            마감 기간은 계산서 작성 연월과 **같은 달**이다 (정산 대상 월).
+            날짜 입력을 하나 더 두면 둘이 어긋날 수 있어 `issueMonth`를 그대로 쓴다.
+          */}
+          <ClosingPanel
+            period={issueMonth}
+            canClose={analysis.canClose && analysis.canIssueInvoices && !splitBlocked}
+            onSave={saveClosing}
+          />
         </>
       )}
     </div>

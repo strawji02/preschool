@@ -52,6 +52,15 @@ export {
   formatBizRegNo,
 } from './calc/biz-reg-no'
 
+// 마감 합계는 순수 산식이라 화면에서 미리보기로도 쓴다
+export {
+  closingTotals,
+  isValidPeriod,
+  type ClosingVenueRow,
+  type ClosingPartnerRow,
+  type ClosingTotals,
+} from './calc/closing'
+
 export {
   validateSplitDeclaration,
   type DeclarationSplit,

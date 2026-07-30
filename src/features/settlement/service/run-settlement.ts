@@ -1,3 +1,4 @@
+import type { ClosingPartnerRow, ClosingVenueRow } from '../calc/closing'
 import { calcSettlement, type PartnerType, type SettlementResult } from '../calc/settlement-formula'
 import {
   loadSettlementMaster,
@@ -116,6 +117,14 @@ export interface SettlementRunResult {
    * 신규 사업장에 담당자를 배정할 때 쓸 수 없다 (담당 유치원이 아직 없는 영업자가 빠진다).
    */
   allPartners: { partnerId: string; partnerName: string }[]
+
+  /**
+   * 마감 스냅샷에 굳힐 식당 단위 확정값 (docs §14-1).
+   * 영업자 이름을 함께 담는다 — 나중에 이름이 바뀌어도 마감 문서는 그대로여야 한다.
+   */
+  closingVenues: ClosingVenueRow[]
+  /** 마감 스냅샷에 굳힐 영업자 단위 산식 결과 */
+  closingPartners: ClosingPartnerRow[]
 }
 
 export async function runSettlement(
@@ -244,7 +253,65 @@ export async function runSettlement(
       .filter((p) => p.isActive)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((p) => ({ partnerId: p.id, partnerName: p.name })),
+    closingVenues: buildClosingVenues(venues, master),
+    closingPartners: partners.map((p) => {
+      const record = master.partners.get(p.partnerId)
+      return {
+        partnerId: p.partnerId,
+        partnerName: p.partnerName,
+        partnerType: p.partnerType,
+        commissionPercent: record?.commissionPercent ?? DEFAULT_COMMISSION_FALLBACK,
+        costTotal: p.costTotal,
+        costVat: p.costVat,
+        priceTotal: p.priceTotal,
+        priceVat: p.priceVat,
+        margin: p.settlement.margin,
+        platformFee: p.settlement.platformFee,
+        vatDiff: p.settlement.vatDiff,
+        businessDeduction: p.settlement.businessDeduction,
+        preTax: p.settlement.preTax,
+        declared: p.settlement.declared,
+        incomeTax: p.settlement.incomeTax,
+        localTax: p.settlement.localTax,
+        netPay: p.settlement.netPay,
+      }
+    }),
   }
+}
+
+/**
+ * 영업자 레코드를 못 찾았을 때의 수수료율.
+ *
+ * 여기까지 왔다면 마스터 불정합이고 이미 경고가 붙어 있다. 스냅샷에 `null`을 넣어
+ * 나중에 "그때 수수료율이 뭐였지"를 답할 수 없게 만드는 대신 기본값을 남긴다.
+ */
+const DEFAULT_COMMISSION_FALLBACK = 5
+
+/** 식당 단위 확정값 — 담당 영업자 이름까지 굳힌다 */
+function buildClosingVenues(
+  venues: readonly NormalizedVenue[],
+  master: SettlementMaster
+): ClosingVenueRow[] {
+  const byKey = new Map(
+    master.venues.map((v) => [`${v.source}:${v.businessCode}`, v] as const)
+  )
+  return venues.map((v) => {
+    const rec = byKey.get(`${v.source}:${v.businessCode}`)
+    const partnerId = rec?.partnerId ?? null
+    return {
+      source: v.source,
+      businessCode: v.businessCode,
+      businessName: v.businessName,
+      restaurantCode: v.restaurantCode,
+      restaurantName: v.restaurantName,
+      partnerId,
+      partnerName: partnerId ? master.partners.get(partnerId)?.name ?? null : null,
+      isExcluded: rec?.isExcluded ?? false,
+      exclusionReason: rec?.exclusionReason ?? null,
+      cost: v.cost,
+      price: v.price,
+    }
+  })
 }
 
 /**
@@ -335,5 +402,7 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     pending: { buyers: [], itemNames: [] },
     itemNameOptions: [],
     allPartners: [],
+    closingVenues: [],
+    closingPartners: [],
   }
 }

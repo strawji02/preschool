@@ -41,6 +41,15 @@ export {
   type DeductionSheet,
 } from './calc/deduction'
 
+// 마감 합계는 순수 산식이라 화면에서 미리보기로도 쓴다
+export {
+  closingTotals,
+  isValidPeriod,
+  type ClosingVenueRow,
+  type ClosingPartnerRow,
+  type ClosingTotals,
+} from './calc/closing'
+
 export {
   validateSplitDeclaration,
   type DeclarationSplit,
@@ -114,6 +123,19 @@ export {
   type SettlementSheet,
   type SheetMerge,
 } from './report/settlement-sheet'
+
+export {
+  ClosingError,
+  saveClosing,
+  loadClosing,
+  loadClosingRevisions,
+  listClosings,
+  CLOSING_STATUS_LABEL,
+  type ClosingStatus,
+  type ClosingRecord,
+  type ClosingRevision,
+  type SaveClosingInput,
+} from './data/closing'
 
 export {
   MasterWriteError,
