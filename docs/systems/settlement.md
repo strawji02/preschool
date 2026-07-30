@@ -223,7 +223,9 @@
 | 업로드 화면·API | `app/app/settlement`, `app/api/settlement` | 프로덕션 반영 |
 | ②영업자별 정산 내역서 | `features/settlement/report/settlement-sheet.ts` | 실데이터 역검증 완료 |
 | ③사업소득 지급명세서 | `features/settlement/report/declaration-sheet.ts` | 실데이터 역검증 완료 |
-| ①홈택스 일괄발행 | — | 양식 역검증 완료, **구현 대기** (§6-1) |
+| 계산서 마스터(사업자정보·품목명) | migration 051/052, `features/settlement/data` | **원격 적용 완료** |
+| 사업자번호 체크섬 | `features/settlement/calc/biz-reg-no.ts` | 실측 17건 + 오타 1,530건 검증 |
+| ①홈택스 일괄발행 | — | 마스터 준비 완료, **생성기 구현 대기** (§6-1) |
 | 경영 보고서 | — | 설계 완료, 구현 대기 (§13) |
 | 월 마감·수금 관리 | — | 미착수 |
 
@@ -458,21 +460,34 @@
 
 4개 전부 통과해야 `확정` → `마감`. 각 항목에서 해당 위치로 바로 점프할 수 있게 한다.
 
-### 14-8. 스키마 추가 계획
+### 14-8. 스키마 (051/052 적용 완료 — 2026-07-30)
 
-- `settlement_venues`(=사업장=유치원)에 계산서 정보: `business_no`(체크섬 검증),
-  `company_name`, `ceo_name`, `address`, `biz_type`, `biz_item`, `email1`, `email2`,
-  `exclusion_reason`
-- `settlement_venue_items`(=식당): `(source, business_code, restaurant_code)` →
-  `invoice_item_name`
+- `settlement_venues`(=사업장=유치원)에 계산서 정보 추가: `company_name`, `biz_type`,
+  `biz_item`, `email2`, `exclusion_reason`. `biz_reg_no`는 050에 이미 있고
+  `CHECK (~ '^[0-9]{10}$')`로 형식을 막는다. 체크섬은 앱에서(`isValidBizRegNo`).
+- `settlement_issuer` — 계산서 공급자(본사) 단일 행. `settlement_venues`의 본사 행을
+  재활용하지 않는다: 그쪽은 공급받는자를 담는 테이블이라 의미가 섞인다.
+- `settlement_venue_items`(=식당) — 키가
+  `(source, business_code, restaurant_code, **tax_kind**)` 다.
+  ⚠️ **과세구분이 키에 들어가는 이유**: 같은 식당이 과세·면세에서 품목명이 다를 수 있다.
+  26년 6월 나래유치원 식당 `원아급간식` — 과세 `원아급간식` / 면세 `급식재료`.
+  하나로 합치면 계산서 품목명이 틀린다.
+
+**시드는 손으로 옮기지 않는다.** `scripts/generate-invoice-seed.ts`가 052 파일을 직접
+생성한다 — 실제로 손으로 베꼈다가 주소 9곳과 식당코드 다수를 틀렸고, 생성 파일과
+대조해서야 잡았다.
+
+시드 검증 (스크립트가 매번 재확인): 사업장→유치원 16/16 유일 식별 /
+식당×과세구분→품목 87건 유일 + 합산 2건 = 89건 / 과세 33,182,420·면세 65,846,245
+원단위 일치 / 미청구 계산서 0장 / 사업자번호 16곳 체크섬 통과
 - `settlement_partner_transfers`: 유치원 × 이전 담당 × 새 담당 × `effective_from`(YYYY-MM)
 - `settlement_closings` + 스냅샷 테이블: 마감 월의 전체 상태
 - 마스터 변경 이력 테이블
 
 ### 14-9. 구현 순서
 
-1. 스키마 + 26년 6월 시드 (홈택스 파일에서 추출 — 필드 불일치 0건 확인됨)
-2. **홈택스 엑셀 생성기** (§6-1) — 검증 기준이 이미 있어 가장 확실하다
+1. ~~스키마 + 26년 6월 시드~~ → **2026-07-30 완료** (migration 051/052)
+2. **홈택스 엑셀 생성기** (§6-1) — 검증 기준이 이미 있어 가장 확실하다 ← 다음
 3. 인라인 해결 UI + 마감 체크리스트
 4. 마스터 화면 + 이관
 5. 마감 스냅샷 → 경영 보고서(§13)

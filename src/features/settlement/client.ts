@@ -45,6 +45,13 @@ export {
   type DeductionSheet,
 } from './calc/deduction'
 
+// 사업자번호 검증은 입력 즉시 피드백을 줘야 하므로 클라이언트에서도 쓴다
+export {
+  normalizeBizRegNo,
+  isValidBizRegNo,
+  formatBizRegNo,
+} from './calc/biz-reg-no'
+
 export {
   validateSplitDeclaration,
   type DeclarationSplit,

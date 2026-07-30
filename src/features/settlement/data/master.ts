@@ -30,6 +30,87 @@ export interface VenueRecord {
   /** 담당 영업자 id. 제외 사업장이거나 미배정이면 null */
   partnerId: string | null
   isExcluded: boolean
+  /** 왜 제외했는지 (예: 마케팅비). 제외가 아니면 null */
+  exclusionReason: string | null
+  /**
+   * 계산서 발행 정보 (docs §6-1). 하나라도 비어 있으면 계산서를 만들 수 없다.
+   *
+   * ⚠️ `companyName`은 원천의 `businessName`과 **다르다** —
+   * `해밀유치원`(계산서) vs `키즈웰에듀푸드(해밀유치원)`(원천).
+   */
+  invoice: VenueInvoiceInfo
+}
+
+export interface VenueInvoiceInfo {
+  bizRegNo: string | null
+  companyName: string | null
+  ceoName: string | null
+  address: string | null
+  bizType: string | null
+  bizItem: string | null
+  email: string | null
+  email2: string | null
+}
+
+/** 계산서 발행에 반드시 있어야 하는 항목 (이메일2는 선택) */
+const REQUIRED_INVOICE_FIELDS = [
+  ['bizRegNo', '사업자등록번호'],
+  ['companyName', '상호'],
+  ['ceoName', '대표자'],
+  ['address', '사업장주소'],
+  ['bizType', '업태'],
+  ['bizItem', '종목'],
+  ['email', '이메일'],
+] as const
+
+/**
+ * 계산서 발행에 빠진 항목 이름들. 비어 있으면 발행 가능하다.
+ *
+ * 정산 제외 사업장은 계산서를 발행하지 않으므로 검사하지 않는다 —
+ * 본사에 사업자 정보를 요구하면 영원히 마감할 수 없다.
+ */
+export function missingInvoiceFields(venue: VenueRecord): string[] {
+  if (venue.isExcluded) return []
+  return REQUIRED_INVOICE_FIELDS.filter(
+    ([key]) => (venue.invoice[key] ?? '') === ''
+  ).map(([, label]) => label)
+}
+
+export type TaxKind = 'taxable' | 'exempt'
+
+export interface VenueItemRecord {
+  source: SettlementSource
+  businessCode: string
+  restaurantCode: string
+  restaurantName: string
+  /**
+   * ⚠️ 같은 식당이 과세·면세에서 품목명이 다를 수 있다 (나래유치원 `원아급간식`:
+   * 과세 `원아급간식` / 면세 `급식재료`). 그래서 키에 포함한다.
+   */
+  taxKind: TaxKind
+  invoiceItemName: string
+}
+
+/** 품목명 조회 키 — `"<원천>:<사업장>:<식당>:<과세구분>"` */
+export type VenueItemKey = string
+
+export function venueItemKey(
+  source: SettlementSource,
+  businessCode: string,
+  restaurantCode: string,
+  taxKind: TaxKind
+): VenueItemKey {
+  return `${source}:${businessCode}:${restaurantCode}:${taxKind}`
+}
+
+export interface IssuerRecord {
+  bizRegNo: string
+  companyName: string
+  ceoName: string
+  address: string
+  bizType: string
+  bizItem: string
+  email: string
 }
 
 export interface SettlementMaster {
@@ -41,6 +122,10 @@ export interface SettlementMaster {
    */
   mapping: PartnerMapping
   venues: VenueRecord[]
+  /** `venueItemKey()`로 조회. 키가 없으면 품목명 미지정 = 마감 차단 (docs §14-2) */
+  venueItems: Map<VenueItemKey, VenueItemRecord>
+  /** 계산서 공급자(본사). 미설정이면 null — 계산서를 만들 수 없다 */
+  issuer: IssuerRecord | null
 }
 
 /**
@@ -53,13 +138,25 @@ export interface SettlementMaster {
 export async function loadSettlementMaster(): Promise<SettlementMaster> {
   const supabase = createAdminClient()
 
-  const [partnersRes, venuesRes] = await Promise.all([
+  const [partnersRes, venuesRes, itemsRes, issuerRes] = await Promise.all([
     supabase
       .from('settlement_partners')
       .select('id, name, partner_type, taxpayer_type, commission_percent, is_active'),
+    // ⚠️ select 문자열을 `+`로 이으면 supabase-js가 열 타입을 추론하지 못해
+    // 결과가 GenericStringError로 떨어진다. 반드시 한 개의 리터럴로 둘 것.
     supabase
       .from('settlement_venues')
-      .select('source, business_code, business_name, partner_id, is_excluded'),
+      .select(
+        'source, business_code, business_name, partner_id, is_excluded, exclusion_reason, biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email, email2'
+      ),
+    supabase
+      .from('settlement_venue_items')
+      .select('source, business_code, restaurant_code, restaurant_name, tax_kind, invoice_item_name'),
+    supabase
+      .from('settlement_issuer')
+      .select('biz_reg_no, company_name, ceo_name, address, biz_type, biz_item, email')
+      .eq('id', 1)
+      .maybeSingle(),
   ])
 
   if (partnersRes.error) {
@@ -67,6 +164,12 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
   }
   if (venuesRes.error) {
     throw new Error(`사업장 마스터 조회 실패: ${venuesRes.error.message}`)
+  }
+  if (itemsRes.error) {
+    throw new Error(`품목명 마스터 조회 실패: ${itemsRes.error.message}`)
+  }
+  if (issuerRes.error) {
+    throw new Error(`계산서 공급자 조회 실패: ${issuerRes.error.message}`)
   }
 
   const partners = new Map<string, PartnerRecord>()
@@ -88,7 +191,52 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
     businessName: row.business_name,
     partnerId: row.partner_id,
     isExcluded: row.is_excluded,
+    exclusionReason: row.exclusion_reason ?? null,
+    invoice: {
+      bizRegNo: row.biz_reg_no ?? null,
+      companyName: row.company_name ?? null,
+      ceoName: row.ceo_name ?? null,
+      address: row.address ?? null,
+      bizType: row.biz_type ?? null,
+      bizItem: row.biz_item ?? null,
+      email: row.email ?? null,
+      email2: row.email2 ?? null,
+    },
   }))
+
+  const venueItems = new Map<VenueItemKey, VenueItemRecord>()
+  for (const row of itemsRes.data ?? []) {
+    const record: VenueItemRecord = {
+      source: row.source as SettlementSource,
+      businessCode: String(row.business_code),
+      restaurantCode: String(row.restaurant_code),
+      restaurantName: row.restaurant_name,
+      taxKind: row.tax_kind as TaxKind,
+      invoiceItemName: row.invoice_item_name,
+    }
+    venueItems.set(
+      venueItemKey(
+        record.source,
+        record.businessCode,
+        record.restaurantCode,
+        record.taxKind
+      ),
+      record
+    )
+  }
+
+  const issuerRow = issuerRes.data
+  const issuer: IssuerRecord | null = issuerRow
+    ? {
+        bizRegNo: issuerRow.biz_reg_no,
+        companyName: issuerRow.company_name,
+        ceoName: issuerRow.ceo_name,
+        address: issuerRow.address,
+        bizType: issuerRow.biz_type,
+        bizItem: issuerRow.biz_item,
+        email: issuerRow.email,
+      }
+    : null
 
   const mapping: PartnerMapping = {}
   for (const v of venues) {
@@ -101,5 +249,5 @@ export async function loadSettlementMaster(): Promise<SettlementMaster> {
     // 미배정은 의도적으로 키를 만들지 않는다 (위 주석 참고)
   }
 
-  return { partners, mapping, venues }
+  return { partners, mapping, venues, venueItems, issuer }
 }

@@ -12,6 +12,12 @@ export {
 } from './calc/rounding'
 
 export {
+  normalizeBizRegNo,
+  isValidBizRegNo,
+  formatBizRegNo,
+} from './calc/biz-reg-no'
+
+export {
   calcPlatformFee,
   calcWithholding,
   calcSettlement,
@@ -94,8 +100,15 @@ export {
 
 export {
   loadSettlementMaster,
+  missingInvoiceFields,
+  venueItemKey,
   type PartnerRecord,
   type VenueRecord,
+  type VenueInvoiceInfo,
+  type VenueItemRecord,
+  type VenueItemKey,
+  type IssuerRecord,
+  type TaxKind,
   type SettlementMaster,
 } from './data/master'
 
