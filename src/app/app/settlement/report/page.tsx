@@ -3,6 +3,7 @@ import { requireUser } from '@/features/shared/auth'
 import {
   listClosings,
   loadClosingDetail,
+  loadCollection,
   rollupByKindergarten,
   rollupBySource,
 } from '@/features/settlement'
@@ -16,7 +17,7 @@ import {
  * 세 기준을 섞지 않는다 (§13-1):
  *   발생(거래) — 이 화면. 원천 업로드로 확정된 값.
  *   세무(신고) — 세금 3종 카드. 성격·납부시점이 달라 분리한다.
- *   현금(입출금) — 수금·지급 관리(§9)가 들어오면 붙인다. 아직 없다.
+ *   현금(입출금) — `발생 vs 현금` 섹션. 수금·지급 기록(§9)에서 온다.
  */
 
 export const dynamic = 'force-dynamic'
@@ -49,7 +50,9 @@ export default async function ReportPage({
   const closings = await listClosings()
   // 요청한 달이 없으면 가장 최근 마감을 보여준다
   const period = requested ?? closings[0]?.period ?? null
-  const detail = period ? await loadClosingDetail(period) : null
+  const [detail, collection] = period
+    ? await Promise.all([loadClosingDetail(period), loadCollection(period)])
+    : [null, null]
 
   return (
     <div>
@@ -115,7 +118,7 @@ export default async function ReportPage({
               {period ? `${periodLabel(period)} 마감 자료를 찾지 못했습니다.` : ''}
             </p>
           ) : (
-            <ReportBody detail={detail} />
+            <ReportBody detail={detail} collection={collection} />
           )}
         </>
       )}
@@ -125,8 +128,10 @@ export default async function ReportPage({
 
 function ReportBody({
   detail,
+  collection,
 }: {
   detail: NonNullable<Awaited<ReturnType<typeof loadClosingDetail>>>
+  collection: Awaited<ReturnType<typeof loadCollection>>
 }) {
   const { closing, venues, partners } = detail
   const t = closing.totals
@@ -423,21 +428,85 @@ function ReportBody({
         )}
       </section>
 
-      {/* ── 월별 추이 ── */}
+      {/* ── 발생 vs 현금 (§13-3) ── */}
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
-        <h2 className="font-semibold text-gray-900">현금 흐름 (참고)</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-semibold text-gray-900">발생 vs 현금</h2>
+          <Link
+            href="/app/settlement/collection"
+            className="text-xs text-gray-500 underline hover:text-gray-900"
+          >
+            수금·지급 관리 →
+          </Link>
+        </div>
         <p className="mt-1 text-xs leading-relaxed text-gray-500">
-          ⚠️ 아래는 <strong>발생 기준으로 추정한 값</strong>입니다. 실제 입출금일은 아직
-          시스템에 없습니다 — 수금·지급 관리가 들어오면 미수금·미지급을 함께 보여줍니다.
+          왼쪽은 <strong>청구·지급 예정액</strong>(발생), 오른쪽은{' '}
+          <strong>실제 입출금</strong>입니다. 차이가 미수금·미지급입니다.
         </p>
+
         <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[620px] text-right text-sm">
+            <thead className="border-b border-gray-200 text-xs text-gray-500">
+              <tr>
+                <th className="py-2 text-left font-medium">항목</th>
+                <th className="py-2 font-medium">발생</th>
+                <th className="py-2 font-medium">현금</th>
+                <th className="py-2 font-medium">잔액</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              <tr>
+                <td className="py-2 text-left">유치원 청구 · 수금</td>
+                <td className="py-2 tabular-nums">{won(t.revenue)}</td>
+                <td className="py-2 tabular-nums">{won(collection?.summary.totals.received ?? 0)}</td>
+                <td
+                  className={`py-2 tabular-nums ${
+                    (collection?.summary.totals.outstanding ?? t.revenue) > 0
+                      ? 'font-medium text-red-600'
+                      : ''
+                  }`}
+                >
+                  {won(collection?.summary.totals.outstanding ?? t.revenue)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2 text-left">영업자 실지급 · 지급</td>
+                <td className="py-2 tabular-nums">{won(t.partnerNetPay)}</td>
+                <td className="py-2 tabular-nums">{won(collection?.summary.totals.paid ?? 0)}</td>
+                <td
+                  className={`py-2 tabular-nums ${
+                    (collection?.summary.totals.unpaid ?? t.partnerNetPay) > 0
+                      ? 'font-medium text-red-600'
+                      : ''
+                  }`}
+                >
+                  {won(collection?.summary.totals.unpaid ?? t.partnerNetPay)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {collection && collection.summary.readyToPay.length > 0 && (
+          <p className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            <strong>지급 요청 {collection.summary.readyToPay.length}명</strong> — 담당 유치원
+            전원 입금 완료:{' '}
+            {collection.summary.readyToPay.map((p) => p.partnerName).join(', ')}
+          </p>
+        )}
+
+        <h3 className="mt-6 text-sm font-medium text-gray-900">발생 기준 현금 추정</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          전액 수금·지급됐다고 가정한 값입니다. 실제 통장 잔액과는 위 잔액만큼 차이가 납니다.
+        </p>
+        <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[480px] text-right text-sm">
             <tbody className="divide-y divide-gray-100">
               <Row label="유입 — 유치원 수금" value={t.revenue} />
               <Row label="유출 — 신세계·CJ 대금" value={-(t.costOfSales + t.marketingCost)} />
               <Row label="유출 — 영업자 실지급" value={-t.partnerNetPay} />
-              <Row label="유출 — 원천세" value={-t.withholding} />
-              <Row label="유출 — 부가세" value={-t.vatPayable} />
+              <Row label="유출 — 원천세 (익월 10일)" value={-t.withholding} />
+              <Row label="유출 — 부가세 (분기)" value={-t.vatPayable} />
               <Row
                 label="순현금"
                 value={
@@ -454,7 +523,7 @@ function ReportBody({
         </div>
         <p className="mt-3 text-xs leading-relaxed text-gray-400">
           발생 기준 영업이익 {won(t.operatingProfit)}과 순현금이 다른 이유: 원천세·부가세는
-          다음 달에 나가고, 수금·지급 시점도 다릅니다.
+          나중에 나가고, 신세계·CJ 대금에 마케팅비 매입이 함께 들어 있습니다.
         </p>
       </section>
     </div>

@@ -41,6 +41,18 @@ export {
   type DeductionSheet,
 } from './calc/deduction'
 
+// 수금·지급도 순수 산식이다 (docs §9)
+export {
+  buildCollectionSummary,
+  type ReceiptRecord,
+  type PayoutRecord,
+  type CollectionRow,
+  type PartnerCollection,
+  type CollectionTotals,
+  type CollectionSummary,
+  type CollectionInput,
+} from './calc/collection'
+
 // 보고서 집계도 순수 함수다 (docs §13-2)
 export {
   rollupByKindergarten,
@@ -132,6 +144,18 @@ export {
   type SettlementSheet,
   type SheetMerge,
 } from './report/settlement-sheet'
+
+export {
+  CollectionError,
+  addReceipt,
+  addPayout,
+  deleteReceipt,
+  deletePayout,
+  loadCollection,
+  type ReceiptEntry,
+  type PayoutEntry,
+  type CollectionView,
+} from './data/collection'
 
 export {
   ClosingError,

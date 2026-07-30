@@ -26,12 +26,20 @@ export default async function SettlementPage() {
             올려도 되고, 두 파일로 나눠 올려도 됩니다 — 시트는 내용으로 자동 판별합니다.
           </p>
         </div>
-        <Link
-          href="/app/settlement/report"
-          className="shrink-0 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-        >
-          경영 보고서
-        </Link>
+        <div className="flex shrink-0 gap-2">
+          <Link
+            href="/app/settlement/collection"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            수금·지급
+          </Link>
+          <Link
+            href="/app/settlement/report"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            경영 보고서
+          </Link>
+        </div>
       </div>
 
       <SettlementWorkspace />
