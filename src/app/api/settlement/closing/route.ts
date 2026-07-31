@@ -101,7 +101,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const workbooks = await Promise.all(files.map(readUploadedWorkbook))
-    const result = await runSettlement({ workbooks, deductions })
+    // ★ 정산월을 넘긴다 — 원천 파일의 날짜가 이 달과 다르면 확정·마감이 막힌다 (docs §8-4).
+    const result = await runSettlement({ workbooks, deductions, period })
 
     // 분할 신고는 지급명세서 쪽 산식이 검증한다 — 같은 함수를 쓴다
     const declaration = buildDeclarationLines(

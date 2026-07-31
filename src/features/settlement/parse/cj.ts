@@ -90,5 +90,7 @@ export function parseCjSheet(rows: readonly unknown[][]): ParseResult {
     })
   }
 
-  return { venues, warnings }
+  // ⚠️ 집계표에는 **날짜 열이 아예 없다.** 그래서 이 원천만으로는 "몇 월 자료인가"를
+  // 확인할 수 없다. 품목·날짜는 별도 파일인 **거래명세서**에 있다 (docs §5-2).
+  return { venues, warnings, dateRange: null }
 }

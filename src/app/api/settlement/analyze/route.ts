@@ -48,7 +48,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const workbooks = await Promise.all(files.map(readUploadedWorkbook))
-    const result = await runSettlement({ workbooks })
+    // 정산월은 **있으면** 대조한다. 화면에서 월을 먼저 고르는 흐름이라 대개 들어오지만,
+    // 없다고 분석을 막지는 않는다 — 여기서 막으면 숫자를 미리 볼 수가 없다.
+    // 확정·마감 경로(`/closing`)에서는 반드시 검사한다 (docs §8-4).
+    const period = String(form.get('period') ?? '')
+    const result = await runSettlement({ workbooks, period })
 
     // blocks·invoiceRows·issuer는 응답에서 뺀다 — 식당/계산서 단위 원본이라 무겁고
     // (계산서는 매달 88장 규모), 화면에는 장수·합계만 쓴다.

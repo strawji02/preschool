@@ -240,10 +240,13 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     setNotice(null)
     if (!opts?.keepInputs) setAnalysis(null)
     try {
-      const res = await fetch('/api/settlement/analyze', {
-        method: 'POST',
-        body: buildFormData(),
-      })
+      // 정산월을 같이 보낸다 — 원천 파일이 다른 달이면 **여기서** 걸린다 (docs §8-4).
+      // 마감이 쓰는 값과 같은 `issueMonth`여야 한다. 다른 값을 보내면 분석은
+      // 통과했는데 마감에서 막히는 이상한 상태가 된다.
+      const fd = buildFormData()
+      fd.append('period', issueMonth)
+
+      const res = await fetch('/api/settlement/analyze', { method: 'POST', body: fd })
       const json: AnalyzeResponse = await res.json()
       if (!res.ok || !json.success) {
         setError(json.error ?? '분석에 실패했습니다.')
@@ -555,6 +558,25 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                 {analysis.excluded.map((e) => e.businessName).join(', ')} (원가{' '}
                 {won(analysis.excluded.reduce((s, e) => s + e.costTotal, 0))}원)
               </p>
+            )}
+
+            {/*
+              ★ 원천 파일이 다른 달일 때 (docs §8-4). **맨 위에, 가장 강하게** 띄운다.
+              달이 틀리면 아래 숫자는 전부 의미가 없으므로 다른 안내보다 먼저 와야 한다.
+              2026-07-31에 7월 파일이 6월로 확정된 사고가 있었고, 그때는 이 자리에
+              아무것도 뜨지 않았다.
+            */}
+            {analysis.errors.length > 0 && (
+              <div className="mt-4 rounded-lg border-2 border-red-400 bg-red-50 px-4 py-3">
+                <p className="text-sm font-semibold text-red-800">
+                  이 파일로는 확정·마감할 수 없습니다
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-red-700">
+                  {analysis.errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {analysis.unmapped.length > 0 && (

@@ -20,6 +20,12 @@ import {
   type PendingItemName,
 } from '../report/invoice-sheet'
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
+import {
+  checkSourcePeriod,
+  periodMismatchMessage,
+  type PeriodMismatch,
+  type SourceDateRange,
+} from '../calc/period-guard'
 import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
 
 /**
@@ -32,6 +38,13 @@ import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
 
 export interface SettlementRunRequest {
   workbooks: UploadedWorkbook[]
+  /**
+   * 정산월 `YYYY-MM`. 주면 **원천 파일의 날짜와 대조**한다 (docs §8-4).
+   *
+   * 안 주면 검사하지 않는다 — 파일을 먼저 올리고 월을 고르는 순서도 가능해서다.
+   * 다만 확정·마감 경로에서는 반드시 준다. 그때는 월이 이미 정해져 있다.
+   */
+  period?: string
   /**
    * 영업자 id → 사업자공제(Q). 매월 수기 입력이라 요청마다 받는다 (docs §3).
    * 빠진 영업자는 0으로 본다.
@@ -69,6 +82,8 @@ export interface SourceSummary {
   fileName: string
   sheetName: string
   venueCount: number
+  /** 파일이 담고 있는 기간. 날짜 열이 없는 원천(CJ 집계표)은 null */
+  dateRange: SourceDateRange | null
 }
 
 export interface SettlementRunResult {
@@ -81,6 +96,11 @@ export interface SettlementRunResult {
   warnings: string[]
   /** 처리를 진행할 수 없는 사유. 비어 있지 않으면 결과를 신뢰하면 안 된다. */
   errors: string[]
+  /**
+   * 정산월과 어긋난 원천. 비어 있어야 정상이며, 있으면 `errors`에도 들어간다.
+   * 화면이 "몇 월 파일인지"를 구체적으로 보여줄 수 있도록 구조를 따로 남긴다.
+   */
+  periodMismatches: PeriodMismatch[]
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
   /**
@@ -148,6 +168,14 @@ export async function runSettlement(
   const ss = parseShinsegaeSheet(picked.shinsegae.rows)
   const cj = parseCjSheet(picked.cj.rows)
   warnings.push(...ss.warnings, ...cj.warnings)
+
+  // ★ 정산월 대조는 **매핑·산식보다 먼저** 본다 (docs §8-4).
+  // 달이 틀리면 그 뒤의 숫자는 전부 의미가 없다. 그래서 경고가 아니라 errors다.
+  const periodMismatches = checkSourcePeriod(req.period ?? '', [
+    { label: `신세계 (${picked.shinsegae.sheetName})`, dateRange: ss.dateRange },
+    { label: `CJ (${picked.cj.sheetName})`, dateRange: cj.dateRange },
+  ])
+  errors.push(...periodMismatches.map(periodMismatchMessage))
 
   // 원본 `집계표_정산용`이 CJ를 먼저 나열하므로 같은 순서로 맞춘다
   const venues: NormalizedVenue[] = [...cj.venues, ...ss.venues]
@@ -237,16 +265,19 @@ export async function runSettlement(
       priceTotal: v.price.total,
     })),
     unmapped,
+    periodMismatches,
     sources: {
       shinsegae: {
         fileName: picked.shinsegae.fileName,
         sheetName: picked.shinsegae.sheetName,
         venueCount: ss.venues.length,
+        dateRange: ss.dateRange,
       },
       cj: {
         fileName: picked.cj.fileName,
         sheetName: picked.cj.sheetName,
         venueCount: cj.venues.length,
+        dateRange: cj.dateRange,
       },
     },
     warnings,
@@ -406,6 +437,7 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     excluded: [],
     unmapped: [],
     sources: { shinsegae: null, cj: null },
+    periodMismatches: [],
     warnings: base.warnings,
     errors: base.errors,
     blocks: [],

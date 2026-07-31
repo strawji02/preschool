@@ -4,6 +4,9 @@
  * 신세계는 **품목 단위**, CJ는 **사업장×식당 집계 단위**로 레벨이 다르다.
  * 공통 정규화 지점은 **사업장×식당×과세구분**이고, 아래 형태로 통일한다.
  */
+import type { SourceDateRange } from '../calc/period-guard'
+
+export type { SourceDateRange }
 
 /** 원천 구분. 두 원천의 사업장코드 체계가 달라서 매핑 키에 반드시 포함해야 한다. */
 export type SettlementSource = 'shinsegae' | 'cj'
@@ -37,6 +40,13 @@ export interface ParseResult {
   venues: NormalizedVenue[]
   /** 사람이 확인해야 하는 이상 징후. 비어 있어야 정상. */
   warnings: string[]
+  /**
+   * 파일이 실제로 담고 있는 기간. **날짜 열이 없는 원천은 `null`** (CJ 집계표).
+   *
+   * 정산월과 대조해 엉뚱한 달의 파일을 막는 데 쓴다 (`calc/period-guard.ts`).
+   * 2026-07-31에 7월 파일이 6월로 확정된 사고가 있었다.
+   */
+  dateRange: SourceDateRange | null
 }
 
 /**
