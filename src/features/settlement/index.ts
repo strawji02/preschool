@@ -188,6 +188,25 @@ export {
 } from './data/closing'
 
 export {
+  buildAdjustmentSheet,
+  ADJUSTMENT_COL_WIDTHS,
+  type AdjustmentSheet,
+} from './report/adjustment-sheet'
+
+export {
+  buildVenueStatement,
+  extractTemperature,
+  type VenueStatement,
+  type VenueStatementItem,
+  type StatementIssuer,
+} from './report/venue-statement'
+
+export {
+  buildVenueStatementWorkbook,
+  writeVenueStatementXlsx,
+} from './report/venue-statement-workbook'
+
+export {
   AdjustmentError,
   createAdjustment,
   deleteAdjustment,

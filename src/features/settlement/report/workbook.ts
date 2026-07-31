@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { DeductionSheet } from '../calc/deduction'
+import { ADJUSTMENT_COL_WIDTHS, type AdjustmentSheet } from './adjustment-sheet'
 import type { DeclarationSheet } from './declaration-sheet'
 import { REPORT_COL, type SettlementSheet } from './settlement-sheet'
 
@@ -43,6 +44,13 @@ export interface WorkbookOptions {
    * 직접 채운다 (docs §7: 주민번호는 저장하지 않는다).
    */
   declarationSheet?: DeclarationSheet | null
+  /**
+   * 품목 조정 내역 (docs §18). 있으면 마지막 시트로 붙인다.
+   *
+   * 조정하면 영업자 지급액이 줄어든다. 왜 줄었는지가 내역서에 없으면
+   * 영업자에게 설명할 근거가 없다 — 금액만이 아니라 **사유와 요청자**를 함께 싣는다.
+   */
+  adjustmentSheet?: AdjustmentSheet | null
 }
 
 export function buildSettlementWorkbook(
@@ -84,6 +92,15 @@ export function buildSettlementWorkbook(
     ].map((c) => c)
     applyMoneyFormat(nws)
     XLSX.utils.book_append_sheet(wb, nws, '사업소득 신고내역')
+  }
+
+  // 조정이 없으면 빈 시트를 붙이지 않는다 (빌더가 null을 준다)
+  const adjustment = options.adjustmentSheet
+  if (adjustment) {
+    const aws = XLSX.utils.aoa_to_sheet(adjustment.rows as unknown[][])
+    aws['!cols'] = ADJUSTMENT_COL_WIDTHS.map((wch) => ({ wch }))
+    applyMoneyFormat(aws)
+    XLSX.utils.book_append_sheet(wb, aws, '품목 조정 내역')
   }
 
   return wb

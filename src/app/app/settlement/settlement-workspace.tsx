@@ -64,6 +64,8 @@ interface AnalyzeResponse {
   adjustmentTotal: number
   /** 조정할 때 고르는 원천 품목 */
   statementItems: StatementItem[]
+  /** 거래명세표를 줄 수 있는 신세계 유치원 (docs §19) */
+  statementVenues: { businessCode: string; businessName: string; itemCount: number }[]
   canClose: boolean
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
@@ -130,7 +132,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    */
   const [issueMonth, setIssueMonth] = useState(defaultIssueMonth())
   const [busy, setBusy] = useState<
-    'analyze' | 'download' | 'invoice-taxable' | 'invoice-exempt' | null
+    'analyze' | 'download' | 'invoice-taxable' | 'invoice-exempt' | string | null
   >(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -311,6 +313,40 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       const a = document.createElement('a')
       a.href = url
       a.download = `정산내역서_${periodLabel || '기간미지정'}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * 유치원 제공 거래명세표 (docs §19).
+   *
+   * 유치원마다 **따로** 받는다 — 한 파일에 여러 곳을 담으면 다른 유치원 단가가
+   * 섞인다. 신세계 유치원만 만들 수 있다 (CJ 집계표에는 품목이 없다).
+   */
+  async function downloadVenueStatement(businessCode: string, businessName: string) {
+    setBusy(`vs:${businessCode}`)
+    setError(null)
+    try {
+      const fd = buildFormData()
+      fd.append('period', issueMonth)
+      fd.append('businessCode', businessCode)
+
+      const res = await fetch('/api/settlement/venue-statement', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error ?? '거래명세표 생성에 실패했습니다.')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `거래명세표_${businessName}_${issueMonth}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -1135,6 +1171,43 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
               <span className="font-medium text-gray-700">사업소득 신고내역</span>
             </p>
           </section>
+
+          {/*
+            9. 유치원 제공 거래명세표 (docs §19).
+
+            **신세계 유치원만** 만들 수 있다 — CJ는 집계표만 받아 품목이 없다.
+            유치원마다 따로 받는다. 한 파일에 여러 곳을 담으면 다른 유치원 단가가 섞인다.
+          */}
+          {analysis.statementVenues.length > 0 && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-6">
+              <h2 className="font-semibold text-gray-900">9. 유치원 제공 거래명세표</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                유치원에 보내는 문서입니다. 집계표 + 식당별 일자 명세로 구성되고, 금액은
+                유치원 청구가(단가) 기준입니다. 조정이 있으면 조정 내역 시트가 함께 붙습니다.
+              </p>
+              <ul className="mt-4 space-y-2">
+                {analysis.statementVenues.map((v) => (
+                  <li
+                    key={v.businessCode}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3"
+                  >
+                    <span className="text-sm">
+                      <span className="font-medium text-gray-900">{v.businessName}</span>{' '}
+                      <span className="text-xs text-gray-500">품목 {won(v.itemCount)}건</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void downloadVenueStatement(v.businessCode, v.businessName)}
+                      disabled={busy !== null}
+                      className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {busy === `vs:${v.businessCode}` ? '만드는 중…' : '거래명세표 받기'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {/*
             마감 기간은 계산서 작성 연월과 **같은 달**이다 (정산 대상 월).

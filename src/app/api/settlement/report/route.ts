@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
+  adjustmentAmount,
+  buildAdjustmentSheet,
+  type AdjustmentRecord,
   buildDeclarationSheet,
   buildDeductionSheet,
   buildSettlementSheet,
@@ -61,6 +64,9 @@ export async function GET(request: NextRequest) {
       closingPartners?: ClosingPartnerRow[]
       deductionItems?: Record<string, DeductionItem[]>
       splits?: Record<string, DeclarationSplit[]>
+      // 조정은 2026-07-31부터 굳힌다 (docs §18). 그 전 리비전에는 없다.
+      adjustments?: AdjustmentRecord[]
+      adjustmentAmounts?: Record<string, number>
     }
     if (!Array.isArray(snap.closingVenues) || !Array.isArray(snap.closingPartners)) {
       return NextResponse.json(
@@ -92,7 +98,18 @@ export async function GET(request: NextRequest) {
       })),
     })
 
-    const wb = buildSettlementWorkbook(sheet, { deductionSheet, declarationSheet })
+    // 조정 내역은 **스냅샷에 굳혀 둔 것**을 그대로 쓴다 (docs §18).
+    // 원천 파일 없이 재발행하는 경로라 금액을 다시 계산할 수 없다.
+    const adjustmentSheet = buildAdjustmentSheet(
+      snap.adjustments ?? [],
+      snap.adjustmentAmounts ?? {}
+    )
+
+    const wb = buildSettlementWorkbook(sheet, {
+      deductionSheet,
+      declarationSheet,
+      adjustmentSheet,
+    })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
 
     return reportResponse(bytes, period)
@@ -187,7 +204,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const wb = buildSettlementWorkbook(sheet, { deductionSheet, declarationSheet })
+    // 조정 내역 — 영업자에게 지급액이 왜 줄었는지 설명하는 근거 (docs §18)
+    const adjAmounts: Record<string, number> = {}
+    for (const a of result.adjustments) {
+      const src = result.statementItems.find(
+        (i) =>
+          i.businessName === a.businessName &&
+          i.restaurantName === a.restaurantName &&
+          i.date === a.itemDate &&
+          i.productCode === a.productCode
+      )
+      if (src) adjAmounts[a.id] = adjustmentAmount(src, a.quantity).total
+    }
+
+    const wb = buildSettlementWorkbook(sheet, {
+      deductionSheet,
+      declarationSheet,
+      adjustmentSheet: buildAdjustmentSheet(result.adjustments, adjAmounts),
+    })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
     return reportResponse(bytes, periodLabel || '기간미지정')
   } catch (err) {

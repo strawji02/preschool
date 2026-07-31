@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiAdmin, requireApiUser } from '@/features/shared/auth'
 import {
   ClosingError,
+  adjustmentAmount,
   buildDeclarationLines,
   isExcelUpload,
   isValidPeriod,
@@ -143,6 +144,21 @@ export async function POST(request: NextRequest) {
       // `closingVenues`는 이미 조정이 반영된 숫자라, 근거가 없으면 나중에
       // "왜 거래명세서보다 적지?"에 답할 수 없다.
       adjustments: result.adjustments,
+      // 금액도 함께 굳힌다 — 재발행 경로에는 원천 파일이 없어 다시 계산할 수 없다
+      adjustmentAmounts: (() => {
+        const out: Record<string, number> = {}
+        for (const a of result.adjustments) {
+          const src = result.statementItems.find(
+            (i) =>
+              i.businessName === a.businessName &&
+              i.restaurantName === a.restaurantName &&
+              i.date === a.itemDate &&
+              i.productCode === a.productCode
+          )
+          if (src) out[a.id] = adjustmentAmount(src, a.quantity).total
+        }
+        return out
+      })(),
     }
 
     const saved = await saveClosing({

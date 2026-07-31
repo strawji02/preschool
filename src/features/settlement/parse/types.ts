@@ -47,6 +47,11 @@ export interface ParseResult {
    * 2026-07-31에 7월 파일이 6월로 확정된 사고가 있었다.
    */
   dateRange: SourceDateRange | null
+  /**
+   * 품목 단위 행. **신세계만 채운다** — CJ 집계표에는 품목이 없다.
+   * 유치원 제공 거래명세표(docs §19)가 쓴다.
+   */
+  items?: unknown[]
 }
 
 /**

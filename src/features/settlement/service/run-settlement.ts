@@ -8,7 +8,7 @@ import {
 } from '../data/master'
 import { aggregateByPartner } from '../parse/aggregate'
 import { parseCjSheet } from '../parse/cj'
-import { parseShinsegaeSheet } from '../parse/shinsegae'
+import { parseShinsegaeSheet, type ShinsegaeItem } from '../parse/shinsegae'
 import type { NormalizedVenue } from '../parse/types'
 import {
   collectInvoiceRows,
@@ -125,6 +125,13 @@ export interface SettlementRunResult {
    * 거래명세서가 없으면 빈 배열 — 그때는 조정을 추가할 수 없다.
    */
   statementItems: CjStatementResult['items']
+  /**
+   * 신세계 품목 행 — 유치원 제공 거래명세표(docs §19)가 쓴다.
+   * CJ는 집계표만 받으므로 품목이 없다 (거래명세서는 별도로 `statementItems`).
+   */
+  shinsegaeItems: ShinsegaeItem[]
+  /** 거래명세표를 만들 수 있는 신세계 유치원 목록 (본사·제외 사업장 뺀 것) */
+  statementVenues: { businessCode: string; businessName: string; itemCount: number }[]
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
   /**
@@ -231,6 +238,10 @@ export async function runSettlement(
   //
   // 원천끼리의 대조(§5-2)는 조정 **전** 숫자로 해야 한다 — 원천은 사실이고
   // 조정은 우리 정책이라, 섞으면 "CJ가 틀린 것"과 "우리가 뺀 것"을 구분할 수 없다.
+  // 유치원 제공 거래명세표용 품목 (docs §19).
+  // ⚠️ **정산 제외 사업장(본사 등)은 뺀다** — 유치원에 줄 문서가 아니다.
+  const shinsegaeItems = (ss.items ?? []) as ShinsegaeItem[]
+
   const adjustments = req.period ? await listAdjustments(req.period) : []
   const applied = applyAdjustments(rawVenues, statement?.items ?? [], adjustments)
   errors.push(...applied.errors)
@@ -313,6 +324,19 @@ export async function runSettlement(
     )
   }
 
+  // 거래명세표를 줄 유치원 — **정산 제외 사업장(본사)은 뺀다.**
+  const excludedCodes = new Set(agg.excluded.map((v) => v.businessCode))
+  const statementVenues = (() => {
+    const map = new Map<string, { businessCode: string; businessName: string; itemCount: number }>()
+    for (const it of shinsegaeItems) {
+      if (excludedCodes.has(it.businessCode)) continue
+      const cur = map.get(it.businessCode)
+      if (cur) cur.itemCount += 1
+      else map.set(it.businessCode, { businessCode: it.businessCode, businessName: it.businessName, itemCount: 1 })
+    }
+    return [...map.values()].sort((a, b) => a.businessName.localeCompare(b.businessName))
+  })()
+
   return {
     partners,
     excluded: agg.excluded.map((v) => ({
@@ -327,6 +351,8 @@ export async function runSettlement(
     adjustments,
     adjustmentTotal: sumAdjustments(statement?.items ?? [], adjustments),
     statementItems: statement?.items ?? [],
+    shinsegaeItems,
+    statementVenues,
     sources: {
       shinsegae: {
         fileName: picked.shinsegae.fileName,
@@ -504,6 +530,8 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     adjustments: [],
     adjustmentTotal: 0,
     statementItems: [],
+    shinsegaeItems: [],
+    statementVenues: [],
     warnings: base.warnings,
     errors: base.errors,
     blocks: [],
