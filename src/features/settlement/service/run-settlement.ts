@@ -20,6 +20,12 @@ import {
   type PendingItemName,
 } from '../report/invoice-sheet'
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
+import { parseCjStatementSheet, type CjStatementResult } from '../parse/cj-statement'
+import {
+  crossCheckCjStatement,
+  cjCrossCheckMessage,
+  type CjCrossCheckIssue,
+} from '../calc/cj-cross-check'
 import {
   checkSourcePeriod,
   periodMismatchMessage,
@@ -101,6 +107,13 @@ export interface SettlementRunResult {
    * 화면이 "몇 월 파일인지"를 구체적으로 보여줄 수 있도록 구조를 따로 남긴다.
    */
   periodMismatches: PeriodMismatch[]
+  /**
+   * 거래명세서 ↔ 집계표 대조 결과. 비어 있어야 정상이며, 있으면 `errors`에도 들어간다.
+   * 거래명세서를 안 올렸으면 대조 자체를 안 하므로 빈 배열이다 (경고는 따로 나간다).
+   */
+  cjCrossCheck: CjCrossCheckIssue[]
+  /** 거래명세서 품목 수. 없으면 null — 올렸는지 여부를 화면이 구분해야 한다. */
+  cjStatementItemCount: number | null
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
   /**
@@ -169,13 +182,36 @@ export async function runSettlement(
   const cj = parseCjSheet(picked.cj.rows)
   warnings.push(...ss.warnings, ...cj.warnings)
 
+  // CJ 거래명세서 — 있으면 파싱한다. 없어도 진행한다 (docs §5-2).
+  let statement: CjStatementResult | null = null
+  if (picked.cjStatement) {
+    statement = parseCjStatementSheet(picked.cjStatement.rows)
+    warnings.push(...statement.warnings)
+  }
+
   // ★ 정산월 대조는 **매핑·산식보다 먼저** 본다 (docs §8-4).
   // 달이 틀리면 그 뒤의 숫자는 전부 의미가 없다. 그래서 경고가 아니라 errors다.
+  //
+  // CJ 집계표에는 날짜가 없다. 거래명세서를 함께 받으면서 **CJ도 기간 검증이 걸린다** —
+  // 집계표가 다른 달이면 아래 교차검증이 금액 차이로 잡는다.
   const periodMismatches = checkSourcePeriod(req.period ?? '', [
     { label: `신세계 (${picked.shinsegae.sheetName})`, dateRange: ss.dateRange },
-    { label: `CJ (${picked.cj.sheetName})`, dateRange: cj.dateRange },
+    { label: `CJ 집계표 (${picked.cj.sheetName})`, dateRange: cj.dateRange },
+    ...(picked.cjStatement
+      ? [
+          {
+            label: `CJ 거래명세서 (${picked.cjStatement.sheetName})`,
+            dateRange: statement?.dateRange ?? null,
+          },
+        ]
+      : []),
   ])
   errors.push(...periodMismatches.map(periodMismatchMessage))
+
+  // ★ 거래명세서 ↔ 집계표 대조 (docs §5-2). 두 파일을 CJ가 각각 만들어 주므로,
+  // 맞으면 양쪽 다 신뢰할 수 있고 어긋나면 한쪽이 틀린 것이다.
+  const cjCrossCheck = crossCheckCjStatement(statement?.venues ?? null, cj.venues)
+  errors.push(...cjCrossCheck.map(cjCrossCheckMessage))
 
   // 원본 `집계표_정산용`이 CJ를 먼저 나열하므로 같은 순서로 맞춘다
   const venues: NormalizedVenue[] = [...cj.venues, ...ss.venues]
@@ -266,6 +302,8 @@ export async function runSettlement(
     })),
     unmapped,
     periodMismatches,
+    cjCrossCheck,
+    cjStatementItemCount: statement ? statement.items.length : null,
     sources: {
       shinsegae: {
         fileName: picked.shinsegae.fileName,
@@ -438,6 +476,8 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     unmapped: [],
     sources: { shinsegae: null, cj: null },
     periodMismatches: [],
+    cjCrossCheck: [],
+    cjStatementItemCount: null,
     warnings: base.warnings,
     errors: base.errors,
     blocks: [],

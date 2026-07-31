@@ -46,6 +46,10 @@ interface AnalyzeResponse {
   }
   warnings: string[]
   errors: string[]
+  /** 거래명세서 ↔ 집계표 대조 결과 (docs §5-2). 비어 있어야 정상. */
+  cjCrossCheck: { restaurantName: string }[]
+  /** 거래명세서 품목 수. **null이면 안 올린 것** — 0건과 구분해야 한다. */
+  cjStatementItemCount: number | null
   canClose: boolean
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
@@ -549,8 +553,30 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             <h2 className="font-semibold text-gray-900">2. 판별된 원천 시트</h2>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
               <SourceCard label="신세계" src={analysis.sources.shinsegae} />
-              <SourceCard label="CJ" src={analysis.sources.cj} />
+              <SourceCard label="CJ 집계표" src={analysis.sources.cj} />
             </dl>
+
+            {/*
+              CJ 거래명세서 대조 결과 (docs §5-2).
+              **통과했을 때도 보여 준다.** 검사가 돌았다는 사실 자체가 정보다 —
+              아무것도 안 뜨면 "명세서를 안 올렸다"와 "대조가 맞았다"를 구분할 수 없다.
+              어긋난 경우는 위 errors 박스에 상세가 나온다.
+            */}
+            {analysis.cjStatementItemCount === null ? (
+              <p className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                CJ 거래명세서가 없어 집계표와 대조하지 못했습니다.
+              </p>
+            ) : analysis.cjCrossCheck.length === 0 ? (
+              <p className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+                CJ 거래명세서 {analysis.cjStatementItemCount.toLocaleString()}개 품목 —
+                집계표 단가와 원단위로 일치합니다.
+              </p>
+            ) : (
+              <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-xs text-red-700">
+                CJ 거래명세서와 집계표가 {analysis.cjCrossCheck.length}개 식당에서
+                어긋납니다 — 위 사유를 확인해 주세요.
+              </p>
+            )}
 
             {analysis.excluded.length > 0 && (
               <p className="mt-4 rounded-lg bg-gray-50 px-4 py-3 text-xs text-gray-600">
