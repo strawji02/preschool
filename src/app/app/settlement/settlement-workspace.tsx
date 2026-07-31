@@ -46,6 +46,10 @@ interface AnalyzeResponse {
   }
   warnings: string[]
   errors: string[]
+  /**
+   * 정산월과 어긋난 원천 (docs §8-4). 한 번에 고칠 수 있도록 파일의 월을 담고 있다.
+   */
+  periodMismatches: { label: string; expected: string; months: string[] }[]
   /** 거래명세서 ↔ 집계표 대조 결과 (docs §5-2). 비어 있어야 정상. */
   cjCrossCheck: { restaurantName: string }[]
   /** 거래명세서 품목 수. **null이면 안 올린 것** — 0건과 구분해야 한다. */
@@ -105,10 +109,14 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const [deductions, setDeductions] = useState<Record<string, DeductionItem[]>>({})
   /** 분할 신고 명의 (docs §4). 비어 있으면 영업자 본인 명의로 신고한다. */
   const [splits, setSplits] = useState<Record<string, DeclarationSplit[]>>({})
-  const [period, setPeriod] = useState(defaultPeriod())
   /**
-   * 계산서 작성일자용 연월. 월말일로 발행하므로 `YYYY-MM`만 받는다 (docs §6-1).
-   * 기본값은 지난달 — 정산은 통상 지난달분을 한다.
+   * ★ **정산월** — 이 화면의 유일한 기준 월 (docs §8-5).
+   *
+   * 기간 검증(§8-4)·마감 기간·계산서 작성일자·내역서 파일명이 **전부 이 값에서** 나온다.
+   *
+   * 2026-07-31까지는 월이 두 군데 있었다. 이 값은 6번 계산서 섹션에 `작성 연월`이라는
+   * 이름으로 숨어 있었고, 7번의 자유 텍스트 `정산 기간`이 오히려 정산월처럼 보였다.
+   * 그래서 7월 자료를 올려도 기본값(지난달)인 6월로 처리됐다.
    */
   const [issueMonth, setIssueMonth] = useState(defaultIssueMonth())
   const [busy, setBusy] = useState<
@@ -121,6 +129,9 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 서버가 저장을 거부하므로 화면만 잠그는 게 아니라 **입력 자체를 막아** 헛수고를 없앤다.
    */
   const [locked, setLocked] = useState(false)
+
+  /** 내역서 파일명·표지용 라벨 (`26년7월`) — 정산월에서 만든다 */
+  const periodLabel = toPeriodLabel(issueMonth)
 
   /** 파일 추가 — 같은 파일을 두 번 넣지 않는다 (이름+크기로 판별) */
   const addFiles = useCallback((incoming: readonly File[]) => {
@@ -233,8 +244,10 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   /**
    * @param keepInputs 미해결 항목을 고친 뒤 자동 재분석할 때 `true`.
    *   사업자공제·분할신고는 사용자가 방금 입력한 값이라 지우면 안 된다.
+   * @param period 정산월을 바꾸면서 바로 재분석할 때. **`setIssueMonth`는 비동기라**
+   *   방금 고른 값이 이 함수 안에서는 아직 반영되지 않는다 — 그래서 직접 받는다.
    */
-  async function analyze(opts?: { keepInputs?: boolean }) {
+  async function analyze(opts?: { keepInputs?: boolean; period?: string }) {
     if (files.length === 0) {
       setError('엑셀 파일을 올려주세요.')
       return
@@ -248,7 +261,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       // 마감이 쓰는 값과 같은 `issueMonth`여야 한다. 다른 값을 보내면 분석은
       // 통과했는데 마감에서 막히는 이상한 상태가 된다.
       const fd = buildFormData()
-      fd.append('period', issueMonth)
+      fd.append('period', opts?.period ?? issueMonth)
 
       const res = await fetch('/api/settlement/analyze', { method: 'POST', body: fd })
       const json: AnalyzeResponse = await res.json()
@@ -275,7 +288,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       const fd = buildFormData()
       fd.append('deductionItems', JSON.stringify(deductions))
       fd.append('splits', JSON.stringify(splits))
-      fd.append('period', period)
+      fd.append('period', periodLabel)
 
       const res = await fetch('/api/settlement/report', { method: 'POST', body: fd })
       if (!res.ok) {
@@ -287,7 +300,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `정산내역서_${period || '기간미지정'}.xlsx`
+      a.download = `정산내역서_${periodLabel || '기간미지정'}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -371,6 +384,18 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  /**
+   * 기간이 어긋났을 때 제안할 정산월 (docs §8-5).
+   *
+   * 어긋난 원천들이 **모두 같은 한 달**일 때만 제안한다. 여러 달이 섞여 있으면
+   * 어느 달로 맞춰야 할지 시스템이 정할 수 없다 — 그때는 사람이 파일을 봐야 한다.
+   */
+  const suggestedPeriod = useMemo(() => {
+    const months = new Set<string>()
+    for (const m of analysis?.periodMismatches ?? []) for (const x of m.months) months.add(x)
+    return months.size === 1 ? [...months][0] : null
+  }, [analysis])
+
   /** 공제액을 반영한 산식 결과 — 항목이 바뀌면 즉시 다시 계산된다 */
   const settlements = useMemo(() => {
     const map = new Map<string, SettlementResult>()
@@ -444,7 +469,34 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
       {/* 1. 업로드 */}
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
-        <h2 className="font-semibold text-gray-900">1. 원천 파일 업로드</h2>
+        <h2 className="font-semibold text-gray-900">1. 정산월과 원천 파일</h2>
+
+        {/*
+          ★ 정산월을 **여기에** 둔다 (docs §8-5).
+
+          원래는 6번 계산서 섹션의 `작성 연월`이 정산월 노릇을 하고 있었다.
+          파일을 올리는 자리에서 한참 아래라 사용자가 못 보고, 기본값이 지난달
+          고정이라 **그달 자료를 그달에 처리하면 항상 어긋났다.**
+          2026-07-31에 7월 자료가 6월로 확정된 사고의 원인이다 (§8-4).
+
+          이 값 하나가 기간 검증·마감·계산서 작성일자·내역서 파일명을 전부 정한다.
+        */}
+        <label className="mt-4 flex items-center gap-3 text-sm">
+          <span className="font-medium text-gray-700">정산월</span>
+          <input
+            type="month"
+            value={issueMonth}
+            onChange={(e) => {
+              setIssueMonth(e.target.value)
+              setAnalysis(null) // 월이 바뀌면 이전 분석 결과는 다른 달 것이다
+            }}
+            disabled={locked}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 disabled:bg-gray-100"
+          />
+          <span className="text-xs text-gray-500">
+            계산서는 이 달 말일로 발행되고, 원천 파일도 이 달이어야 합니다.
+          </span>
+        </label>
 
         {/*
           드래그 처리는 window 리스너가 담당한다 (위 useEffect 참고).
@@ -602,6 +654,26 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                     <li key={i}>{e}</li>
                   ))}
                 </ul>
+
+                {/*
+                  ★ 기간이 어긋났을 때는 **고치는 버튼까지** 준다 (docs §8-5).
+                  "정산월을 바꾸세요"라고만 하면 사용자는 그 입력이 어디 있는지 찾아야 한다.
+                  파일이 한 달짜리일 때만 제안한다 — 여러 달이 섞였으면 어느 달로
+                  맞춰야 할지 시스템이 정할 수 없다.
+                */}
+                {suggestedPeriod && !locked && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIssueMonth(suggestedPeriod)
+                      void analyze({ keepInputs: true, period: suggestedPeriod })
+                    }}
+                    disabled={busy !== null}
+                    className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+                  >
+                    정산월을 {suggestedPeriod}로 바꾸고 다시 분석
+                  </button>
+                )}
               </div>
             )}
 
@@ -856,17 +928,13 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             </p>
 
             <div className="mt-4 flex flex-wrap items-end gap-3">
-              <label className="text-sm">
-                <span className="mb-1 block text-xs text-gray-500">
-                  작성 연월 (월말일로 발행)
-                </span>
-                <input
-                  type="month"
-                  value={issueMonth}
-                  onChange={(e) => setIssueMonth(e.target.value)}
-                  className="rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
-                />
-              </label>
+              {/*
+                월 입력을 여기 두지 않는다 — 1번의 정산월이 정본이다 (docs §8-5).
+                같은 값을 두 군데서 고칠 수 있으면 반드시 어긋난다.
+              */}
+              <p className="text-xs text-gray-500">
+                작성일자 <span className="font-medium text-gray-700">{issueMonth} 말일</span>
+              </p>
               <button
                 type="button"
                 onClick={() => downloadInvoice('taxable')}
@@ -1006,16 +1074,14 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
             <h2 className="font-semibold text-gray-900">7. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
-              <label className="text-sm">
-                <span className="mb-1 block text-xs text-gray-500">정산 기간</span>
-                <input
-                  type="text"
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value)}
-                  placeholder="26년6월"
-                  className="rounded border border-gray-300 px-3 py-1.5 focus:border-gray-500 focus:outline-none"
-                />
-              </label>
+              {/*
+                파일명·표지에 쓰는 라벨은 정산월에서 만든다 (docs §8-5).
+                자유 텍스트로 두었더니 이름이 `정산 기간`이라 사용자가 이걸 정산월로
+                착각했다. 실제 마감 기준은 1번의 정산월이다.
+              */}
+              <p className="text-xs text-gray-500">
+                정산 기간 <span className="font-medium text-gray-700">{periodLabel}</span>
+              </p>
               <button
                 type="button"
                 onClick={download}
@@ -1287,10 +1353,15 @@ function SourceCard({
 }
 
 /** 이번 달 기준 기본 기간 라벨 (예: 26년7월) */
-function defaultPeriod(): string {
-  const now = new Date()
-  const yy = String(now.getFullYear()).slice(2)
-  return `${yy}년${now.getMonth() + 1}월`
+/**
+ * `2026-07` → `26년7월`. 내역서 파일명·표지용 라벨.
+ *
+ * 사용자가 따로 입력하지 않는다 — 정산월에서 만든다 (docs §8-5).
+ */
+function toPeriodLabel(month: string): string {
+  const m = month.match(/^(\d{4})-(\d{2})$/)
+  if (!m) return ''
+  return `${m[1].slice(2)}년${Number(m[2])}월`
 }
 
 /**
