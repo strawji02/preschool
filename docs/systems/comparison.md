@@ -10,11 +10,34 @@
 
 **비교 대상 공급사는 신세계 1곳뿐**이다. (CJ는 정산 시스템에서만 등장)
 
-## 2. 위치
+## 2. 위치와 접근 권한
 
-- 화면: `src/app/calc-food/` → 로그인 도입 후 `/app/calc-food`로 이동 예정
-- 진입: `/app` 런처에서 제목 **5클릭 → 숨김 카드 노출 → 비밀번호** (타인에게 숨기는 UX 장치)
-- 도메인 로직: `src/lib/` (spec-parser, unit-conversion, matching-kpi, partner-profit 등)
+- 화면: `src/app/calc-food/` — **경로 이동 계획 없음.** 운영 중이라 URL을 바꾸면
+  북마크가 깨진다. `/app/*` 아래로 옮기는 건 실익이 없다.
+- 도메인 로직: `src/lib/` (spec-parser, unit-conversion, matching-kpi, partner-profit,
+  `funnel/`)
+
+### 접근 조건 — 두 개를 모두 넘어야 한다 (2026-07-31, migration 056)
+
+| 층 | 무엇 | 어디 |
+|---|---|---|
+| 1 | 로그인 (화이트리스트) | `middleware.ts` → `/calc-food` |
+| 2 | `can_access_comparison = true` | `calc-food/layout.tsx` → `requireComparisonAccess()` |
+
+**2026-07-30까지 이 화면은 로그인 없이 열려 있었다.** 거래처 단가가 담긴 원천
+데이터를 다루므로, 화이트리스트 안에서도 지정한 사람만 보도록 좁혔다.
+
+`role = 'admin'`은 **정산 마감 해제 권한**을 뜻하며 비교 시스템 접근과는 별개
+축이다. admin이어도 `can_access_comparison`이 false면 못 들어온다.
+
+런처(`/app`)의 **제목 3클릭 → 숨김 카드 노출**은 타인의 시선을 피하는 UX 장치일
+뿐이다. URL을 직접 쳐도 위 2층에서 막힌다. (`comparison-reveal.tsx`, `clicks >= 3`)
+
+### 배포 버전 표시 (2026-07-31)
+
+화면 제목 옆에 `COMPARISON_VERSION`이 뜬다. **비교 시스템이 실제로 바뀐 커밋**의
+날짜·시각이며, 정산만 고친 배포에서는 값이 그대로 남는다.
+판별 경로는 `scripts/generate-version.mjs`가 정본이다 (settlement.md §16).
 
 ## 3. 워크플로
 
@@ -36,6 +59,10 @@
   - 규격이 KG/PK/BOX를 담으면 **규격 우선**(coarse한 `extracted_unit`이 덮어쓰지 못하게)
   - `Xg*Nea`는 곱함, 단 `.../BOX`(박스 묶음수)면 곱하지 않음
   - 개당 무게 범위는 **평균** 사용
+- **품목군별 허용 오차**(`funnel/price-cluster.ts`): 농산물 ±40% / 축산물 ±25% /
+  가공품 ±20% / 기타 ±30%. 농산물은 계절 변동이 커서 넓고, 가공품이 ±40% 차이나면
+  다른 물건이다. 규격을 못 읽어도 **후보에서 버리지 않고** 순위만 뒤로 민다 —
+  버리면 검수자가 손으로도 못 고른다.
 
 ## 5. 산출물
 
@@ -44,12 +71,36 @@
   - ⚠️ 현재 계약식(원가 × (마진율 − 플랫폼 5%)) 기준. **실제 정산의 사업자공제·부가세차액·3.3%는 미반영**
 - 엑셀 다운로드 (3단 비교표)
 
-## 6. 미결 사항
+## 6. 테스트
+
+`src/lib/funnel/` 5개 파일 · 73 케이스. 전체는 `npx vitest run src/lib`.
+
+⚠️ **2026-07-31까지 3개 파일이 검증되지 않고 있었다.** `excel-parser` ·
+`price-cluster` · `price-normalizer`의 테스트가 `console.log` + `npx tsx`로 돌리는
+수동 스크립트였는데 파일명만 `.test.ts`여서, vitest는 "No test suite found"로
+**상시 FAIL**을 냈고 직접 실행해도 **종료 코드가 항상 0**이라 실패를 잡지 못했다.
+
+vitest로 옮긴 뒤 73개 전부 통과했다 — 구현은 정상이었고 검증만 없었다.
+같은 함정을 피하려면 `.test.ts`에는 반드시 `describe`/`it`을 쓴다.
+
+## 7. 미결 사항
 
 - 손익 보고서 모델: **원가 고정(모델 A, 현 구현)** vs 판매가 고정(모델 B) — 재작업 전 확인 필요
 - 네이버 쇼핑 참고자료 Phase 2(단가비교 배지, `reference_search_cache` 테이블) / Phase 3(검색 프리필)
 
-## 7. 상세 이력
+## 8. 상세 이력
 
 과거 구현·조사 문서는 `claudedocs/` 참조 (matching_research, hybrid_search_implementation 등).
+**평소에는 읽지 않는다** — 필요한 질문이 생겼을 때만 연다.
 매칭 오류 디버깅 절차는 프로젝트 메모리 `feedback_matching_debug_playbook` 참조.
+
+---
+
+## 갱신 규칙
+
+`[공통]` 커밋이 비교 시스템 경로(`src/app/calc-food`, `src/lib`, `src/features/shared`,
+`src/middleware.ts`)를 건드리면 **이 문서도 같은 커밋에서 고친다.**
+
+2026-07-29 → 07-31 사이 커밋 3건이 이 문서에 반영되지 않아, "로그인 도입 후 이동
+예정"·"5클릭" 같은 사실과 다른 내용이 남아 있었다. 운영 중인 시스템의 문서가
+가장 낡으면, 다음 작업이 잘못된 전제에서 시작한다.

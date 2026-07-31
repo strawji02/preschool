@@ -3,9 +3,10 @@ import {
   extractAttributes,
   compareAttributes,
   filterByAttributes,
-  type InvoiceItem,
   type DBProduct,
 } from './attribute-filter'
+// `InvoiceItem`의 정본은 파서다 — 여기서 다시 정의하면 두 모양이 갈라진다
+import type { InvoiceItem } from './excel-parser'
 
 describe('extractAttributes', () => {
   it('프리미엄 속성을 추출한다', () => {
@@ -109,6 +110,8 @@ describe('filterByAttributes', () => {
 
   const createDBProduct = (id: string, name: string, price: number): DBProduct => ({
     id,
+    // 속성 비교는 규격을 보지 않지만 타입상 필수다
+    spec: '',
     name,
     price,
   })
