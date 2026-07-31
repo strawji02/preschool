@@ -16,6 +16,7 @@
 | 수금·지급 기록 | `settlement/수금.md` | §9 |
 | 경영 보고서 화면 | `settlement/보고서.md` | §13 |
 | 유치원·영업자 등록·이관 | `settlement/마스터.md` | §10, §14 |
+| 품목 조정 (정산제외·이동) | `settlement/조정.md` | §18 |
 | 로그인·권한·배포 버전 | `settlement/권한과배포.md` | §15~§17 |
 
 **두 개 이상을 동시에 열지 않는다.** 마감 버그를 잡을 때 수금 문서는 필요 없다.
@@ -237,6 +238,7 @@
 | 수금·지급 관리 | migration 055, `app/app/settlement/collection` | **프로덕션 반영** (§9) |
 | 원천 기간 검증 | `calc/period-guard.ts` | **프로덕션 반영** (§8-4) |
 | CJ 거래명세서 파서 + 교차검증 | `parse/cj-statement.ts`, `calc/cj-cross-check.ts` | **프로덕션 반영** (§5-2) |
+| 품목 조정 | migration 059, `calc/adjustment.ts`, `app/app/settlement/adjustment-panel.tsx` | **프로덕션 반영** (§18) |
 
 ### 역검증 근거
 

@@ -188,6 +188,23 @@ export {
 } from './data/closing'
 
 export {
+  AdjustmentError,
+  createAdjustment,
+  deleteAdjustment,
+  listAdjustments,
+  type AdjustmentRecord,
+  type CreateAdjustmentInput,
+} from './data/adjustment'
+
+export {
+  adjustmentAmount,
+  applyAdjustments,
+  sumAdjustments,
+  type AdjustmentKind,
+  type StoredAdjustment,
+} from './calc/adjustment'
+
+export {
   MasterWriteError,
   assignVenue,
   excludeVenue,

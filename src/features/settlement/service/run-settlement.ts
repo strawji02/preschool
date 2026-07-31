@@ -21,6 +21,8 @@ import {
 } from '../report/invoice-sheet'
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
 import { parseCjStatementSheet, type CjStatementResult } from '../parse/cj-statement'
+import { applyAdjustments, sumAdjustments } from '../calc/adjustment'
+import { listAdjustments, type AdjustmentRecord } from '../data/adjustment'
 import {
   crossCheckCjStatement,
   cjCrossCheckMessage,
@@ -114,6 +116,15 @@ export interface SettlementRunResult {
   cjCrossCheck: CjCrossCheckIssue[]
   /** 거래명세서 품목 수. 없으면 null — 올렸는지 여부를 화면이 구분해야 한다. */
   cjStatementItemCount: number | null
+  /** 이 달에 적용된 품목 조정 (docs §18). 화면 목록과 내역서가 이걸 쓴다. */
+  adjustments: AdjustmentRecord[]
+  /** 조정으로 줄어든 청구액 합계. 이동은 사업장 합계를 바꾸지 않아 세지 않는다. */
+  adjustmentTotal: number
+  /**
+   * 조정에 쓸 수 있는 원천 품목. 화면에서 **골라서** 조정하므로 필요하다.
+   * 거래명세서가 없으면 빈 배열 — 그때는 조정을 추가할 수 없다.
+   */
+  statementItems: CjStatementResult['items']
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
   /**
@@ -214,7 +225,16 @@ export async function runSettlement(
   errors.push(...cjCrossCheck.map(cjCrossCheckMessage))
 
   // 원본 `집계표_정산용`이 CJ를 먼저 나열하므로 같은 순서로 맞춘다
-  const venues: NormalizedVenue[] = [...cj.venues, ...ss.venues]
+  const rawVenues: NormalizedVenue[] = [...cj.venues, ...ss.venues]
+
+  // ★ 품목 조정 (docs §18). **교차검증 뒤, 매핑 앞**이 자리다.
+  //
+  // 원천끼리의 대조(§5-2)는 조정 **전** 숫자로 해야 한다 — 원천은 사실이고
+  // 조정은 우리 정책이라, 섞으면 "CJ가 틀린 것"과 "우리가 뺀 것"을 구분할 수 없다.
+  const adjustments = req.period ? await listAdjustments(req.period) : []
+  const applied = applyAdjustments(rawVenues, statement?.items ?? [], adjustments)
+  errors.push(...applied.errors)
+  const venues = applied.venues
 
   const master = await loadSettlementMaster()
   const agg = aggregateByPartner(venues, master.mapping)
@@ -304,6 +324,9 @@ export async function runSettlement(
     periodMismatches,
     cjCrossCheck,
     cjStatementItemCount: statement ? statement.items.length : null,
+    adjustments,
+    adjustmentTotal: sumAdjustments(statement?.items ?? [], adjustments),
+    statementItems: statement?.items ?? [],
     sources: {
       shinsegae: {
         fileName: picked.shinsegae.fileName,
@@ -478,6 +501,9 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     periodMismatches: [],
     cjCrossCheck: [],
     cjStatementItemCount: null,
+    adjustments: [],
+    adjustmentTotal: 0,
+    statementItems: [],
     warnings: base.warnings,
     errors: base.errors,
     blocks: [],

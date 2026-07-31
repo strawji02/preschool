@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ClosingPanel from './closing-panel'
 import PendingPanel from './pending-panel'
+import AdjustmentPanel, {
+  type AdjustmentRow,
+  type StatementItem,
+} from './adjustment-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
@@ -54,6 +58,12 @@ interface AnalyzeResponse {
   cjCrossCheck: { restaurantName: string }[]
   /** 거래명세서 품목 수. **null이면 안 올린 것** — 0건과 구분해야 한다. */
   cjStatementItemCount: number | null
+  /** 이 달에 적용된 품목 조정 (docs §18) */
+  adjustments: AdjustmentRow[]
+  /** 조정으로 줄어든 청구액. 이동은 사업장 합계를 안 바꾸므로 세지 않는다. */
+  adjustmentTotal: number
+  /** 조정할 때 고르는 원천 품목 */
+  statementItems: StatementItem[]
   canClose: boolean
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
@@ -708,9 +718,23 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             onResolved={() => void analyze({ keepInputs: true })}
           />
 
-          {/* 3. 사업자공제 */}
+          {/*
+            3. 품목 조정 (docs §18).
+            **미해결 항목 바로 다음**이다 — 조정하면 아래 정산 숫자가 전부 바뀌므로,
+            공제·분할을 입력하기 전에 끝내야 한다.
+          */}
+          <AdjustmentPanel
+            period={issueMonth}
+            items={analysis.statementItems}
+            adjustments={analysis.adjustments}
+            total={analysis.adjustmentTotal}
+            locked={locked}
+            onChanged={() => void analyze({ keepInputs: true })}
+          />
+
+          {/* 4. 사업자공제 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">3. 사업자공제 입력</h2>
+            <h2 className="font-semibold text-gray-900">4. 사업자공제 입력</h2>
             <p className="mt-1 text-xs text-gray-500">
               항목별로 넣으면 합계가 산식의 공제액(Q)이 됩니다. 입력 내역은 내역서의{' '}
               <span className="font-medium">사업자공제 상세</span> 시트로 함께 저장됩니다.
@@ -733,7 +757,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 4. 정산 결과 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">4. 영업자별 정산</h2>
+            <h2 className="font-semibold text-gray-900">5. 영업자별 정산</h2>
 
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[820px] text-right text-sm">
@@ -812,7 +836,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 5. 분할 신고 + 지급명세서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">5. 사업소득 지급명세서</h2>
+            <h2 className="font-semibold text-gray-900">6. 사업소득 지급명세서</h2>
             <p className="mt-1 text-xs leading-relaxed text-gray-500">
               세무사 제출용입니다. 비워 두면 영업자 본인 명의로 신고합니다. 여러 명 명의로
               나눠 신고하려면 아래에 성명과 금액을 넣으세요 — <strong>합계가 신고액과
@@ -917,7 +941,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 6. 홈택스 계산서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">6. 홈택스 계산서 일괄발행</h2>
+            <h2 className="font-semibold text-gray-900">7. 홈택스 계산서 일괄발행</h2>
             <p className="mt-1 text-xs leading-relaxed text-gray-500">
               과세는 <span className="font-medium text-gray-700">세금계산서</span>, 면세는{' '}
               <span className="font-medium text-gray-700">계산서</span>로 양식이 달라 파일을
@@ -1072,7 +1096,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 7. 다운로드 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">7. 내역서 다운로드</h2>
+            <h2 className="font-semibold text-gray-900">8. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               {/*
                 파일명·표지에 쓰는 라벨은 정산월에서 만든다 (docs §8-5).

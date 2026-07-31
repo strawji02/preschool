@@ -139,6 +139,10 @@ export async function POST(request: NextRequest) {
       issuer: result.issuer,
       closingVenues: result.closingVenues,
       closingPartners: result.closingPartners,
+      // ★ 어떤 조정이 반영됐는지 함께 굳힌다 (docs §18).
+      // `closingVenues`는 이미 조정이 반영된 숫자라, 근거가 없으면 나중에
+      // "왜 거래명세서보다 적지?"에 답할 수 없다.
+      adjustments: result.adjustments,
     }
 
     const saved = await saveClosing({
