@@ -46,6 +46,13 @@ export interface SaveClosingInput {
   actor: string
   /** 왜 다시 저장했는지. 마감 후 수정이면 특히 중요하다 */
   reason?: string | null
+  /**
+   * 이 리비전에 대한 메모 (예: `테스트 마감`).
+   *
+   * ★ 주지 않으면 **비워진다.** 메모는 그 리비전에 대한 설명이므로 다음
+   * 리비전까지 따라가면 안 된다 — 테스트 딱지가 진짜 마감에 남는다.
+   */
+  note?: string | null
 }
 
 export interface ClosingRecord {
@@ -60,6 +67,8 @@ export interface ClosingRecord {
   updatedAt: string
   /** 마감 해제 횟수. 0보다 크면 마감 후 수정이 있었다 */
   reopenCount: number
+  /** 이 리비전에 붙은 메모. 재확정하면 비워진다 */
+  note: string | null
 }
 
 export interface ClosingRevision {
@@ -169,11 +178,14 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
         confirmed_by: confirmedBy,
         closed_at: closedAt,
         closed_by: closedBy,
+        // ★ 반드시 명시한다. 빼면 upsert가 기존 값을 그대로 두어, 한 번 붙인
+        // 메모가 리비전을 넘어 살아남는다 (실DB 확인: revision 2에도 남았다).
+        note: input.note ?? null,
       },
       { onConflict: 'period' }
     )
     .select(
-      'period, status, revision, updated_at, confirmed_at, confirmed_by, closed_at, closed_by, reopen_count'
+      'period, status, revision, updated_at, confirmed_at, confirmed_by, closed_at, closed_by, reopen_count, note'
     )
     .single()
   if (upsert.error) throw new ClosingError(`마감 저장 실패: ${upsert.error.message}`)
@@ -256,6 +268,7 @@ export async function saveClosing(input: SaveClosingInput): Promise<ClosingRecor
     closedBy: upsert.data.closed_by,
     updatedAt: upsert.data.updated_at,
     reopenCount: Number(upsert.data.reopen_count ?? 0),
+    note: (upsert.data as { note?: string | null }).note ?? null,
   }
 }
 
@@ -330,6 +343,7 @@ export async function reopenClosing(input: {
     closedBy: (row.closed_by as string | null) ?? null,
     updatedAt: String(row.updated_at),
     reopenCount: Number(row.reopen_count ?? 0),
+    note: (row.note as string | null) ?? null,
   }
 }
 
@@ -357,6 +371,7 @@ export async function loadClosing(period: string): Promise<ClosingRecord | null>
     closedBy: (row.closed_by as string | null) ?? null,
     updatedAt: String(row.updated_at),
     reopenCount: Number(row.reopen_count ?? 0),
+    note: (row.note as string | null) ?? null,
   }
 }
 
@@ -404,6 +419,7 @@ export async function listClosings(limit = 24): Promise<ClosingRecord[]> {
       closedBy: (row.closed_by as string | null) ?? null,
       updatedAt: String(row.updated_at),
       reopenCount: Number(row.reopen_count ?? 0),
+      note: (row.note as string | null) ?? null,
     }
   })
 }

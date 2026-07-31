@@ -126,6 +126,16 @@ export default async function ReportPage({
             </p>
           ) : (
             <div className="space-y-6">
+              {/*
+                마감 메모. 지금은 `테스트 마감` 표시에 쓴다 — 이게 안 보이면
+                테스트 자료를 실제 장부로 착각하게 된다. 재확정하면 비워진다.
+              */}
+              {detail.closing.note && (
+                <p className="rounded-2xl border border-amber-300 bg-amber-50 px-6 py-4 text-sm text-amber-900">
+                  <span className="font-semibold">이 마감에 메모가 있습니다 — </span>
+                  {detail.closing.note}
+                </p>
+              )}
               {period && (
                 <ReportDownloads
                   period={period}
