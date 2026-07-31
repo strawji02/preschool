@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
+  NO_SOURCE_MESSAGE,
   isExcelUpload,
-  readUploadedWorkbook,
+  resolveSources,
   runSettlement,
 } from '@/features/settlement'
 
@@ -27,13 +28,10 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  const period = String(form.get('period') ?? '')
+  // 파일이 없으면 **보관된 원천**을 쓴다 (docs §20). 말일에 한 번 올려 두면
+  // 그 뒤 조정·재분석이 전부 파일 없이 돈다.
   const files = form.getAll('files').filter((f): f is File => f instanceof File)
-  if (files.length === 0) {
-    return NextResponse.json(
-      { success: false, error: '엑셀 파일을 첨부해 주세요.' },
-      { status: 400 }
-    )
-  }
 
   const rejected = files.filter((f) => !isExcelUpload(f))
   if (rejected.length > 0) {
@@ -47,11 +45,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const workbooks = await Promise.all(files.map(readUploadedWorkbook))
+    const resolved = await resolveSources({ period, files })
+    if (resolved.from === 'none') {
+      return NextResponse.json({ success: false, error: NO_SOURCE_MESSAGE }, { status: 400 })
+    }
+    const workbooks = resolved.workbooks
     // 정산월은 **있으면** 대조한다. 화면에서 월을 먼저 고르는 흐름이라 대개 들어오지만,
     // 없다고 분석을 막지는 않는다 — 여기서 막으면 숫자를 미리 볼 수가 없다.
     // 확정·마감 경로(`/closing`)에서는 반드시 검사한다 (docs §8-4).
-    const period = String(form.get('period') ?? '')
     const result = await runSettlement({ workbooks, period })
 
     // blocks·invoiceRows·issuer는 응답에서 뺀다 — 식당/계산서 단위 원본이라 무겁고

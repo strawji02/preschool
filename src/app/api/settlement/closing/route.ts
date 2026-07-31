@@ -10,7 +10,8 @@ import {
   loadClosing,
   loadClosingRevisions,
   normalizeDeductionItems,
-  readUploadedWorkbook,
+  NO_SOURCE_MESSAGE,
+  resolveSources,
   reopenClosing,
   runSettlement,
   saveClosing,
@@ -85,9 +86,10 @@ export async function POST(request: NextRequest) {
   const action = actionRaw
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File)
-  if (files.length === 0 || files.some((f) => !isExcelUpload(f))) {
+  // 파일은 선택이다 — 없으면 보관된 원천을 쓴다 (docs §20)
+  if (files.some((f) => !isExcelUpload(f))) {
     return NextResponse.json(
-      { success: false, error: '엑셀 파일을 첨부해 주세요.' },
+      { success: false, error: '엑셀 파일만 올릴 수 있습니다.' },
       { status: 400 }
     )
   }
@@ -101,9 +103,13 @@ export async function POST(request: NextRequest) {
   const reason = String(form.get('reason') ?? '').trim() || null
 
   try {
-    const workbooks = await Promise.all(files.map(readUploadedWorkbook))
+    // 파일이 없으면 보관된 원천을 쓴다 (docs §20)
+    const resolved = await resolveSources({ period, files })
+    if (resolved.from === 'none') {
+      return NextResponse.json({ success: false, error: NO_SOURCE_MESSAGE }, { status: 400 })
+    }
     // ★ 정산월을 넘긴다 — 원천 파일의 날짜가 이 달과 다르면 확정·마감이 막힌다 (docs §8-4).
-    const result = await runSettlement({ workbooks, deductions, period })
+    const result = await runSettlement({ workbooks: resolved.workbooks, deductions, period })
 
     // 분할 신고는 지급명세서 쪽 산식이 검증한다 — 같은 함수를 쓴다
     const declaration = buildDeclarationLines(

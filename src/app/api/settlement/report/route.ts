@@ -12,7 +12,8 @@ import {
   isValidPeriod,
   loadClosingSnapshot,
   normalizeDeductionItems,
-  readUploadedWorkbook,
+  NO_SOURCE_MESSAGE,
+  resolveSources,
   rebuildClosingBlocks,
   runSettlement,
   sumDeductionItems,
@@ -137,9 +138,10 @@ export async function POST(request: NextRequest) {
   }
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File)
-  if (files.length === 0 || files.some((f) => !isExcelUpload(f))) {
+  // 파일은 선택이다 — 없으면 보관된 원천을 쓴다 (docs §20)
+  if (files.some((f) => !isExcelUpload(f))) {
     return NextResponse.json(
-      { success: false, error: '엑셀 파일을 첨부해 주세요.' },
+      { success: false, error: '엑셀 파일만 올릴 수 있습니다.' },
       { status: 400 }
     )
   }
@@ -155,8 +157,18 @@ export async function POST(request: NextRequest) {
   const periodLabel = String(form.get('period') ?? '').trim()
 
   try {
-    const workbooks = await Promise.all(files.map(readUploadedWorkbook))
-    const result = await runSettlement({ workbooks, deductions })
+    // ⚠️ `period`는 `26년7월` 같은 **표지 라벨**이다. 보관본 조회는 `YYYY-MM`이
+    // 필요해서 따로 받는다 (docs §20).
+    const sourcePeriod = String(form.get('sourcePeriod') ?? '')
+    const resolved = await resolveSources({ period: sourcePeriod, files })
+    if (resolved.from === 'none') {
+      return NextResponse.json({ success: false, error: NO_SOURCE_MESSAGE }, { status: 400 })
+    }
+    const result = await runSettlement({
+      workbooks: resolved.workbooks,
+      deductions,
+      period: sourcePeriod,
+    })
 
     if (result.errors.length > 0) {
       return NextResponse.json(

@@ -18,6 +18,7 @@
 | 유치원·영업자 등록·이관 | `settlement/마스터.md` | §10, §14 |
 | 품목 조정 (정산제외·이동) | `settlement/조정.md` | §18 |
 | 유치원 제공 거래명세표 | `settlement/조정.md` | §19 |
+| 원천 파일 서버 보관 | `settlement/원천보관.md` | §20 |
 | 로그인·권한·배포 버전 | `settlement/권한과배포.md` | §15~§17 |
 
 **두 개 이상을 동시에 열지 않는다.** 마감 버그를 잡을 때 수금 문서는 필요 없다.
@@ -242,6 +243,7 @@
 | 품목 조정 | migration 059, `calc/adjustment.ts`, `app/app/settlement/adjustment-panel.tsx` | **프로덕션 반영** (§18) |
 | 조정 시트 (내역서) | `report/adjustment-sheet.ts` | **프로덕션 반영** (§18) |
 | 유치원 제공 거래명세표 | `report/venue-statement.ts`, `api/settlement/venue-statement` | **프로덕션 반영** (§19) |
+| 원천 서버 보관 | migration 060, `data/source-archive.ts`, `service/resolve-sources.ts` | **프로덕션 반영** (§20) |
 
 ### 역검증 근거
 

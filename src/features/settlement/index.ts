@@ -97,7 +97,29 @@ export {
   type PickSheetsResult,
 } from './service/pick-sheets'
 
-export { readUploadedWorkbook, isExcelUpload } from './service/read-upload'
+export {
+  readUploadedWorkbook,
+  readWorkbookBytes,
+  isExcelUpload,
+} from './service/read-upload'
+
+export {
+  SourceArchiveError,
+  SOURCE_KIND_LABEL,
+  saveSourceFiles,
+  loadActiveSources,
+  listSourceFiles,
+  loadSourceWorkbooks,
+  type SourceKind,
+  type SourceFileRecord,
+  type DetectedSheet,
+} from './data/source-archive'
+
+export {
+  resolveSources,
+  NO_SOURCE_MESSAGE,
+  type ResolvedSources,
+} from './service/resolve-sources'
 
 export {
   runSettlement,
@@ -251,6 +273,21 @@ export {
 
 export { parseShinsegaeSheet } from './parse/shinsegae'
 export { parseCjSheet } from './parse/cj'
+export { parseCjStatementSheet } from './parse/cj-statement'
+
+export {
+  checkSourcePeriod,
+  periodMismatchMessage,
+  toDateRange,
+  type SourceDateRange,
+  type PeriodMismatch,
+} from './calc/period-guard'
+
+export {
+  crossCheckCjStatement,
+  cjCrossCheckMessage,
+  type CjCrossCheckIssue,
+} from './calc/cj-cross-check'
 export { aggregateByPartner } from './parse/aggregate'
 export {
   venueMappingKey,

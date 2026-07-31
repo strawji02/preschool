@@ -38,6 +38,24 @@ interface AnalyzedPartner {
   priceVat: number
 }
 
+/** 서버에 보관된 원천 한 건 (docs §20) */
+interface ArchivedSource {
+  id: string
+  kind: 'shinsegae' | 'cj' | 'cj_statement'
+  fileName: string
+  sheetName: string
+  dateMin: string | null
+  dateMax: string | null
+  uploadedBy: string
+  uploadedAt: string
+}
+
+const SOURCE_LABEL: Record<ArchivedSource['kind'], string> = {
+  shinsegae: '신세계 품목',
+  cj: 'CJ 집계표',
+  cj_statement: 'CJ 거래명세서',
+}
+
 interface AnalyzeResponse {
   success: boolean
   error?: string
@@ -141,9 +159,35 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 서버가 저장을 거부하므로 화면만 잠그는 게 아니라 **입력 자체를 막아** 헛수고를 없앤다.
    */
   const [locked, setLocked] = useState(false)
+  /**
+   * 서버에 보관된 원천 (docs §20). 있으면 파일을 다시 올리지 않아도 된다 —
+   * 말일 5시간 동안 창을 닫아도 이어서 할 수 있다.
+   */
+  const [archived, setArchived] = useState<ArchivedSource[] | null>(null)
 
   /** 내역서 파일명·표지용 라벨 (`26년7월`) — 정산월에서 만든다 */
   const periodLabel = toPeriodLabel(issueMonth)
+
+  /** 정산월이 바뀌면 그 달의 보관 원천을 다시 읽는다 (docs §20) */
+  useEffect(() => {
+    let cancelled = false
+    if (!/^\d{4}-\d{2}$/.test(issueMonth)) {
+      setArchived(null)
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/settlement/source?period=${issueMonth}`)
+        const json = (await res.json()) as { success?: boolean; active?: ArchivedSource[] }
+        if (!cancelled) setArchived(json.success ? (json.active ?? []) : null)
+      } catch {
+        if (!cancelled) setArchived(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [issueMonth])
 
   /** 파일 추가 — 같은 파일을 두 번 넣지 않는다 (이름+크기로 판별) */
   const addFiles = useCallback((incoming: readonly File[]) => {
@@ -260,7 +304,9 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    *   방금 고른 값이 이 함수 안에서는 아직 반영되지 않는다 — 그래서 직접 받는다.
    */
   async function analyze(opts?: { keepInputs?: boolean; period?: string }) {
-    if (files.length === 0) {
+    const period = opts?.period ?? issueMonth
+    const hasArchive = (archived?.length ?? 0) > 0
+    if (files.length === 0 && !hasArchive) {
       setError('엑셀 파일을 올려주세요.')
       return
     }
@@ -269,11 +315,42 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     setNotice(null)
     if (!opts?.keepInputs) setAnalysis(null)
     try {
+      /*
+        ★ 파일이 있으면 **먼저 서버에 보관**한다 (docs §20).
+        그래야 다음부터는 파일 없이 조정·재분석·산출물이 전부 돌아간다.
+        말일 5시간 동안 창을 닫아도 이어서 할 수 있어야 한다.
+
+        보관이 실패해도 분석은 진행한다 — 5시간짜리 마감에서 도구가 통째로
+        멈추는 상황은 만들면 안 된다. 대신 경고를 남긴다.
+      */
+      let archivedNow = false
+      if (files.length > 0) {
+        const af = new FormData()
+        for (const f of files) af.append('files', f)
+        af.append('period', period)
+        const ar = await fetch('/api/settlement/source', { method: 'POST', body: af })
+        const aj = (await ar.json().catch(() => null)) as
+          | { success?: boolean; error?: string; active?: ArchivedSource[] }
+          | null
+        if (ar.ok && aj?.success) {
+          archivedNow = true
+          setArchived(aj.active ?? [])
+          setFiles([]) // 보관됐으니 브라우저에 들고 있을 이유가 없다
+          setNotice('원천을 서버에 보관했습니다 — 이제 파일 없이 이어서 작업할 수 있습니다.')
+        } else if (ar.status === 409) {
+          // 기간 불일치 — 보관도 분석도 막는다 (docs §8-4)
+          setError(aj?.error ?? '원천 기간이 정산월과 다릅니다.')
+          return
+        } else {
+          setNotice(`원천 보관에 실패해 이번만 파일로 진행합니다: ${aj?.error ?? '알 수 없음'}`)
+        }
+      }
+
       // 정산월을 같이 보낸다 — 원천 파일이 다른 달이면 **여기서** 걸린다 (docs §8-4).
-      // 마감이 쓰는 값과 같은 `issueMonth`여야 한다. 다른 값을 보내면 분석은
-      // 통과했는데 마감에서 막히는 이상한 상태가 된다.
-      const fd = buildFormData()
-      fd.append('period', opts?.period ?? issueMonth)
+      const fd = new FormData()
+      // 보관에 성공했으면 파일을 다시 보내지 않는다 — 서버가 보관본을 쓴다
+      if (!archivedNow) for (const f of files) fd.append('files', f)
+      fd.append('period', period)
 
       const res = await fetch('/api/settlement/analyze', { method: 'POST', body: fd })
       const json: AnalyzeResponse = await res.json()
@@ -301,6 +378,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       fd.append('deductionItems', JSON.stringify(deductions))
       fd.append('splits', JSON.stringify(splits))
       fd.append('period', periodLabel)
+      fd.append('sourcePeriod', issueMonth) // 보관본 조회용 (docs §20)
 
       const res = await fetch('/api/settlement/report', { method: 'POST', body: fd })
       if (!res.ok) {
@@ -545,6 +623,40 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
         </label>
 
         {/*
+          ★ 보관된 원천 (docs §20).
+
+          말일 09:00~14:00 안에 혼자 끝내야 하는 일이라, 창을 닫거나 다른 일을
+          하다 돌아와도 이어서 할 수 있어야 한다. 한 번 올리면 여기 남는다.
+        */}
+        {archived !== null && archived.length > 0 && (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-sm font-medium text-emerald-900">
+              {issueMonth} 원천이 서버에 보관돼 있습니다 — 파일을 다시 올리지 않아도 됩니다.
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-emerald-800">
+              {archived.map((a) => (
+                <li key={a.id}>
+                  <span className="font-medium">{SOURCE_LABEL[a.kind]}</span> · {a.fileName}
+                  {a.dateMin && (
+                    <span className="text-emerald-600">
+                      {' '}
+                      ({a.dateMin} ~ {a.dateMax})
+                    </span>
+                  )}
+                  <span className="text-emerald-600">
+                    {' '}
+                    · {a.uploadedAt.slice(0, 16).replace('T', ' ')} {a.uploadedBy}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-emerald-700">
+              바꾸려면 새 파일을 올리고 분석하세요. 이전 것은 지워지지 않고 이력으로 남습니다.
+            </p>
+          </div>
+        )}
+
+        {/*
           드래그 처리는 window 리스너가 담당한다 (위 useEffect 참고).
           요소에 직접 달면 조금만 빗나가도 브라우저가 파일을 열어버린다.
           클릭 경로는 label + 숨은 input — 같은 저장소의 /calc-food UploadZone과 동일한 패턴.
@@ -616,10 +728,14 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           <button
             type="button"
             onClick={() => void analyze()}
-            disabled={busy !== null || files.length === 0}
+            disabled={busy !== null || (files.length === 0 && (archived?.length ?? 0) === 0)}
             className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy === 'analyze' ? '분석 중…' : '분석'}
+            {busy === 'analyze'
+              ? '분석 중…'
+              : files.length > 0
+                ? '보관하고 분석'
+                : '분석'}
           </button>
           {files.length > 0 && (
             <button

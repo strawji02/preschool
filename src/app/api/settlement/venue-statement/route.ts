@@ -4,7 +4,8 @@ import {
   adjustmentAmount,
   buildVenueStatement,
   isExcelUpload,
-  readUploadedWorkbook,
+  NO_SOURCE_MESSAGE,
+  resolveSources,
   runSettlement,
   writeVenueStatementXlsx,
 } from '@/features/settlement'
@@ -32,9 +33,10 @@ export async function POST(request: NextRequest) {
   }
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File)
-  if (files.length === 0 || files.some((f) => !isExcelUpload(f))) {
+  // 파일은 선택이다 — 없으면 보관된 원천을 쓴다 (docs §20)
+  if (files.some((f) => !isExcelUpload(f))) {
     return NextResponse.json(
-      { success: false, error: '엑셀 파일을 첨부해 주세요.' },
+      { success: false, error: '엑셀 파일만 올릴 수 있습니다.' },
       { status: 400 }
     )
   }
@@ -49,8 +51,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const workbooks = await Promise.all(files.map(readUploadedWorkbook))
-    const result = await runSettlement({ workbooks, period })
+    // 파일이 없으면 보관된 원천을 쓴다 (docs §20)
+    const resolved = await resolveSources({ period, files })
+    if (resolved.from === 'none') {
+      return NextResponse.json({ success: false, error: NO_SOURCE_MESSAGE }, { status: 400 })
+    }
+    const result = await runSettlement({ workbooks: resolved.workbooks, period })
 
     // 기간이 어긋나면 여기서도 막는다 — 잘못된 달의 명세표를 유치원에 주면 안 된다
     if (result.errors.length > 0) {

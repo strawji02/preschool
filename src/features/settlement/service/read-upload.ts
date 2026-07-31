@@ -12,11 +12,23 @@ import type { UploadedWorkbook } from './pick-sheets'
  * 데이터 시작 인덱스가 밀리므로, 파서가 기대하는 형태로 정리해서 넘긴다.
  */
 export async function readUploadedWorkbook(file: File): Promise<UploadedWorkbook> {
-  const buffer = await file.arrayBuffer()
+  return readWorkbookBytes(file.name, await file.arrayBuffer())
+}
+
+/**
+ * 바이트에서 바로 읽는다 — **보관된 원천**을 다시 쓸 때 (docs §20).
+ *
+ * Storage에서 받은 파일은 `File`이 아니라 바이트다. `File`을 새로 만들어
+ * 감싸는 것보다 이쪽이 솔직하다.
+ */
+export function readWorkbookBytes(
+  fileName: string,
+  buffer: ArrayBuffer | Uint8Array
+): UploadedWorkbook {
   const wb = XLSX.read(buffer, { type: 'array' })
 
   return {
-    fileName: file.name,
+    fileName,
     sheets: wb.SheetNames.map((name) => ({
       name,
       rows: XLSX.utils.sheet_to_json(wb.Sheets[name], {
