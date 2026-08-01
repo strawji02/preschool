@@ -93,8 +93,15 @@ export interface Segment {
   images: { imageId: number; tl: ImageAnchor; br: ImageAnchor }[]
 }
 
-/** `col`·`row`는 0-based. 나머지 필드는 그대로 넘겨야 위치가 유지된다. */
-type ImageAnchor = { col: number; row: number } & Record<string, unknown>
+/**
+ * 이미지 앵커 — 0-based `col`/`row`만 쓴다.
+ *
+ * ⚠️ **exceljs 앵커 객체를 그대로 펼치면 안 된다.** `row`·`col`은 프로토타입
+ * getter라 `{...anchor}`로는 **복사되지 않는다.** 대신 `nativeRow`만 넘어가서
+ * 블록을 옮겨도 이미지가 안 따라오고, 위치로 거르는 필터도 전부 빗나간다.
+ * 실제로 그래서 모든 식당 시트 첫 장에 오전간식 금액 그림이 박혔다 (2026-08-01).
+ */
+type ImageAnchor = { col: number; row: number }
 
 export const MAX_COL = 43
 
@@ -128,10 +135,11 @@ export function snapshotSegment(ws: ExcelJS.Worksheet, from: number, to: number)
   for (const im of ws.getImages()) {
     // exceljs 이미지 앵커는 0-based
     if (im.range.tl.row < from - 1 || im.range.br.row > to) continue
+    // getter를 **여기서 읽어** 숫자로 굳힌다 (위 ImageAnchor 주석 참고)
     images.push({
       imageId: Number(im.imageId),
-      tl: { ...im.range.tl } as ImageAnchor,
-      br: { ...im.range.br } as ImageAnchor,
+      tl: { col: im.range.tl.col, row: im.range.tl.row },
+      br: { col: im.range.br.col, row: im.range.br.row },
     })
   }
   return { rows, merges, images }
@@ -178,8 +186,8 @@ export function paste(ws: ExcelJS.Worksheet, seg: Segment, at: number, srcTop: n
   for (const im of seg.images) {
     const shift = at - srcTop
     ws.addImage(im.imageId, {
-      tl: { ...im.tl, row: im.tl.row + shift },
-      br: { ...im.br, row: im.br.row + shift },
+      tl: { col: im.tl.col, row: im.tl.row + shift },
+      br: { col: im.br.col, row: im.br.row + shift },
     } as unknown as ExcelJS.ImageRange)
   }
   return at + seg.rows.length
@@ -281,6 +289,16 @@ export async function writeShinsegaeStatementXlsx(st: ShinsegaeStatement): Promi
     item: snapshotSegment(blockWs, BLOCK.itemRow, BLOCK.itemRow),
     tail: snapshotSegment(blockWs, BLOCK.tailFrom, BLOCK.tailTo),
   }
+  /*
+    ★ **머리 구간(공급자 박스)의 도장 말고는 이미지를 싣지 않는다.**
+
+    원본 신세계 파일에는 `합계`·`26,340` 같은 **글자 그림**이 합계 칸 위에 덮여 있다.
+    그걸 같이 복제하는 바람에 모든 식당 시트에 **오전간식 첫날 금액이 그림으로**
+    박혔다 (2026-08-01). 템플릿에서 걷어냈지만, 템플릿을 다시 뽑을 때 실수로
+    딸려 오면 유치원에 틀린 금액이 보이는 문서가 나간다. 여기서 한 번 더 막는다.
+  */
+  tpl.item.images = []
+  tpl.tail.images = []
   const widths: (number | undefined)[] = []
   for (let c = 1; c <= MAX_COL; c++) widths[c] = blockWs.getColumn(c).width
 
