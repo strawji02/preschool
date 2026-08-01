@@ -1,13 +1,19 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { adjustmentVenueKey, defaultAdjustmentReason } from '@/features/settlement/client'
 
 /**
  * 품목 조정 패널 — docs/systems/settlement/조정.md §18
  *
  * ★ **금액을 손으로 치지 않는다.** 거래명세서 품목을 검색해서 고르면 날짜·상품코드·
- * 단가·과세구분이 전부 따라온다. 사람이 넣는 건 수량·사유·요청자뿐이라 오타로
- * 엉뚱한 금액이 빠질 여지가 없다.
+ * 단가·과세구분이 전부 따라온다. 사람이 넣는 건 수량뿐이라 오타로 엉뚱한 금액이
+ * 빠질 여지가 없다.
+ *
+ * ★ **요청자·사유도 채워서 준다** (2026-08-01). 그전에는 빈 칸이었는데, 회색 안내문이
+ * 떠 있어 **이미 입력된 것처럼 보였다.** 그 상태로는 저장 버튼이 비활성이라 눌러도
+ * 아무 일이 없고 이유도 안 보였다. 요청자는 그 유치원 담당 영업자, 사유는 처리
+ * 종류에 따른 기본 문구가 들어간다 — 다르면 그 자리에서 고치면 된다.
  *
  * 조정 없이 마감하면 그냥 청구되므로, **목록이 항상 보여야 한다** — 접어 두지 않는다.
  */
@@ -44,6 +50,11 @@ export interface AdjustmentRow {
 interface Props {
   period: string
   items: readonly StatementItem[]
+  /**
+   * 사업장×식당 → 담당 영업자. 요청자 기본값에 쓴다.
+   * 키는 `adjustmentVenueKey` — 반영 로직과 같은 규칙이어야 한다.
+   */
+  partnerByVenue: Readonly<Record<string, string>>
   adjustments: readonly AdjustmentRow[]
   /** 조정 합계 (제외분만). 이동은 사업장 합계를 바꾸지 않는다. */
   total: number
@@ -54,9 +65,15 @@ interface Props {
 
 const won = (n: number) => n.toLocaleString('ko-KR')
 
+/** 방금 저장한 줄을 목록에서 찾기 위한 키 */
+function rowKey(a: { kind: string; itemDate: string; productCode: string }): string {
+  return `${a.kind}|${a.itemDate}|${a.productCode}`
+}
+
 export default function AdjustmentPanel({
   period,
   items,
+  partnerByVenue,
   adjustments,
   total,
   locked,
@@ -70,8 +87,16 @@ export default function AdjustmentPanel({
   const [target, setTarget] = useState('')
   const [reason, setReason] = useState('')
   const [requestedBy, setRequestedBy] = useState('')
+  /**
+   * 사용자가 직접 고쳤는지. 고쳤으면 기본값이 **덮어쓰지 않는다** —
+   * 처리 종류를 바꿨다고 방금 적은 사유가 날아가면 안 된다.
+   */
+  const [reasonEdited, setReasonEdited] = useState(false)
+  const [requestedByEdited, setRequestedByEdited] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 방금 저장한 조정 — 목록에서 눈에 띄게 표시한다 */
+  const [savedKey, setSavedKey] = useState<string | null>(null)
 
   /**
    * 품목 검색 — 상품명·식당명·날짜 어디로든 찾을 수 있게 한다.
@@ -101,6 +126,29 @@ export default function AdjustmentPanel({
     return [...names].sort()
   }, [items, picked])
 
+  /** 이 품목의 담당 영업자 — 요청자 기본값 */
+  function partnerOf(it: StatementItem): string {
+    return partnerByVenue[adjustmentVenueKey(it.businessName, it.restaurantName)] ?? ''
+  }
+
+  /**
+   * 품목을 고르면 **바로 저장할 수 있는 상태**로 만든다.
+   * 수량은 전량, 요청자는 담당 영업자, 사유는 처리 종류별 기본 문구.
+   */
+  function pick(it: StatementItem) {
+    setPicked(it)
+    setQuantity(String(it.quantity))
+    setSavedKey(null)
+    if (!requestedByEdited) setRequestedBy(partnerOf(it))
+    if (!reasonEdited) setReason(defaultAdjustmentReason(kind))
+  }
+
+  /** 처리 종류를 바꾸면 사유 기본값도 따라간다 — 손으로 고친 사유는 건드리지 않는다 */
+  function changeKind(next: 'exclude' | 'move') {
+    setKind(next)
+    if (!reasonEdited) setReason(defaultAdjustmentReason(next))
+  }
+
   function reset() {
     setPicked(null)
     setQuery('')
@@ -108,6 +156,8 @@ export default function AdjustmentPanel({
     setTarget('')
     setReason('')
     setRequestedBy('')
+    setReasonEdited(false)
+    setRequestedByEdited(false)
     setKind('exclude')
     setError(null)
   }
@@ -140,8 +190,18 @@ export default function AdjustmentPanel({
         setError(json.error ?? '저장에 실패했습니다.')
         return
       }
-      reset()
-      setOpen(false)
+      /*
+        ★ **저장한 결과를 눈에 보이게 남긴다.**
+
+        예전에는 폼을 닫아 버려서, 방금 누른 게 반영됐는지 화면으로 확인할 방법이
+        없었다. 조정은 보통 여러 건이 몰려 오므로(말일 5시간) 폼은 **열어 둔 채**
+        품목만 비워 다음 건을 바로 받고, 저장된 줄은 아래 목록에서 표시한다.
+      */
+      setSavedKey(rowKey({ kind, itemDate: picked.date, productCode: picked.productCode }))
+      setPicked(null)
+      setQuery('')
+      setQuantity('')
+      setTarget('')
       onChanged()
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장 중 오류가 발생했습니다.')
@@ -153,6 +213,7 @@ export default function AdjustmentPanel({
   async function remove(id: string) {
     setBusy(true)
     setError(null)
+    setSavedKey(null)
     try {
       const res = await fetch(
         `/api/settlement/adjustment?id=${encodeURIComponent(id)}&period=${period}`,
@@ -178,13 +239,19 @@ export default function AdjustmentPanel({
     return picked.tax.taxableSupply > 0 ? supply + supply / 10 : supply
   }, [picked, quantity])
 
-  const canSave =
-    picked !== null &&
-    Number(quantity) > 0 &&
-    Number(quantity) <= picked.quantity &&
-    reason.trim() !== '' &&
-    requestedBy.trim() !== '' &&
-    (kind === 'exclude' || target !== '')
+  /** 저장을 막고 있는 이유 — 비활성 버튼 옆에 그대로 보여 준다 */
+  const blocker = useMemo(() => {
+    if (!picked) return null
+    const q = Number(quantity)
+    if (!Number.isFinite(q) || q <= 0) return '수량을 입력해 주세요.'
+    if (q > picked.quantity) return `수량이 원천(${picked.quantity}${picked.unit})을 넘습니다.`
+    if (kind === 'move' && target === '') return '이동할 식당을 골라 주세요.'
+    if (requestedBy.trim() === '') return '요청자를 입력해 주세요.'
+    if (reason.trim() === '') return '사유를 입력해 주세요.'
+    return null
+  }, [picked, quantity, kind, target, requestedBy, reason])
+
+  const canSave = picked !== null && blocker === null
 
   return (
     <section className="rounded-2xl border border-gray-200 bg-white p-6">
@@ -237,10 +304,7 @@ export default function AdjustmentPanel({
                 <li key={`${it.date}|${it.restaurantName}|${it.productCode}`}>
                   <button
                     type="button"
-                    onClick={() => {
-                      setPicked(it)
-                      setQuantity(String(it.quantity))
-                    }}
+                    onClick={() => pick(it)}
                     className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50"
                   >
                     <span className="text-gray-500">{it.date}</span>{' '}
@@ -281,7 +345,7 @@ export default function AdjustmentPanel({
                   <span className="mb-1 block text-xs text-gray-500">처리</span>
                   <select
                     value={kind}
-                    onChange={(e) => setKind(e.target.value as 'exclude' | 'move')}
+                    onChange={(e) => changeKind(e.target.value as 'exclude' | 'move')}
                     className="rounded border border-gray-300 px-3 py-1.5"
                   >
                     <option value="exclude">정산 제외 (본인부담)</option>
@@ -340,8 +404,11 @@ export default function AdjustmentPanel({
                   <input
                     type="text"
                     value={requestedBy}
-                    onChange={(e) => setRequestedBy(e.target.value)}
-                    placeholder="김영수"
+                    onChange={(e) => {
+                      setRequestedBy(e.target.value)
+                      setRequestedByEdited(true)
+                    }}
+                    placeholder="요청한 영업자"
                     className="rounded border border-gray-300 px-3 py-1.5"
                   />
                 </label>
@@ -350,21 +417,31 @@ export default function AdjustmentPanel({
                   <input
                     type="text"
                     value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    placeholder="정산제외 요청(본인부담)"
+                    onChange={(e) => {
+                      setReason(e.target.value)
+                      setReasonEdited(true)
+                    }}
+                    placeholder="조정 사유"
                     className="w-full rounded border border-gray-300 px-3 py-1.5"
                   />
                 </label>
               </div>
 
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={!canSave || busy}
-                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {busy ? '저장 중…' : '저장하고 다시 분석'}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void save()}
+                  disabled={!canSave || busy}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {busy ? '저장 중…' : '저장하고 다시 분석'}
+                </button>
+                {/*
+                  ★ **못 누르는 이유를 적는다.** 비활성 버튼만 있으면 눌러도 아무 일이
+                  없는 것처럼 보인다. 2026-08-01에 실제로 여기서 막혔다.
+                */}
+                {!canSave && blocker && <span className="text-xs text-amber-700">{blocker}</span>}
+              </div>
             </div>
           )}
         </div>
@@ -372,6 +449,13 @@ export default function AdjustmentPanel({
 
       {error && (
         <p className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      )}
+
+      {savedKey && !error && (
+        <p className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          조정을 저장하고 다시 분석했습니다 — 아래 <span className="font-semibold">노란 줄</span>이
+          방금 저장한 내용입니다.
+        </p>
       )}
 
       {/* ── 처리된 내용 ── */}
@@ -392,7 +476,10 @@ export default function AdjustmentPanel({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {adjustments.map((a) => (
-                <tr key={a.id}>
+                <tr
+                  key={a.id}
+                  className={rowKey(a) === savedKey ? 'bg-amber-50' : undefined}
+                >
                   <td className="py-2 pr-3">
                     <span
                       className={`rounded px-1.5 py-0.5 ${

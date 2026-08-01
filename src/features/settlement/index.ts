@@ -239,7 +239,9 @@ export {
 
 export {
   adjustmentAmount,
+  adjustmentVenueKey,
   applyAdjustments,
+  defaultAdjustmentReason,
   sumAdjustments,
   type AdjustmentKind,
   type StoredAdjustment,

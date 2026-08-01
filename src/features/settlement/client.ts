@@ -114,4 +114,16 @@ export {
   type NameWithholding,
 } from './report/declaration-sheet'
 
+/**
+ * 조정 입력 기본값·키 규칙 (docs §18).
+ *
+ * 화면이 요청자·사유를 채워 주고, 담당 영업자를 찾을 때 **반영 로직과 같은 키**를
+ * 써야 하므로 클라이언트에도 노출한다. 순수 함수라 서버 코드가 딸려오지 않는다.
+ */
+export {
+  adjustmentVenueKey,
+  defaultAdjustmentReason,
+  type AdjustmentKind,
+} from './calc/adjustment'
+
 export type { SettlementSource, TaxBreakdown } from './parse/types'

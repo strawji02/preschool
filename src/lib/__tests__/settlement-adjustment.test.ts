@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   adjustmentAmount,
+  adjustmentVenueKey,
   applyAdjustments,
+  defaultAdjustmentReason,
   type StoredAdjustment,
 } from '@/features/settlement/calc/adjustment'
 import type { CjStatementItem } from '@/features/settlement/parse/cj-statement'
@@ -219,5 +221,29 @@ describe('applyAdjustments — 정산에 반영', () => {
   it('제외한 식당이 venues에 없으면 오류', () => {
     const r = applyAdjustments([방과후], [item()], [adj()])
     expect(r.errors[0]).toContain('식당')
+  })
+})
+
+/**
+ * 조정 입력 기본값 (docs §18-3)
+ *
+ * ★ **왜 기본값이 필요한가.** 2026-08-01에 실제로 막혔다. 요청자·사유가 빈 칸이면
+ * 저장 버튼이 비활성인데, 화면에는 회색 안내문(`김영수`, `정산제외 요청(본인부담)`)이
+ * 떠 있어 **이미 입력된 것처럼 보인다.** 눌러도 아무 일이 없고 이유도 안 보였다.
+ *
+ * 말일 다섯 시간 안에 혼자 조정을 몰아 넣는 상황이라, 매번 같은 값을 타이핑하게
+ * 두면 그 자체가 비용이다. 골랐으면 채워져 있어야 한다.
+ */
+describe('조정 입력 기본값', () => {
+  it('식당 키가 반영 로직과 같은 규칙이어야 한다', () => {
+    // 이 키로 담당 영업자를 찾아 요청자에 채운다. 규칙이 갈리면 엉뚱한 사람이 들어간다.
+    expect(adjustmentVenueKey('키즈웰(아름솔)', '키즈웰(아름솔)_방과후간식')).toBe(
+      '키즈웰(아름솔)|키즈웰(아름솔)_방과후간식'
+    )
+  })
+
+  it('처리 종류에 따라 사유 기본값이 다르다', () => {
+    expect(defaultAdjustmentReason('exclude')).toBe('정산제외 요청(본인부담)')
+    expect(defaultAdjustmentReason('move')).toBe('식당 이동 요청')
   })
 })

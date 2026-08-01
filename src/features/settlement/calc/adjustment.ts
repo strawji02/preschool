@@ -49,6 +49,26 @@ export interface StoredAdjustment {
   requestedBy: string
 }
 
+/**
+ * 사업장×식당을 가리키는 키.
+ *
+ * ⚠️ **반영(`applyAdjustments`)과 화면이 같은 규칙을 써야 한다.** 화면은 이 키로
+ * 담당 영업자를 찾아 요청자 칸에 채우는데, 규칙이 갈리면 엉뚱한 사람이 들어간다.
+ */
+export function adjustmentVenueKey(businessName: string, restaurantName: string): string {
+  return `${businessName}|${restaurantName}`
+}
+
+/**
+ * 사유 기본값 — 화면이 미리 채워 둔다 (docs §18-3).
+ *
+ * 조정 사유는 사실상 두 가지뿐이라 매번 타이핑할 이유가 없다. 다르게 적어야 하면
+ * 그대로 고치면 된다.
+ */
+export function defaultAdjustmentReason(kind: AdjustmentKind): string {
+  return kind === 'exclude' ? '정산제외 요청(본인부담)' : '식당 이동 요청'
+}
+
 /** 원천 금액이 늘 10원 단위라 그 관례를 따른다 */
 function round10(n: number): number {
   return Math.round(n / 10) * 10
@@ -112,7 +132,7 @@ export function applyAdjustments(
   for (const it of items) itemMap.set(itemKey({ ...it, itemDate: it.date }), it)
 
   const venueMap = new Map<string, NormalizedVenue>()
-  for (const v of venues) venueMap.set(`${v.businessName}|${v.restaurantName}`, v)
+  for (const v of venues) venueMap.set(adjustmentVenueKey(v.businessName, v.restaurantName), v)
 
   const errors: string[] = []
   /** 같은 품목에 조정이 여러 건일 수 있다 — 합계가 원천 수량을 넘으면 안 된다 */
@@ -146,7 +166,7 @@ export function applyAdjustments(
     }
     usedQty.set(key, used)
 
-    const fromKey = `${a.businessName}|${a.restaurantName}`
+    const fromKey = adjustmentVenueKey(a.businessName, a.restaurantName)
     if (!venueMap.has(fromKey)) {
       errors.push(`${a.restaurantName}: 이 식당이 집계표에 없습니다.`)
       continue
@@ -158,7 +178,7 @@ export function applyAdjustments(
         errors.push(`${a.restaurantName} ${it.productName}: 이동할 식당을 지정해 주세요.`)
         continue
       }
-      toKey = `${a.businessName}|${a.targetRestaurantName}`
+      toKey = adjustmentVenueKey(a.businessName, a.targetRestaurantName)
       if (!venueMap.has(toKey)) {
         // 새로 만들지 않는다 — 식당코드를 알 수 없고, 계산서 품목명도 마스터에 없다.
         errors.push(
@@ -176,7 +196,7 @@ export function applyAdjustments(
 
   const out = venues.map(clone)
   const outMap = new Map<string, NormalizedVenue>()
-  for (const v of out) outMap.set(`${v.businessName}|${v.restaurantName}`, v)
+  for (const v of out) outMap.set(adjustmentVenueKey(v.businessName, v.restaurantName), v)
 
   for (const p of planned) {
     subtract(outMap.get(p.from)!.price, p.amount)

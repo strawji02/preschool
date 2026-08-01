@@ -11,6 +11,7 @@ import AdjustmentPanel, {
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
   DEDUCTION_CATEGORIES,
+  adjustmentVenueKey,
   buildDeclarationLines,
   calcSettlement,
   sumDeductionItems,
@@ -82,6 +83,11 @@ interface AnalyzeResponse {
   adjustmentTotal: number
   /** 조정할 때 고르는 원천 품목 */
   statementItems: StatementItem[]
+  /**
+   * 식당별 담당 영업자 (docs §18-3). 조정 패널이 요청자 기본값에 쓴다.
+   * 마감 스냅샷용으로 이미 만들던 값이라 따로 계산하지 않는다.
+   */
+  closingVenues: { businessName: string; restaurantName: string; partnerName: string | null }[]
   /** 거래명세표를 줄 수 있는 신세계 유치원 (docs §19) */
   statementVenues: { businessCode: string; businessName: string; itemCount: number }[]
   canClose: boolean
@@ -167,6 +173,20 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
   /** 내역서 파일명·표지용 라벨 (`26년7월`) — 정산월에서 만든다 */
   const periodLabel = toPeriodLabel(issueMonth)
+
+  /**
+   * 식당 → 담당 영업자 (docs §18-3).
+   *
+   * 조정 요청은 그 유치원 담당 영업자가 하므로 요청자 칸의 기본값이 된다.
+   * 키는 `adjustmentVenueKey` — 조정 반영 로직과 **같은 규칙**이어야 한다.
+   */
+  const partnerByVenue = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const v of analysis?.closingVenues ?? []) {
+      if (v.partnerName) out[adjustmentVenueKey(v.businessName, v.restaurantName)] = v.partnerName
+    }
+    return out
+  }, [analysis])
 
   /** 정산월이 바뀌면 그 달의 보관 원천을 다시 읽는다 (docs §20) */
   useEffect(() => {
@@ -878,6 +898,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           <AdjustmentPanel
             period={issueMonth}
             items={analysis.statementItems}
+            partnerByVenue={partnerByVenue}
             adjustments={analysis.adjustments}
             total={analysis.adjustmentTotal}
             locked={locked}
