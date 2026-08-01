@@ -48,6 +48,15 @@ const nextConfig: NextConfig = {
   // Cloud Run deployment - standalone output
   output: 'standalone',
 
+  /*
+    거래명세표 템플릿은 런타임에 `readFile`로 읽는다 (docs §19-2).
+    import이 아니라서 Next가 추적하지 못하므로 명시적으로 포함시킨다.
+    빠지면 배포본에서만 "템플릿이 없습니다"로 죽는다 — 로컬에서는 안 보인다.
+  */
+  outputFileTracingIncludes: {
+    '/api/settlement/**': ['./src/features/settlement/report/templates/*.xlsx'],
+  },
+
   // 빌드 시간 환경 변수
   env: {
     NEXT_PUBLIC_BUILD_TIME: buildTime,

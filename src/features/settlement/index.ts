@@ -224,6 +224,18 @@ export {
 } from './report/venue-statement'
 
 export {
+  buildShinsegaeStatement,
+  formatStatementAmount,
+  formatStatementDate,
+  formatStatementQuantity,
+  type ShinsegaeStatement,
+  type ShinsegaeStatementBuyer,
+  type ShinsegaeStatementBlock,
+} from './report/shinsegae-statement'
+
+export { writeShinsegaeStatementXlsx } from './report/shinsegae-statement-workbook'
+
+export {
   buildVenueStatementWorkbook,
   writeVenueStatementXlsx,
 } from './report/venue-statement-workbook'
