@@ -170,9 +170,20 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 말일 5시간 동안 창을 닫아도 이어서 할 수 있다.
    */
   const [archived, setArchived] = useState<ArchivedSource[] | null>(null)
+  /**
+   * 보관된 원천이 있는데도 **일부러** 새 파일을 올리려는 중 (docs §20).
+   *
+   * 보관본이 있으면 업로드 상자를 접는다. 다시 올릴 필요가 없는데 화면 한복판에
+   * 큼직한 점선 상자가 있으면 "또 올려야 하나" 싶어진다 — 실제로 그 지적을 받았다.
+   */
+  const [replacing, setReplacing] = useState(false)
 
   /** 내역서 파일명·표지용 라벨 (`26년7월`) — 정산월에서 만든다 */
   const periodLabel = toPeriodLabel(issueMonth)
+
+  const hasArchive = (archived?.length ?? 0) > 0
+  /** 업로드 상자를 펼칠지 — 보관본이 없거나, 교체 중이거나, 이미 파일을 든 경우 */
+  const showDropzone = !hasArchive || replacing || files.length > 0
 
   /**
    * 식당 → 담당 영업자 (docs §18-3).
@@ -325,7 +336,6 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    */
   async function analyze(opts?: { keepInputs?: boolean; period?: string }) {
     const period = opts?.period ?? issueMonth
-    const hasArchive = (archived?.length ?? 0) > 0
     if (files.length === 0 && !hasArchive) {
       setError('엑셀 파일을 올려주세요.')
       return
@@ -356,6 +366,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           archivedNow = true
           setArchived(aj.active ?? [])
           setFiles([]) // 보관됐으니 브라우저에 들고 있을 이유가 없다
+          setReplacing(false) // 업로드 상자를 다시 접는다
           setNotice('원천을 서버에 보관했습니다 — 이제 파일 없이 이어서 작업할 수 있습니다.')
         } else if (ar.status === 409) {
           // 기간 불일치 — 보관도 분석도 막는다 (docs §8-4)
@@ -633,6 +644,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             onChange={(e) => {
               setIssueMonth(e.target.value)
               setAnalysis(null) // 월이 바뀌면 이전 분석 결과는 다른 달 것이다
+              setReplacing(false)
             }}
             disabled={locked}
             className="rounded-lg border border-gray-300 px-3 py-1.5 disabled:bg-gray-100"
@@ -670,9 +682,15 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-xs text-emerald-700">
-              바꾸려면 새 파일을 올리고 분석하세요. 이전 것은 지워지지 않고 이력으로 남습니다.
-            </p>
+            {!replacing && files.length === 0 && (
+              <button
+                type="button"
+                onClick={() => setReplacing(true)}
+                className="mt-2 text-xs text-emerald-700 underline hover:text-emerald-900"
+              >
+                다른 파일로 교체하기
+              </button>
+            )}
           </div>
         )}
 
@@ -681,6 +699,11 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           요소에 직접 달면 조금만 빗나가도 브라우저가 파일을 열어버린다.
           클릭 경로는 label + 숨은 input — 같은 저장소의 /calc-food UploadZone과 동일한 패턴.
         */}
+        {/*
+          ★ 보관본이 있으면 업로드 상자를 **접는다** (docs §20).
+          「다른 파일로 교체하기」를 누르거나, 화면에 파일을 끌어다 놓으면 다시 펼쳐진다.
+        */}
+        {showDropzone && (
         <label
           className={`mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
             dragging
@@ -713,6 +736,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             신세계 품목 시트 + CJ 집계표 · 통합 파일 1개도 가능 · .xlsx / .xls / .xlsm
           </p>
         </label>
+        )}
 
         {files.length > 0 && (
           <ul className="mt-4 space-y-2">
@@ -764,6 +788,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                 setFiles([])
                 setAnalysis(null)
                 setNotice(null)
+                setReplacing(false)
               }}
               className="text-sm text-gray-500 hover:text-gray-900"
             >
