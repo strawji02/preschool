@@ -4,6 +4,7 @@ import {
   SourceArchiveError,
   checkSourcePeriod,
   detectSheetKind,
+  toArchiveKind,
   isExcelUpload,
   listSourceFiles,
   loadActiveSources,
@@ -48,7 +49,8 @@ function detect(fileName: string, bytes: Uint8Array): DetectedSheet[] {
     else if (kind === 'cj') dateRange = parseCjSheet(sheet.rows).dateRange
     else dateRange = parseCjStatementSheet(sheet.rows).dateRange
 
-    found.push({ kind: kind as SourceKind, sheetName: sheet.name, dateRange })
+    // ⚠️ 캐스트 금지 — 판별기는 카멜, DB는 스네이크다 (`toArchiveKind` 주석)
+    found.push({ kind: toArchiveKind(kind), sheetName: sheet.name, dateRange })
   }
   return found
 }

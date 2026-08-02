@@ -90,7 +90,10 @@ export {
 
 export {
   detectSheetKind,
+  toArchiveKind,
   pickSourceSheets,
+  type SheetKind,
+  type ArchiveKind,
   type UploadedSheet,
   type UploadedWorkbook,
   type PickedSheet,

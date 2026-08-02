@@ -20,6 +20,21 @@ import type { SettlementSource } from '../parse/types'
 /** 원천 시트 종류. 거래명세서는 정산 산식에 직접 안 들어가서 `SettlementSource`가 아니다. */
 export type SheetKind = SettlementSource | 'cjStatement'
 
+/** 보관 테이블(`settlement_source_files.kind`)이 받는 값 */
+export type ArchiveKind = SettlementSource | 'cj_statement'
+
+/**
+ * 판별 결과를 보관 종류로 바꾼다.
+ *
+ * ⚠️ **판별기는 카멜(`cjStatement`), DB는 스네이크(`cj_statement`)다.**
+ * 라우트에서 캐스트로 넘겼다가 CHECK 제약에 걸려 7월 원천이 통째로 저장되지
+ * 않았다 (2026-08-02). 6월은 거래명세서가 없어 드러나지 않았다.
+ * **캐스트하지 말고 이 함수를 쓴다.**
+ */
+export function toArchiveKind(kind: SheetKind): ArchiveKind {
+  return kind === 'cjStatement' ? 'cj_statement' : kind
+}
+
 /** 헤더를 찾기 위해 훑어볼 상단 행 수. 제목 행이 앞에 붙어 있는 경우를 흡수한다. */
 const HEADER_SCAN_ROWS = 5
 
