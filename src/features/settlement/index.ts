@@ -83,6 +83,7 @@ export {
 } from './calc/closing'
 
 export {
+  carryOverSplits,
   validateSplitDeclaration,
   type DeclarationSplit,
   type SplitValidationResult,

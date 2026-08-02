@@ -39,3 +39,33 @@ export function validateSplitDeclaration(
 
   return { total, diff, valid: diff === 0 }
 }
+
+/**
+ * 지난달 분할 명의를 이번 달 신고액에 맞춰 이어받는다 (docs §4).
+ *
+ * ★ **명의는 그대로, 금액은 다시 나눈다.** 매달 같은 사람들에게 나눠 신고하는데
+ * 신고액은 달마다 다르다. 지난달 금액을 그대로 가져오면 합계가 안 맞아 마감이
+ * 막히고, 사용자가 계산기를 두드려야 한다.
+ *
+ * ⚠️ **합계는 신고액과 1원도 어긋나면 안 된다.** 비율 배분에서 생기는 반올림
+ * 차액은 첫 행이 흡수한다. 지난달 합계가 0이면 첫 명의에 전액을 넣는다.
+ */
+export function carryOverSplits(
+  previous: readonly DeclarationSplit[],
+  declared: number
+): DeclarationSplit[] {
+  if (previous.length === 0) return []
+
+  const prevTotal = previous.reduce((sum, s) => sum + s.amount, 0)
+  if (prevTotal <= 0) {
+    return previous.map((s, i) => ({ name: s.name, amount: i === 0 ? declared : 0 }))
+  }
+
+  const out = previous.map((s) => ({
+    name: s.name,
+    amount: Math.round((s.amount / prevTotal) * declared),
+  }))
+  const diff = declared - out.reduce((sum, s) => sum + s.amount, 0)
+  out[0].amount += diff
+  return out
+}

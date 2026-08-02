@@ -9,6 +9,7 @@ import {
   listClosings,
   loadClosing,
   loadClosingRevisions,
+  loadClosingSnapshot,
   normalizeDeductionItems,
   NO_SOURCE_MESSAGE,
   resolveSources,
@@ -246,11 +247,28 @@ export async function GET(request: NextRequest) {
     if (!period) {
       return NextResponse.json({ success: true, closings: await listClosings() })
     }
-    const [closing, revisions] = await Promise.all([
+    const [closing, revisions, snap] = await Promise.all([
       loadClosing(period),
       loadClosingRevisions(period),
+      loadClosingSnapshot(period),
     ])
-    return NextResponse.json({ success: true, closing, revisions })
+    /*
+      ★ **저장한 공제·분할을 함께 돌려준다** (docs §4).
+
+      그전에는 스냅샷 안에만 있고 화면이 다시 읽지 않아, 새로고침하거나 분석을
+      다시 누르면 입력이 통째로 사라졌다. "저장한 자료가 계속 초기화된다"는
+      보고가 이것이었다 (2026-08-02).
+    */
+    const s = (snap?.snapshot ?? {}) as {
+      splits?: unknown
+      deductionItems?: unknown
+    }
+    return NextResponse.json({
+      success: true,
+      closing,
+      revisions,
+      inputs: { splits: s.splits ?? {}, deductionItems: s.deductionItems ?? {} },
+    })
   } catch (err) {
     console.error('[settlement/closing GET]', err)
     return NextResponse.json(

@@ -12,6 +12,7 @@ import AdjustmentPanel, {
 import {
   DEDUCTION_CATEGORIES,
   adjustmentVenueKey,
+  carryOverSplits,
   buildDeclarationLines,
   calcSettlement,
   sumDeductionItems,
@@ -146,6 +147,13 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   /** 분할 신고 명의 (docs §4). 비어 있으면 영업자 본인 명의로 신고한다. */
   const [splits, setSplits] = useState<Record<string, DeclarationSplit[]>>({})
   /**
+   * 직전 달에 저장된 분할 명의 (docs §4).
+   *
+   * 매달 같은 사람들에게 나눠 신고하므로, 처음 설정할 때 지난달 명의를 이어받는다.
+   * 금액은 이번 달 신고액에 맞춰 다시 나눈다 — `carryOverSplits`.
+   */
+  const [prevSplits, setPrevSplits] = useState<Record<string, DeclarationSplit[]>>({})
+  /**
    * ★ **정산월** — 이 화면의 유일한 기준 월 (docs §8-5).
    *
    * 기간 검증(§8-4)·마감 기간·계산서 작성일자·내역서 파일명이 **전부 이 값에서** 나온다.
@@ -200,6 +208,52 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     }
     return out
   }, [analysis])
+
+  /**
+   * 정산월이 바뀌면 **저장된 공제·분할을 되살린다** (docs §4).
+   *
+   * 확정할 때 스냅샷에 굳혀 두는데 화면이 다시 읽지 않아, 새로고침하거나 분석을
+   * 다시 누르면 통째로 사라졌다. "저장한 자료가 계속 초기화된다"는 보고가
+   * 이것이었다 (2026-08-02).
+   *
+   * 직전 달 분할 명의도 같이 읽는다 — 처음 설정할 때 이어받는다.
+   */
+  useEffect(() => {
+    let cancelled = false
+    if (!/^\d{4}-\d{2}$/.test(issueMonth)) return
+    const prevMonth = (() => {
+      const [y, m] = issueMonth.split('-').map(Number)
+      return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+    })()
+    void (async () => {
+      const read = async (period: string) => {
+        try {
+          const res = await fetch(`/api/settlement/closing?period=${period}`)
+          const json = (await res.json()) as {
+            success?: boolean
+            inputs?: {
+              splits?: Record<string, DeclarationSplit[]>
+              deductionItems?: Record<string, DeductionItem[]>
+            }
+          }
+          return json.success ? (json.inputs ?? null) : null
+        } catch {
+          return null
+        }
+      }
+      const [mine, prev] = await Promise.all([read(issueMonth), read(prevMonth)])
+      if (cancelled) return
+      setPrevSplits(prev?.splits ?? {})
+      // 이 달에 저장된 게 있으면 그대로 되살린다
+      if (mine?.splits && Object.keys(mine.splits).length > 0) setSplits(mine.splits)
+      if (mine?.deductionItems && Object.keys(mine.deductionItems).length > 0) {
+        setDeductions(mine.deductionItems)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [issueMonth])
 
   /** 정산월이 바뀌면 그 달의 보관 원천을 다시 읽는다 (docs §20) */
   useEffect(() => {
@@ -404,10 +458,19 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
         return
       }
       setAnalysis(json)
-      if (!opts?.keepInputs) {
-        setDeductions({})
-        setSplits({})
-      }
+      /*
+        ★ **분석은 입력을 지우지 않는다** (2026-08-02).
+
+        그전에는 `분석`을 누를 때마다 공제·분할을 통째로 비웠다. 사용자가 방금
+        입력한 값이 사라져 "저장한 자료가 계속 초기화된다"는 보고로 이어졌다.
+        대신 **이번 분석에 없는 영업자 항목만** 버린다 — 남겨 두면 어느 달 것인지
+        알 수 없는 유령 값이 된다.
+      */
+      const alive = new Set(json.partners.map((p) => p.partnerId))
+      const prune = <T,>(rec: Record<string, T>) =>
+        Object.fromEntries(Object.entries(rec).filter(([id]) => alive.has(id)))
+      setDeductions((prev) => prune(prev))
+      setSplits((prev) => prune(prev))
     } catch (e) {
       setError(e instanceof Error ? e.message : '분석 중 오류가 발생했습니다.')
     } finally {
@@ -1083,6 +1146,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                     locked={locked}
                     declared={declared}
                     splits={splits[p.partnerId] ?? []}
+                    previous={prevSplits[p.partnerId] ?? []}
                     onChange={(next) =>
                       setSplits((prev) => ({ ...prev, [p.partnerId]: next }))
                     }
@@ -1425,12 +1489,18 @@ function SplitEditor({
   partnerName,
   declared,
   splits,
+  previous,
   locked,
   onChange,
 }: {
   partnerName: string
   declared: number
   splits: DeclarationSplit[]
+  /**
+   * 직전 달에 저장된 명의 (docs §4). 있으면 처음 설정할 때 이어받는다.
+   * 금액은 이번 달 신고액에 맞춰 다시 나눈다.
+   */
+  previous: DeclarationSplit[]
   /** 마감된 달이면 수정할 수 없다 (docs §8) */
   locked: boolean
   onChange: (splits: DeclarationSplit[]) => void
@@ -1505,21 +1575,38 @@ function SplitEditor({
       {locked ? (
         <p className="mt-3 text-xs text-gray-400">마감된 달이라 수정할 수 없습니다.</p>
       ) : (
-        <button
-          type="button"
-          onClick={() =>
-            onChange([
-              ...splits,
-              // 첫 행은 영업자 본인 이름과 전액을 채워 둔다 — 대부분 본인 + 가족 형태다
-              splits.length === 0
-                ? { name: partnerName, amount: declared }
-                : { name: '', amount: 0 },
-            ])
-          }
-          className="mt-3 rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
-        >
-          {active ? '+ 명의 추가' : '분할 신고 설정'}
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              onChange([
+                ...splits,
+                // 첫 행은 영업자 본인 이름과 전액을 채워 둔다 — 대부분 본인 + 가족 형태다
+                splits.length === 0
+                  ? { name: partnerName, amount: declared }
+                  : { name: '', amount: 0 },
+              ])
+            }
+            className="rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+          >
+            {active ? '+ 명의 추가' : '분할 신고 설정'}
+          </button>
+
+          {/*
+            ★ **지난달 명의를 이어받는다** (docs §4).
+            매달 같은 사람들에게 나눠 신고하므로 매번 다시 치게 두지 않는다.
+            금액은 이번 달 신고액에 맞춰 비율로 다시 나눠 **합계가 바로 일치**한다.
+          */}
+          {!active && previous.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange(carryOverSplits(previous, declared))}
+              className="rounded-lg border border-gray-900 bg-gray-900 px-3 py-1 text-xs font-medium text-white transition hover:bg-gray-700"
+            >
+              지난달 명의 불러오기 ({previous.map((s) => s.name).join('·')})
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
