@@ -73,7 +73,70 @@ const COL = {
 /** 머리 기준 행 (블록 첫 행 = 1) */
 const HEAD_ROW = { date: 6, regNo: 10, company: 12, address: 13 } as const
 /** 꼬리 기준 오프셋 (꼬리 첫 행 = 0) */
-const TAIL_OFFSET = { sumRow: 0, exemptRow: 1, monthRow: 4, pageRow: 13 } as const
+const TAIL_OFFSET = {
+  sumRow: 0,
+  exemptRow: 1,
+  monthRow: 4,
+  /**
+   * ★ **탄력 여백 행** — 월합계와 검수 사이의 빈 행(템플릿 r23).
+   *
+   * 원본은 이 한 행을 늘였다 줄였다 하며 블록이 정확히 한 장을 채우게 만든다.
+   * ```
+   * 오전간식 (품목  1건)   409.6pt
+   * 급식재료 (품목 14건)    65.2pt
+   * → 블록 총높이는 둘 다 819.4pt = 한 장
+   * ```
+   * 이걸 안 맞추면 품목이 많은 날 블록이 1,150pt까지 커져 **매번 두 장**이 된다.
+   */
+  elasticRow: 5,
+  pageRow: 13,
+} as const
+
+/**
+ * 한 장에 들어가는 내용 높이 (pt).
+ *
+ * 원본 `급식재료`의 한 장짜리 블록 21개가 전부 819.1~819.9pt였다 —
+ * A4 세로·여백 0 기준의 실측값이다. **조금 낮게 잡는다**: 딱 맞추면 반올림
+ * 한 번에 다음 장으로 밀린다. 남는 몇 pt는 눈에 안 보인다.
+ */
+const PAGE_CONTENT_HEIGHT = 815
+
+/** 탄력 행을 0으로 만들면 표가 붙어 버린다. 최소한은 남긴다. */
+const MIN_ELASTIC_HEIGHT = 3
+
+/** 높이를 지정하지 않은 행의 기본값 (템플릿 시트 설정) */
+const DEFAULT_ROW_HEIGHT = 12.75
+
+/**
+ * 탄력 행을 뺀 블록 높이 — 탄력 행에 얼마를 줄지, 몇 장이 될지 둘 다 이걸로 정한다.
+ */
+function heightWithoutElastic(
+  tpl: { head: Segment; item: Segment; tail: Segment },
+  itemCount: number
+): number {
+  const itemHeight = tpl.item.rows[0]?.height ?? DEFAULT_ROW_HEIGHT
+  return (
+    segmentHeight(tpl.head) +
+    itemCount * itemHeight +
+    segmentHeight(tpl.tail, TAIL_OFFSET.elasticRow)
+  )
+}
+
+/** 블록이 차지할 인쇄 장수 — 품목이 많으면 두 장이 된다 (원본도 그렇다) */
+function pagesForBlock(
+  tpl: { head: Segment; item: Segment; tail: Segment },
+  itemCount: number
+): number {
+  const h = Math.max(PAGE_CONTENT_HEIGHT, heightWithoutElastic(tpl, itemCount) + MIN_ELASTIC_HEIGHT)
+  return Math.ceil(h / PAGE_CONTENT_HEIGHT)
+}
+
+function segmentHeight(seg: Segment, skipIndex?: number): number {
+  return seg.rows.reduce(
+    (sum, row, i) => (i === skipIndex ? sum : sum + (row.height ?? DEFAULT_ROW_HEIGHT)),
+    0
+  )
+}
 
 interface CellSnapshot {
   col: number
@@ -244,6 +307,19 @@ function writeBlock(
   ws.getCell(monthRow, COL.total).value = formatStatementAmount(block.cumulativeTotal)
 
   ws.getCell(tailAt + TAIL_OFFSET.pageRow, COL.page).value = block.page
+
+  /*
+    ★ **탄력 여백 행으로 한 장을 채운다** (위 `elasticRow` 주석).
+
+    품목이 많으면 줄이고 적으면 늘려서 블록이 한 장에 들어가게 한다.
+    품목이 아주 많아 한 장을 넘기면 최소값만 남기고 두 장으로 흐르게 둔다 —
+    원본도 그 날은 두 장이다(품목 17건 이상).
+  */
+  ws.getRow(tailAt + TAIL_OFFSET.elasticRow).height = Math.max(
+    MIN_ELASTIC_HEIGHT,
+    PAGE_CONTENT_HEIGHT - heightWithoutElastic(tpl, block.items.length)
+  )
+
   return cursor
 }
 
@@ -340,8 +416,34 @@ export async function writeShinsegaeStatementXlsx(st: ShinsegaeStatement): Promi
     for (let c = 1; c <= MAX_COL; c++) {
       if (widths[c] !== undefined) ws.getColumn(c).width = widths[c]
     }
+    /*
+      ★ **날짜마다 새 장에서 시작하게 페이지 나눔을 넣는다** (docs §19-2).
+
+      원본은 행 높이를 자동으로 늘려 각 블록이 정확히 한 장(819.4pt)을 채우게
+      만든다. 품목명이 길면 행이 두 줄이 되고, 그만큼 아래 빈 행이 줄어든다.
+      **그 자동맞춤은 글꼴 폭에 달려 있어 우리가 재현할 수 없다.**
+
+      대신 블록 끝마다 **명시적 페이지 나눔**을 건다. 행 높이가 어떻든
+      한 날짜가 페이지 중간에서 잘리지 않고, 다음 날짜는 새 장에서 시작한다.
+      원본이 패딩으로 얻으려던 결과를 더 확실하게 얻는다.
+
+      ⚠️ 마지막 블록 뒤에는 넣지 않는다 — 빈 장이 한 장 더 붙는다.
+    */
+    /*
+      ★ **페이지 번호는 실제 인쇄 장수로 매긴다** (`n/N`).
+
+      블록 번호로 매기면 품목이 많은 날이 두 장이 될 때 어긋난다. 원본도
+      인쇄 장수 기준이다 — 26년 6월 급식재료가 블록 21개인데 `10/24`였다.
+    */
+    const pages = sheet.blocks.map((b) => pagesForBlock(tpl, b.items.length))
+    const totalPages = pages.reduce((a, n) => a + n, 0)
+    let pageNo = 1
     let at = 1
-    for (const block of sheet.blocks) at = writeBlock(ws, tpl, at, block, st.buyer)
+    sheet.blocks.forEach((block, i) => {
+      at = writeBlock(ws, tpl, at, { ...block, page: `${pageNo}/${totalPages}` }, st.buyer)
+      pageNo += pages[i]
+      if (i < sheet.blocks.length - 1) ws.getRow(at - 1).addPageBreak()
+    })
   }
 
   // 템플릿용 빈 명세서 시트는 결과물에 남기지 않는다
