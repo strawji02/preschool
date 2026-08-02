@@ -45,7 +45,12 @@ const SECURITY_HEADERS = [
 ]
 
 const nextConfig: NextConfig = {
-  // Cloud Run deployment - standalone output
+  /*
+    ⚠️ Cloud Run 시절 잔재다. 2026-02에 preschool-app을 Cloud Run에 올리며 켰고,
+    Vercel로 옮긴 뒤에도 남았다. Vercel에서는 무해하지만 **지우지 않는다** —
+    빌드 산출 방식이 바뀌는데, 운영 중인 비교 시스템 배포를 걸 만한 이득이 없다.
+    제거하려면 배포 검증을 붙여서만 (docs/클라우드-경계.md).
+  */
   output: 'standalone',
 
   /*
