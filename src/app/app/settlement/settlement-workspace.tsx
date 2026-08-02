@@ -170,6 +170,8 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 말일 5시간 동안 창을 닫아도 이어서 할 수 있다.
    */
   const [archived, setArchived] = useState<ArchivedSource[] | null>(null)
+  /** 보관본을 조회하는 중 — 잠깐 빈 화면이 되는 걸 설명해 준다 */
+  const [checkingArchive, setCheckingArchive] = useState(false)
   /**
    * 보관된 원천이 있는데도 **일부러** 새 파일을 올리려는 중 (docs §20).
    *
@@ -202,10 +204,20 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   /** 정산월이 바뀌면 그 달의 보관 원천을 다시 읽는다 (docs §20) */
   useEffect(() => {
     let cancelled = false
+    /*
+      ★ **조회하기 전에 먼저 비운다.**
+
+      안 비우면 이전 달 카드가 새 달 이름을 달고 남아 있다가, 응답이 오면
+      사라진다. 화면에는 "2026-07 원천이 보관돼 있습니다"라고 쓰여 있는데
+      목록은 6월 파일인 순간이 생긴다 — 잠깐이라도 **틀린 문장**이다.
+      2026-08-02에 "카드가 잠깐 보였다 없어진다"는 보고가 이것이었다.
+    */
+    setArchived(null)
     if (!/^\d{4}-\d{2}$/.test(issueMonth)) {
-      setArchived(null)
+      setCheckingArchive(false)
       return
     }
+    setCheckingArchive(true)
     void (async () => {
       try {
         const res = await fetch(`/api/settlement/source?period=${issueMonth}`)
@@ -213,6 +225,8 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
         if (!cancelled) setArchived(json.success ? (json.active ?? []) : null)
       } catch {
         if (!cancelled) setArchived(null)
+      } finally {
+        if (!cancelled) setCheckingArchive(false)
       }
     })()
     return () => {
@@ -660,6 +674,19 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           말일 09:00~14:00 안에 혼자 끝내야 하는 일이라, 창을 닫거나 다른 일을
           하다 돌아와도 이어서 할 수 있어야 한다. 한 번 올리면 여기 남는다.
         */}
+        {checkingArchive && (
+          <p className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-500">
+            {issueMonth} 보관 원천을 확인하는 중…
+          </p>
+        )}
+
+        {!checkingArchive && archived !== null && archived.length === 0 && (
+          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            <span className="font-medium">{issueMonth} 원천이 서버에 없습니다.</span> 파일을 올리고
+            「보관하고 분석」을 누르면 이 달도 보관됩니다.
+          </p>
+        )}
+
         {archived !== null && archived.length > 0 && (
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
             <p className="text-sm font-medium text-emerald-900">
