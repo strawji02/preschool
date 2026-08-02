@@ -58,6 +58,8 @@ src/lib/                   범용 유틸 (format, cn, supabase)
   - `.test.ts` 파일에는 반드시 `describe`/`it`을 쓰세요. `console.log` 스크립트를
     그 이름으로 두면 vitest가 상시 FAIL을 내면서 **종료 코드는 0**이라 아무도 못 잡습니다.
 - 배포: Vercel 단일 프로젝트 (`firstconsulting.site`). main push = 프로덕션.
+  ⚠️ **급식이 GCP 리소스를 만들어야 하면 `docs/클라우드-경계.md`를 먼저 읽으세요.**
+  남의 프로젝트에 얹지 않습니다 (2026-08-02 결정).
 - 버전 표시: `scripts/generate-version.mjs`가 **경로로** 시스템을 판별합니다.
   모듈 경계를 바꾸면 이 파일의 경로 목록도 같이 고치세요 — 갈라지면 사용자가
   "안 바뀌었다"는 잘못된 정보를 봅니다.
