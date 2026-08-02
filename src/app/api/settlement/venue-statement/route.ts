@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
-  adjustmentAmount,
-  buildVenueStatement,
+  buildShinsegaeStatement,
   isExcelUpload,
+  loadSettlementMaster,
   NO_SOURCE_MESSAGE,
   resolveSources,
   runSettlement,
-  writeVenueStatementXlsx,
+  writeShinsegaeStatementXlsx,
 } from '@/features/settlement'
 
 /**
@@ -74,36 +74,54 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 이 유치원에 걸린 조정만 싣는다. 다른 유치원 조정이 섞이면 안 된다.
-    const mine = result.adjustments.filter((a) => a.businessName === items[0].businessName)
-    const amounts: Record<string, number> = {}
-    for (const a of mine) {
-      const src = result.statementItems.find(
-        (i) =>
-          i.businessName === a.businessName &&
-          i.restaurantName === a.restaurantName &&
-          i.date === a.itemDate &&
-          i.productCode === a.productCode
+    /*
+      ★ **공급받는자는 유치원**이다. 마스터의 계산서 정보를 그대로 쓴다.
+      공급자((주)신세계푸드)와 직인은 템플릿에 박혀 있어 여기서 넣지 않는다 (docs §19-2).
+    */
+    const master = await loadSettlementMaster()
+    const venue = master.venues.find(
+      (v) => v.source === 'shinsegae' && v.businessCode === businessCode
+    )
+    const inv = venue?.invoice
+    if (!inv?.companyName || !inv.bizRegNo) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `${items[0].businessName}: 상호·사업자등록번호가 없어 명세표를 만들 수 없습니다. 마스터를 채워 주세요.`,
+        },
+        { status: 409 }
       )
-      if (src) amounts[a.id] = adjustmentAmount(src, a.quantity).total
     }
 
-    const statement = buildVenueStatement({
-      businessName: items[0].businessName,
+    /*
+      ⚠️ **조정(§18)은 싣지 않는다.** 조정은 CJ 거래명세서 품목에만 걸리므로
+      신세계 유치원에는 생길 수 없다. 혹시 생기면 아래에서 걸러 알린다.
+    */
+    const stray = result.adjustments.filter((a) => a.businessName === items[0].businessName)
+    if (stray.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `${items[0].businessName}에 품목 조정 ${stray.length}건이 걸려 있습니다. 신세계 명세표는 조정을 담지 못하니 확인해 주세요.`,
+        },
+        { status: 409 }
+      )
+    }
+
+    const statement = buildShinsegaeStatement({
+      businessName: inv.companyName,
       period,
-      issuer: {
-        companyName: result.issuer?.companyName ?? '',
-        bizRegNo: result.issuer?.bizRegNo ?? '',
-        ceoName: result.issuer?.ceoName ?? '',
-        address: result.issuer?.address ?? '',
+      buyer: {
+        companyName: inv.companyName,
+        bizRegNo: inv.bizRegNo,
+        ceoName: inv.ceoName ?? '',
+        address: inv.address ?? '',
       },
       items,
-      adjustments: mine,
-      adjustmentAmounts: amounts,
     })
 
-    const bytes = writeVenueStatementXlsx(statement)
-    const name = `거래명세표_${items[0].businessName}_${period}.xlsx`
+    const bytes = await writeShinsegaeStatementXlsx(statement)
+    const name = `거래명세표_${inv.companyName}_${period}.xlsx`
     return new NextResponse(bytes as unknown as BodyInit, {
       headers: {
         'Content-Type':

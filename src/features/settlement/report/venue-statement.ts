@@ -111,6 +111,12 @@ export function extractTemperature(productName: string): string {
   return m ? m[1] : ''
 }
 
+/**
+ * ⚠️ **폐기.** 서식 없는 단순 표다. 유치원에 나가는 문서는
+ * `shinsegae-statement.ts`(원본 폼 그대로, docs §19-2)가 만든다.
+ * 라우트를 이쪽으로 되돌리지 말 것 — 2026-08-02에 연결을 빠뜨려
+ * 옛 서식이 그대로 나갔다.
+ */
 export function buildVenueStatement(input: VenueStatementInput): VenueStatement {
   // ── 식당 → 일자 → 품목 ──
   const byRestaurant = new Map<string, Map<string, VenueStatementItem[]>>()
