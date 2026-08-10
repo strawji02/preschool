@@ -129,3 +129,66 @@ curl -H "X-App-Secret: ${APP_SHARED_SECRET}" "https://firstconsulting.site/api/s
   - 원인: 초기 setup에서 RLS 미설정
   - 해결: `046_security_hardening.sql` — 6개 table RLS enable + 9개 함수 search_path 고정
   - 재발방지: `scripts/lint-migrations.sh` + 본 문서
+
+## 2026-08-10 — 구글 클라우드 보안 권고 대조
+
+구글이 보낸 자격증명 관리 권고를 실제 환경과 하나씩 맞춰 봤다.
+
+### 통과
+
+```
+저장소에 키 없음        private_key·BEGIN PRIVATE KEY·AIza…·JWT  전부 0건
+                        (git 이력 전체 검색. `service_role` 38건은 역할 이름)
+.gitignore              .env* / .env*.local  차단
+사용자 관리 SA 키       5개 프로젝트 전부 0개 — 구글 관리 키만 있다
+API 키 API 제한         7개 전부 걸려 있다 (Gemini·Firebase 각각)
+```
+
+다운로드형 서비스 계정 키가 하나도 없어서 권고의 **가장 큰 항목(장수명 키)은
+해당 사항이 없다.**
+
+### ⚠️ 찾은 것 — service_role 코드가 브라우저 번들에 실려 있었다
+
+`unitConversionUnified.ts`가 `unit-conversion-db`를 직접 import했는데, 이걸 쓰는
+`MatchingRow`·`CandidateSelector`가 **둘 다 클라이언트 컴포넌트**였다.
+
+```
+calc-food/page.tsx → AnalysisDashboard → MatchingStep → CandidateSelector ('use client')
+  → unitConversionUnified → unit-conversion-db → supabase/admin  (service_role)
+```
+
+**키 값은 새지 않았다.** Next는 `NEXT_PUBLIC_` 접두어만 인라인한다 — 번들에는
+`env.SUPABASE_SERVICE_ROLE_KEY`라는 **이름만** 있고 값은 `undefined`였다.
+브라우저 파일에서 실제 키를 찾아본 결과 0건.
+
+그래도 서버 전용 DB 코드가 브라우저에 실릴 이유는 없다. 끊었다.
+
+- `admin.ts`·`unit-conversion-db.ts`에 **`import 'server-only'`** — 다시 새면 빌드가 깨진다
+- `admin/unit-conversions/page.tsx`는 **타입만** 가져오게 (`import type`)
+- 재검사: 브라우저 파일에 키 이름 0건 / 값 0건
+
+### ⚠️ 함께 드러난 것 — DB 단위 환산은 한 번도 동작한 적이 없다
+
+`convertPriceUnified`의 Strategy 1·2(DB 환산)는 브라우저에서 키가 없어 늘 예외로
+빠졌고 `try/catch` 폴백이 받아 왔다. 호출자가 클라이언트 둘뿐이라 **서버에서
+실행된 적이 없다.** 죽은 경로라 걷어냈다.
+
+되살리려면 API 경로로 빼야 하고, **매칭 결과가 달라지므로 별도 작업**이다.
+
+### 남은 권고 — GCP 쪽 (챗봇 프로젝트 소관)
+
+```
+API 키 환경 제한(IP·리퍼러)   7개 전부 없음 — 유출 시 어디서든 호출 가능
+조직 정책                    disableServiceAccountKeyCreation 미설정
+                             serviceAccountKeyExpiryHours 미설정
+                             (조직이 없어 프로젝트 단위로 걸어야 한다)
+필수 연락처                  API 자체가 비활성 — 사실상 미설정
+예산 알림                    API 자체가 비활성 — 미설정
+```
+
+⚠️ **예산 알림이 없어서** 26년 상반기 Artifact Registry 90GB(월 ₩13,371)가
+몇 달간 눈에 안 띄었다. 권고문의 "소비 급증이 자격증명 침해의 첫 신호"가
+정확히 그 사례다.
+
+키가 0개인 지금 `disableServiceAccountKeyCreation`을 거는 것은 **끊길 것이 없어
+가장 싸다.** 나중에 키가 생긴 뒤에는 못 건다.

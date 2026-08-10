@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { UnitConversion } from '@/lib/unit-conversion-db'
+// ⚠️ **타입만** 가져온다. 값으로 가져오면 이 모듈이 통째로 클라이언트 번들에
+//    끌려 들어가 service_role로 DB를 붙는 코드가 브라우저에 실린다 (2026-08-10).
+import type { UnitConversion } from '@/lib/unit-conversion-db'
 
 export default function UnitConversionsPage() {
   const [conversions, setConversions] = useState<UnitConversion[]>([])
