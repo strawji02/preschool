@@ -117,6 +117,27 @@ describeNaverError       원본 JSON 대신 사람이 읽는 문장 + permanent 
 결과라 재시도 버튼은 거짓 희망이다. 중단 사실은 모듈 변수로 한 번만
 확인한다(품목 200개마다 헛클릭하지 않게).
 
+#### ⚠️ 링크 대상은 `search.naver.com`이다 — 쇼핑 전용 도메인이 아니다
+
+처음에 `search.shopping.naver.com`을 넣어 배포했고, 검수자 화면에서
+**차단 페이지**가 떴다. 실측:
+
+```
+search.shopping.naver.com/search/all?query=…       418 · "접속이 일시적으로 제한"
+search.shopping.naver.com/…&frm=NVSCTAB            CAPTCHA "보안 확인을 완료해"
+search.naver.com/search.naver?where=shop&query=…   200 · 네이버 가격비교 정상
+```
+
+차단 페이지가 사유로 "상품 구매, 탐색과 무관한 **외부 이벤트를 통한 접속**"을
+든다. 우리 링크가 정확히 그것이다. 네이버 자신의 쇼핑 탭도 같은 도메인으로
+가지만 `frm=NVSCTAB` + naver.com 리퍼러가 붙는데, 우리는 `rel="noreferrer"`이고
+그래도 CAPTCHA가 떴다.
+
+통합검색은 막지 않고 **네이버 가격비교** 섹션에 시중가가 나온다(실측:
+`지리산 건조 취나물 200g 26,000원 · 배송비 4,000원`). 시중가 확인이라는
+목적에는 충분하다. `search.shopping.naver.com`으로 되돌리지 말 것 —
+테스트(`naver-shopping.test.ts`)가 막고 있다.
+
 ★ **원본 응답 본문을 화면에 흘리지 않는다.** 이전에는 120자를 그대로 보여 줘서
 검수자가 `{ "errorCode": "SE05" }`를 봤다. 그걸 보고 할 수 있는 일이 없다.
 정규화 계층(`normalizeNaverItems`)은 남겨 뒀다 — 대체 API를 붙일 때 재사용한다.

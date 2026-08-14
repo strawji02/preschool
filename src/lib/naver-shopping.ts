@@ -97,10 +97,24 @@ export function normalizeNaverItems(raw: unknown): ReferenceProduct[] {
 /* ────────────────────────────────────────────────────────── */
 
 /**
- * 네이버 쇼핑 검색 페이지 주소 — 검수자가 새 탭에서 직접 확인한다.
+ * 네이버 검색(쇼핑) 페이지 주소 — 검수자가 새 탭에서 직접 확인한다.
  *
  * 원래 이 카드가 자동화하려던 작업이 "품명을 네이버에서 검색 → 이미지 확인 →
  * 시중가 점검"이었다. API가 죽었으니 그 수동 작업으로 되돌려 주는 게 최선이다.
+ *
+ * ★ **`search.shopping.naver.com`을 쓰지 않는다.** 그게 더 정확한 주소로
+ * 보이지만 네이버가 외부 유입을 차단한다 — 2026-08-15에 그걸 넣어 배포했다가
+ * 검수자 화면에 차단 페이지가 떴다. 실측:
+ *
+ * ```
+ * search.shopping.naver.com/search/all?query=…       418 · "접속이 일시적으로 제한"
+ * search.shopping.naver.com/…&frm=NVSCTAB            CAPTCHA "보안 확인을 완료해"
+ * search.naver.com/search.naver?where=shop&query=…   200 · 네이버 가격비교 정상
+ * ```
+ *
+ * 차단 페이지가 사유로 "상품 구매, 탐색과 무관한 **외부 이벤트를 통한 접속**"을
+ * 든다. 우리 링크가 정확히 그것이다. 네이버 통합검색(`search.naver.com`)은
+ * 막지 않고, 그 안에 **네이버 가격비교** 섹션이 있어 시중가 확인이 된다.
  *
  * ⚠️ **`encodeURIComponent`를 쓴다.** 거래명세표 품명에는 `[K]취나물,국산`처럼
  * 대괄호·쉼표가 들어 있어 그대로 붙이면 주소가 깨진다.
@@ -110,7 +124,7 @@ export function normalizeNaverItems(raw: unknown): ReferenceProduct[] {
 export function naverShoppingSearchUrl(query: string | null | undefined): string {
   const q = (query ?? '').trim()
   if (!q) return ''
-  return `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q)}`
+  return `https://search.naver.com/search.naver?where=shop&query=${encodeURIComponent(q)}`
 }
 
 /** 검수자에게 보여 줄 오류 설명 */

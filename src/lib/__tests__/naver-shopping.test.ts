@@ -71,10 +71,26 @@ describe('normalizeNaverItems', () => {
   분이 `"errorCode": "SE05"`를 보고 할 수 있는 일이 없다.
 */
 describe('naverShoppingSearchUrl', () => {
-  it('품명을 인코딩해 네이버 쇼핑 검색 주소를 만든다', () => {
+  it('품명을 인코딩해 네이버 검색(쇼핑) 주소를 만든다', () => {
     expect(naverShoppingSearchUrl('취나물')).toBe(
-      'https://search.shopping.naver.com/search/all?query=%EC%B7%A8%EB%82%98%EB%AC%BC'
+      'https://search.naver.com/search.naver?where=shop&query=%EC%B7%A8%EB%82%98%EB%AC%BC'
     )
+  })
+
+  /*
+    ⚠️ **`search.shopping.naver.com`으로 되돌리지 마세요.** 그게 더 "정확한"
+    주소로 보이지만 네이버가 외부 유입을 막습니다 — 2026-08-15에 실제로 넣어
+    배포했다가 검수자 화면에서 차단 페이지가 떴습니다.
+
+      search.shopping.naver.com/search/all?query=…              418 · "접속이 일시적으로 제한"
+      search.shopping.naver.com/…&frm=NVSCTAB                   CAPTCHA "보안 확인을 완료해 주세요"
+      search.naver.com/search.naver?where=shop&query=…          200 · 네이버 가격비교 정상
+
+    차단 페이지의 사유 목록에 "상품 구매, 탐색과 무관한 **외부 이벤트를 통한
+    접속**"이 있습니다. 우리 링크가 정확히 그것입니다.
+  */
+  it('네이버가 외부 유입을 막는 쇼핑 전용 도메인은 쓰지 않는다', () => {
+    expect(naverShoppingSearchUrl('취나물')).not.toContain('search.shopping.naver.com')
   })
 
   it('거래명세표 품명의 대괄호·쉼표·공백도 인코딩한다', () => {
