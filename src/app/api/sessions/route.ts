@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest) {
     const { data, error } = await supabase
       .from('audit_sessions')
       .select(
-        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, pending_items, unmatched_items, current_step, created_at, updated_at',
+        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, pending_items, unmatched_items, current_step, created_at, updated_at, price_book_period',
       )
       .eq('is_archived', false)
       .gt('total_items', 0)

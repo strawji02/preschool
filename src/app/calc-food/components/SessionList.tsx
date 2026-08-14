@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { Folder, FileText, MoreVertical, Trash2, Edit3, Loader2, CheckSquare, Square } from 'lucide-react'
 import { formatNumber } from '@/lib/format'
+import { formatPeriodLabel } from './PriceBookPeriodPicker'
 
 interface SessionSummary {
   id: string
@@ -21,6 +22,8 @@ interface SessionSummary {
   current_step: 'image_preview' | 'matching' | 'report' | 'completed' | string
   created_at: string
   updated_at: string
+  /** 신세계 단가 기준월 `YYYY-MM`. null이면 products 단가 (comparison.md §9) */
+  price_book_period?: string | null
 }
 
 interface SessionListProps {
@@ -246,6 +249,15 @@ export function SessionList({ onSelect }: SessionListProps) {
                     <span>품목 {formatNumber(s.total_items)}</span>
                     {s.total_items > 0 && (
                       <span>매칭 {formatNumber(s.matched_items)}/{formatNumber(s.total_items)} ({matchProgress}%)</span>
+                    )}
+                    {/*
+                      어느 달 단가로 비교한 세션인지 (comparison.md §9). 같은
+                      유치원을 두 달 기준으로 비교해 두면 목록에서 구분해야 한다.
+                    */}
+                    {s.price_book_period && (
+                      <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                        단가 {formatPeriodLabel(s.price_book_period)}
+                      </span>
                     )}
                     <span className="text-gray-400">· {formatRelativeTime(s.updated_at)}</span>
                   </div>

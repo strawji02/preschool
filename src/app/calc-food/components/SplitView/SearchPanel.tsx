@@ -529,6 +529,15 @@ export function SearchPanel({
                     <span className="text-lg font-bold text-orange-600">
                       {formatCurrency(product.standard_price)}
                     </span>
+                    {/* 그 달 단가표에 없는 품목 — 버리지 않고 알린다 (comparison.md §9) */}
+                    {product.priceBookMissing && (
+                      <span
+                        className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                        title="고른 기준월 단가표에 이 품목이 없습니다. 신세계 DB 단가를 그대로 보여 줍니다."
+                      >
+                        단가표에 없음
+                      </span>
+                    )}
                     {product.pricePerGram && (
                       <span className="text-xs text-gray-500">
                         {product.pricePerGram.toFixed(1)}원/g

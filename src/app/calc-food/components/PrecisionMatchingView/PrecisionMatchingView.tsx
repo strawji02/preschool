@@ -2792,6 +2792,18 @@ function CandidateCard({
         {/* 가격 / 환산단가 / 면세 */}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
           <span className="font-bold text-gray-900">{formatCurrency(candidate.standard_price)}</span>
+          {/*
+            그 달 단가표에 없는 품목 (comparison.md §9). **버리지 않고 알린다** —
+            버리면 검수자가 손으로도 못 고른다. 단가는 products 값 그대로다.
+          */}
+          {candidate.priceBookMissing && (
+            <span
+              className="rounded bg-amber-100 px-1 py-0 text-[10px] font-medium text-amber-800"
+              title="고른 기준월 단가표에 이 품목이 없습니다. 신세계 DB 단가를 그대로 보여 줍니다."
+            >
+              단가표에 없음
+            </span>
+          )}
           {perKg && <span className="text-gray-600">· ₩{formatNumber(perKg)}/kg</span>}
           {candidate.tax_type && (
             <span

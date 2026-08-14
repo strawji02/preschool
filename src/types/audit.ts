@@ -30,6 +30,13 @@ export interface SupplierMatch {
   subcategory?: string      // 세부 카테고리
   storage_temp?: string     // 보관 온도 (실온/냉장/냉동)
   _funnelReasons?: string[] // 깔때기 알고리즘 감점 사유 (선택적)
+  /**
+   * 세션 기준월 단가표에 **이 품목이 없다** (comparison.md §9).
+   *
+   * ⚠️ 후보에서 버리지 않는다 — 버리면 검수자가 손으로도 못 고른다. 단가는
+   * `products` 값이 그대로 남아 있으니 화면이 "확인 필요"로 알린다.
+   */
+  priceBookMissing?: boolean
 }
 
 // 절감액 계산 결과
@@ -143,6 +150,13 @@ export interface MatchCandidate {
   spec_unit?: string
   supplier: Supplier  // 추가: 어느 공급사의 가격인지
   match_score: number
+  /**
+   * 세션 기준월 단가표에 **이 품목이 없다** (comparison.md §9).
+   *
+   * ⚠️ 후보에서 버리지 않는다 — 버리면 검수자가 손으로도 못 고른다. 단가는
+   * `products` 값이 그대로 남아 있으니, 화면이 "확인 필요"로 알린다.
+   */
+  priceBookMissing?: boolean
 }
 
 // 감사 항목 (DB 레코드)
@@ -206,6 +220,8 @@ export interface AuditSession {
   total_loss: number
   created_at: string
   updated_at: string
+  /** 신세계 단가 기준월 `YYYY-MM`. null이면 products 단가 (comparison.md §9) */
+  price_book_period?: string | null
 }
 
 // Gemini OCR Request/Response - supplier 제거 (OCR은 공급사와 무관)
@@ -241,6 +257,11 @@ export interface InitSessionRequest {
   total_pages: number
   total_files?: number          // 원본 파일 수 (2026-04-26 추가)
   kindergarten_name?: string    // 사용자 편집 업체명 (2026-04-26 추가)
+  /**
+   * 신세계 단가 기준월 `YYYY-MM` (comparison.md §9).
+   * 없으면 products.standard_price를 쓰는 기존 동작.
+   */
+  price_book_period?: string | null
 }
 
 export interface InitSessionResponse {

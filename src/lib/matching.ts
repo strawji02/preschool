@@ -1233,23 +1233,31 @@ export async function findComparisonMatches(
           .filter((c) => !blockedIds.has(c.id))
           .map((c) => ({ ...c, ...(map.get(c.id) ?? {}) }))
 
-        /*
-          ★ **기준월 단가로 덮는다** (docs/systems/comparison.md §9).
-
-          여기가 모든 검색 경로(hybrid·vector·bm25·fuzzy·폴백)가 모이는 자리다.
-          위 enrichment가 이미 `product_code`를 붙여 놓아 단가표와 바로 붙는다.
-
-          ⚠️ 후보 검색은 `products`로 하고 **가격만** 그 달 단가표에서 가져온다.
-          임베딩·search_vector는 품목명에서 나오고 품목명은 달마다 안 바뀐다.
-
-          ⚠️ 그 달에 없는 품목은 **버리지 않는다** (§4 원칙). 원래 단가를 두고
-          `priceBookMissing`만 세워 검수자가 판단하게 한다 — 버리면 손으로도
-          못 고르고, 0원으로 두면 절감액이 조용히 부풀려진다.
-        */
-        if (priceBookPeriod) {
-          ssg_candidates = await withPeriodPrices(ssg_candidates, priceBookPeriod)
-        }
       }
+    }
+
+    /*
+      ★ **기준월 단가로 덮는다** (docs/systems/comparison.md §9).
+
+      여기가 모든 검색 경로(hybrid·vector·bm25·fuzzy·폴백)가 모이는 자리다.
+      위 enrichment가 `product_code`를 붙여 놓아 단가표와 바로 붙는다.
+
+      ⚠️ **enrichment 블록 밖이다.** 안에 두면 그 조회가 비었을 때 치환이 조용히
+      건너뛰어져 낡은 단가로 절감액이 나온다. 밖에 두면 `product_code`가 없는
+      후보는 `priceBookMissing`으로 드러난다 — 조용히 틀리는 것보다 낫다.
+
+      ⚠️ 후보 검색은 `products`로 하고 **가격만** 그 달 단가표에서 가져온다.
+      임베딩·search_vector는 품목명에서 나오고 품목명은 달마다 안 바뀐다.
+
+      ⚠️ 그 달에 없는 품목은 **버리지 않는다** (§4 원칙). 원래 단가를 두고
+      `priceBookMissing`만 세워 검수자가 판단하게 한다 — 버리면 손으로도
+      못 고르고, 0원으로 두면 절감액이 조용히 부풀려진다.
+
+      ★ 치환은 `ssg_top` 선택(아래)보다 **앞이다.** 뒤에 두면 매칭이 낡은 단가로
+      정해지고 절감액도 낡는다 — 고치려는 버그 그 자체다.
+    */
+    if (priceBookPeriod) {
+      ssg_candidates = await withPeriodPrices(ssg_candidates, priceBookPeriod)
     }
 
     // ── 토큰 매칭 + 원산지 가중치 검증 (2026-05-04, 2026-05-11 origin 필드 우선) ──

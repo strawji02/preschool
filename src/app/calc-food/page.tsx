@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { COMPARISON_VERSION } from '@/features/shared/version'
 import { useAuditSession } from './hooks/useAuditSession'
 import { SessionScopeProvider } from './hooks/useSessionScope'
+import { PriceBookPeriodPicker, formatPeriodLabel } from './components/PriceBookPeriodPicker'
 import { InvoiceReviewModal } from './components/InvoiceReviewModal'
 
 // SSR 비활성화 - PDF.js가 클라이언트에서만 동작
@@ -68,6 +69,9 @@ export default function CalcFoodPage() {
   const {
     state,
     processFiles,
+    // 신세계 단가 기준월 (comparison.md §9)
+    priceBookPeriod,
+    setPriceBookPeriod,
     setCurrentPage,
     updateItemMatch,
     reset,
@@ -149,6 +153,27 @@ export default function CalcFoodPage() {
               </span>
             </h1>
             {/* Phase 2: 단계 표시는 WorkflowStepper로 이동 */}
+
+            {/*
+              ★ 진행 중에는 **바꿀 수 없다** (comparison.md §9). 매칭이 이미 그 달
+              단가로 후보를 저장했으므로, 지금 바꿔도 계산된 절감액은 안 바뀐다.
+              그런데도 고를 수 있게 두면 "바꿨는데 왜 그대로냐"가 된다.
+            */}
+            {state.status !== 'empty' && (
+              <div
+                className="flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-xs text-gray-600"
+                title={
+                  priceBookPeriod
+                    ? `${priceBookPeriod} 신세계 단가표로 비교합니다 (세션 시작 시 확정)`
+                    : 'products 테이블 단가로 비교합니다 — 2026-05-09 이후 갱신되지 않았습니다'
+                }
+              >
+                <span className="text-gray-400">단가 기준</span>
+                <span className="font-medium">
+                  {priceBookPeriod ? formatPeriodLabel(priceBookPeriod) : '신세계 DB'}
+                </span>
+              </div>
+            )}
           </div>
 
           {state.status !== 'empty' && (
@@ -172,6 +197,14 @@ export default function CalcFoodPage() {
       <main>
         {state.status === 'empty' && (
           <>
+            {/*
+              ★ **업로드 앞에** 고른다 (comparison.md §9). 매칭이 시작되면 후보
+              단가가 그때 값으로 저장되므로, 뒤에서 바꿔도 이미 계산된 절감액은
+              바뀌지 않는다.
+            */}
+            <div className="px-4 pt-4">
+              <PriceBookPeriodPicker value={priceBookPeriod} onChange={setPriceBookPeriod} />
+            </div>
             <UploadZone onFileSelect={processFiles} />
             <SessionList onSelect={loadSession} />
           </>

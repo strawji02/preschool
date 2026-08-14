@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useReducer, useCallback, useMemo, useEffect, useRef, useState } from 'react'
 import type { ComparisonItem, MatchCandidate, Supplier, SupplierMatch, SavingsResult, SupplierScenario } from '@/types/audit'
 import type { PageImage } from '@/lib/pdf-processor'
 import { extractPagesFromPDF, imageFileToPage, extractBase64, isPDF, isImage } from '@/lib/pdf-processor'
@@ -809,6 +809,21 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 export function useAuditSession() {
   const [state, dispatch] = useReducer(auditReducer, initialState)
 
+  /*
+    신세계 단가 기준월 (comparison.md §9). 세션을 만들 때 함께 저장하고, 그 뒤의
+    매칭·절감액이 그 달 단가를 쓴다.
+
+    ⚠️ **ref도 같이 든다.** 세션 생성은 async 흐름 안에서 일어나므로 state만
+    쓰면 클로저가 예전 값을 잡는다 — 사용자가 고른 달이 조용히 무시된다.
+    ⚠️ null은 **기존 동작**이다 (products 단가). 지금까지의 세션 233개가 그렇다.
+  */
+  const [priceBookPeriod, setPriceBookPeriodState] = useState<string | null>(null)
+  const priceBookPeriodRef = useRef<string | null>(null)
+  const setPriceBookPeriod = useCallback((period: string | null) => {
+    priceBookPeriodRef.current = period
+    setPriceBookPeriodState(period)
+  }, [])
+
   // state ref — async/setTimeout 콜백에서 최신 state 접근용 (closure 캡처 방지)
   const stateRef = useRef(state)
   useEffect(() => {
@@ -831,7 +846,14 @@ export function useAuditSession() {
         total_pages: number
         current_step: string
         page_totals: PageTotal[] | null
+        price_book_period: string | null
       }
+      /*
+        이어가는 세션의 단가 기준월을 되살린다 (comparison.md §9). 안 되살리면
+        재매칭·추가 업로드가 **다른 달** 단가를 쓰게 되어 한 세션 안에서 단가가
+        섞인다.
+      */
+      setPriceBookPeriod(session.price_book_period ?? null)
       const items = (data.items as ComparisonItem[]) ?? []
       const pageTotals = (session.page_totals ?? []) as PageTotal[]
       const pageSourceFiles: string[] = []
@@ -1392,6 +1414,8 @@ export function useAuditSession() {
         body: JSON.stringify({
           name: fileName,
           total_pages: allPages.length,
+          // 이 세션이 어느 달 신세계 단가로 비교하는지 (comparison.md §9)
+          price_book_period: priceBookPeriodRef.current,
         }),
       })
 
@@ -1575,7 +1599,12 @@ export function useAuditSession() {
       const initRes = await fetch('/api/session/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: preview.fileName, total_pages: 1 }),
+        body: JSON.stringify({
+          name: preview.fileName,
+          total_pages: 1,
+          // 이 세션이 어느 달 신세계 단가로 비교하는지 (comparison.md §9)
+          price_book_period: priceBookPeriodRef.current,
+        }),
       })
       if (!initRes.ok) throw new Error('세션 초기화 실패')
       const initData = await initRes.json()
@@ -1990,6 +2019,9 @@ export function useAuditSession() {
   return {
     state,
     processFiles,
+    // 신세계 단가 기준월 (comparison.md §9) — 업로드 전에 고른다
+    priceBookPeriod,
+    setPriceBookPeriod,
     setCurrentPage,
     updateItemMatch,
     reset,

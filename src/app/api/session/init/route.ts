@@ -32,6 +32,22 @@ export async function POST(request: NextRequest) {
       total_pages: body.total_pages,
       current_step: 'image_preview',
     }
+    /*
+      신세계 단가 기준월 (comparison.md §9). 이 세션의 매칭·절감액이 그 달 단가를
+      쓴다. 넣지 않으면 NULL — products.standard_price를 쓰는 기존 동작.
+
+      ⚠️ 형식이 틀리면 **막는다.** 통과시키면 DB CHECK가 거부해 세션 생성 자체가
+      실패하고, 사용자는 이유를 알 수 없다.
+    */
+    if (body.price_book_period) {
+      if (!/^\d{4}-\d{2}$/.test(body.price_book_period)) {
+        return NextResponse.json<InitSessionResponse>(
+          { success: false, message: '단가 기준월을 YYYY-MM 형식으로 골라 주세요.' },
+          { status: 400 }
+        )
+      }
+      insertPayload.price_book_period = body.price_book_period
+    }
     if (body.kindergarten_name) insertPayload.kindergarten_name = body.kindergarten_name
     if (body.total_files != null) insertPayload.total_files = body.total_files
 

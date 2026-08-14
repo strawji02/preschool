@@ -23,7 +23,7 @@ export async function GET(
     const { data: session, error: sessErr } = await supabase
       .from('audit_sessions')
       .select(
-        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, current_step, page_totals, proposal_extras, created_at, updated_at',
+        'id, name, kindergarten_name, supplier, status, total_pages, total_files, total_items, matched_items, current_step, page_totals, proposal_extras, created_at, updated_at, price_book_period',
       )
       .eq('id', id)
       .single()
