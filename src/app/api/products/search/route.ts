@@ -5,6 +5,7 @@ import { expandWithSynonyms, FOOD_SYNONYMS } from '@/lib/synonyms'
 import { dualNormalize, extractCoreKeyword } from '@/lib/preprocessing'
 import { getTokenMatchRatio, SUPPLIER_BRANDS, GENERIC_MODIFIERS, isProcessedProduct, cleanProductQuery, tokenize } from '@/lib/token-match'
 import { sanitizeOrFilterValue } from '@/lib/api-error'
+import { withPeriodPrices } from '@/features/shared/price-book'
 import type { SearchProductsResponse, MatchCandidate, Supplier } from '@/types/audit'
 
 interface RpcResult {
@@ -558,9 +559,24 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    /*
+      ★ **세션 기준월 단가로 덮는다** (docs/systems/comparison.md §9).
+
+      후보 검색은 `products`(임베딩·search_vector)로 하고 **가격만** 그 달
+      단가표에서 가져온다. 임베딩은 품목명에서 나오고 품목명은 달마다 안 바뀐다.
+
+      ⚠️ `priceBookPeriod`가 없으면 **한 건도 건드리지 않는다.** 기존 세션
+      233개의 절감액이 그대로 유지돼야 한다 — 파라미터를 빠뜨렸을 때의 기본값이
+      "옛 동작"이라 안전한 쪽으로 넘어진다.
+    */
+    const priced = await withPeriodPrices(
+      products as unknown as (MatchCandidate & { product_code?: string | null })[],
+      searchParams.get('priceBookPeriod')
+    )
+
     return NextResponse.json<SearchProductsResponse>({
       success: true,
-      products: products as unknown as MatchCandidate[],
+      products: priced as unknown as MatchCandidate[],
     })
   } catch (error) {
     console.error('Search error:', error)

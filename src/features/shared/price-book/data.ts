@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkPriceBookPeriod, type PriceBookItem } from './parse'
+import { applyPeriodPrices, type PricedRow } from './apply'
 
 /**
  * 신세계 월별 단가표 저장·조회 — docs/systems/settlement/단가표.md §21
@@ -167,4 +168,36 @@ export async function listPriceBooks(): Promise<PriceBookSummary[]> {
     uploadedAt: r.uploaded_at,
     uploadedBy: r.uploaded_by ?? '',
   }))
+}
+
+/**
+ * 세션의 기준월 단가를 읽어 덮는다 — docs/systems/comparison.md §9
+ *
+ * `applyPeriodPrices`(순수)에 맵을 물어다 주는 서버 쪽 껍데기다.
+ *
+ * ⚠️ **`period`가 없으면 조회조차 하지 않는다.** 기존 세션은 지금까지의 절감액을
+ * 그대로 유지해야 한다 — 조회 실패로 단가가 비는 일도 없어야 한다.
+ */
+export async function withPeriodPrices<T extends PricedRow>(
+  rows: readonly T[],
+  period: string | null | undefined
+): Promise<(T & { priceBookMissing?: boolean })[]> {
+  if (!period) return applyPeriodPrices(rows, null)
+
+  const codes = rows.map((r) => r.product_code ?? '').filter((c) => c !== '')
+  const lookup = await loadPriceLookup(period, codes)
+  return applyPeriodPrices(rows, lookup)
+}
+
+/** 세션의 기준월을 읽는다. 없으면 null — 기존 동작 */
+export async function loadSessionPricePeriod(sessionId: string): Promise<string | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('audit_sessions')
+    .select('price_book_period')
+    .eq('id', sessionId)
+    .maybeSingle()
+  // 조회가 실패해도 막지 않는다 — 기존 동작(NULL)으로 떨어진다
+  if (error || !data) return null
+  return data.price_book_period ?? null
 }

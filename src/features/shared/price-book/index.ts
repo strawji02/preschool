@@ -25,12 +25,19 @@ export {
 } from './parse'
 
 export {
+  applyPeriodPrices,
+  type PricedRow,
+} from './apply'
+
+export {
   PriceBookError,
   savePriceBook,
   loadPriceLookup,
   loadPriceBookPrices,
   listPriceBooks,
   previousPeriod,
+  withPeriodPrices,
+  loadSessionPricePeriod,
   type PriceBookSummary,
   type PriceLookup,
 } from './data'
