@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { normalizeNaverItems, type ReferenceProduct } from '@/lib/naver-shopping'
+import { normalizeNaverItems, describeNaverError, type ReferenceProduct } from '@/lib/naver-shopping'
 
 /**
  * 시중 참고자료 검색 — 네이버 쇼핑 API 프록시
@@ -20,7 +20,16 @@ export interface ReferenceSearchResponse {
   configured: boolean // 네이버 키 설정 여부
   items: ReferenceProduct[]
   query?: string
+  /**
+   * 사람이 읽는 한 문장. **네이버 원본 응답을 섞지 않는다** —
+   * 검수자가 `"errorCode": "SE05"`를 보고 할 수 있는 일이 없다.
+   */
   error?: string
+  /**
+   * true면 재시도해도 같은 결과 — 화면이 "다시 검색"을 감추고
+   * 네이버 직접 검색 버튼으로 안내한다. (2026-08-15 쇼핑 API 중단)
+   */
+  unavailable?: boolean
 }
 
 const NAVER_ENDPOINT = 'https://openapi.naver.com/v1/search/shop.json'
@@ -61,13 +70,23 @@ export async function GET(request: NextRequest) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
+      const info = describeNaverError(res.status, body)
+      /*
+        진단 정보는 **서버 로그에만** 남긴다. 화면에는 info.message만 간다.
+        (2026-08-15) 네이버가 쇼핑 검색을 중단해 이 경로가 상시로 타므로,
+        원인 추적은 로그에서 한다.
+      */
+      console.warn(
+        `[reference-search] 네이버 응답 실패 status=${res.status} code=${info.code ?? '-'} q="${query}"`
+      )
       return NextResponse.json<ReferenceSearchResponse>(
         {
           success: false,
           configured: true,
           items: [],
           query,
-          error: `네이버 API 오류 (${res.status}) ${body.slice(0, 120)}`,
+          error: info.message,
+          unavailable: info.permanent,
         },
         { status: 502 }
       )

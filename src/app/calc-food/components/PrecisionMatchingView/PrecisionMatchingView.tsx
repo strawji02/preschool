@@ -26,6 +26,7 @@ import {
 import { ssgUnitWeightG } from '@/lib/spec-parser'
 import { resolveInvoiceUnitWeightG } from '@/lib/invoice-unit-weight'
 import type { ReferenceProduct } from '@/lib/naver-shopping'
+import { naverShoppingSearchUrl } from '@/lib/naver-shopping'
 import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
 import { computeMatchingKpi } from '@/lib/matching-kpi'
 import { useSupplyRate } from '../../hooks/useSupplyRate'
@@ -1462,6 +1463,31 @@ function CopyNameButton({ text, dark = false }: { text: string; dark?: boolean }
   )
 }
 
+/*
+  (2026-08-15) 네이버 쇼핑 API 중단을 **한 번만 확인한다.**
+
+  참고 패널은 품목을 넘길 때마다 초기화된다(`useEffect [item.id]`). 그대로 두면
+  검수자가 품목 200개마다 "검색"을 눌러 같은 실패를 200번 본다. 중단은 품목과
+  무관한 사실이므로 탭이 열려 있는 동안 기억해, 처음부터 네이버 직접 검색
+  버튼을 보여 준다.
+
+  ⚠️ 모듈 변수를 쓰는 이유 — 이건 사용자 데이터가 아니라 **외부 API의 상태**다.
+  세션·품목과 무관하고, 새로고침하면 다시 확인한다(복구되면 자동으로 풀린다).
+*/
+let naverShopOutage: { message: string } | null = null
+
+/** 참고 패널 초기 상태 — 이미 확인된 중단 사실을 물려받는다 */
+function initialRefState() {
+  return {
+    loading: false,
+    loaded: naverShopOutage !== null,
+    configured: true,
+    items: [] as ReferenceProduct[],
+    error: naverShopOutage?.message,
+    unavailable: naverShopOutage !== null,
+  }
+}
+
 function WebReferencePanel({
   state,
   onSearch,
@@ -1474,14 +1500,22 @@ function WebReferencePanel({
     configured: boolean
     items: ReferenceProduct[]
     error?: string
+    /** 재시도해도 같은 결과 — "다시 검색"을 감추고 네이버 직접 검색으로 안내한다 */
+    unavailable?: boolean
   }
   onSearch: (q?: string) => void
   query?: string | null
   invoiceUnitPrice?: number | null
 }) {
-  const { loading, loaded, configured, items, error } = state
+  const { loading, loaded, configured, items, error, unavailable } = state
   // (2026-07-16) 사용자 직접 검색어 입력 — 기본값은 품명, 자유롭게 수정 후 검색 가능
   const [term, setTerm] = useState<string>(query ?? '')
+  /*
+    (2026-08-15) 네이버가 쇼핑 검색 API를 중단했다. 자동 조회가 불가능해지면
+    **검수자가 원래 손으로 하던 네이버 검색**으로 되돌려 준다.
+    입력창의 검색어를 그대로 쓰므로, 품명을 다듬은 뒤 눌러도 반영된다.
+  */
+  const manualSearchUrl = naverShoppingSearchUrl(term)
   // 품목 전환 시 입력창을 새 품명으로 리셋
   useEffect(() => {
     setTerm(query ?? '')
@@ -1512,14 +1546,37 @@ function WebReferencePanel({
           placeholder="검색어 입력 (예: 두부 300g)"
           className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-emerald-500"
         />
-        <button
-          type="button"
-          onClick={runSearch}
-          disabled={loading || !term.trim()}
-          className="shrink-0 rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {loading ? '검색 중…' : loaded ? '다시 검색' : '검색'}
-        </button>
+        {/*
+          자동 조회가 영구히 불가능하면(`unavailable`) "다시 검색"을 없앤다.
+          404/SE05는 몇 번 눌러도 같은 결과라 재시도 버튼은 거짓 희망이다.
+          대신 새 탭으로 네이버 쇼핑 검색을 연다.
+        */}
+        {unavailable ? (
+          <a
+            href={manualSearchUrl || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!manualSearchUrl}
+            className={cn(
+              'inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold text-white transition',
+              manualSearchUrl
+                ? 'bg-[#03C75A] hover:bg-[#02b350]' // 네이버 브랜드 초록 — 외부로 나간다는 신호
+                : 'pointer-events-none bg-gray-300',
+            )}
+          >
+            네이버에서 검색
+            <ExternalLink size={11} />
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={runSearch}
+            disabled={loading || !term.trim()}
+            className="shrink-0 rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {loading ? '검색 중…' : loaded ? '다시 검색' : '검색'}
+          </button>
+        )}
       </div>
 
       {!loaded && !loading && (
@@ -1536,7 +1593,16 @@ function WebReferencePanel({
         </p>
       )}
 
-      {loaded && configured && error && <p className="text-[11px] text-red-500">{error}</p>}
+      {/*
+        `unavailable`은 검수자가 잘못한 게 아니라 네이버 쪽 사정이다 —
+        빨간 오류가 아니라 안내 색(amber)으로 둔다. 빨강을 남발하면
+        정말 고쳐야 하는 경고가 묻힌다.
+      */}
+      {loaded && configured && error && (
+        <p className={cn('text-[11px] leading-relaxed', unavailable ? 'text-amber-700' : 'text-red-500')}>
+          {error}
+        </p>
+      )}
 
       {loaded && configured && !error && items.length === 0 && (
         <p className="text-[11px] text-gray-400">
@@ -1658,9 +1724,10 @@ function ShinsegaeMatching({
     configured: boolean
     items: ReferenceProduct[]
     error?: string
-  }>({ loading: false, loaded: false, configured: true, items: [] })
+    unavailable?: boolean
+  }>(() => initialRefState())
   useEffect(() => {
-    setRefState({ loading: false, loaded: false, configured: true, items: [] })
+    setRefState(initialRefState())
   }, [item.id])
   const loadReference = useCallback(async (queryOverride?: string) => {
     // 사용자가 입력창에 직접 입력한 검색어(queryOverride)가 있으면 우선, 없으면 품명
@@ -1676,7 +1743,12 @@ function ShinsegaeMatching({
         configured: data.configured ?? true,
         items: Array.isArray(data.items) ? data.items : [],
         error: data.error,
+        unavailable: data.unavailable === true,
       })
+      // 중단 사실을 기억 — 다음 품목에서는 바로 네이버 직접 검색을 보여 준다
+      if (data.unavailable === true && typeof data.error === 'string') {
+        naverShopOutage = { message: data.error }
+      }
     } catch {
       setRefState((s) => ({ ...s, loading: false, loaded: true, error: '시중 검색에 실패했습니다' }))
     }
