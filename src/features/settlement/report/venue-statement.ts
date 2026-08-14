@@ -30,6 +30,8 @@ export interface VenueStatementItem {
   /** `YYYY-MM-DD` */
   date: string
   restaurantName: string
+  /** 신세계 단가표와 붙이는 열쇠 (docs §21). 원산지를 이걸로 찾는다. */
+  productCode?: string
   productName: string
   spec: string
   unit: string

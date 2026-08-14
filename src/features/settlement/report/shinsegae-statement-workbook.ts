@@ -61,7 +61,7 @@ const COL = {
   supply: 28, // AB17
   vat: 33, // AG17
   total: 35, // AI17
-  origin: 41, // AO17  ⚠️ 비운다 (docs §19)
+  origin: 41, // AO17  단가표에서 채운다 (docs §21). 못 찾으면 빈칸
   taxLabel: 20, // T18 과세 / T19 면세
   taxAmount: 23, // W18/W19
   daySupply: 28, // AB18
@@ -285,7 +285,12 @@ function writeBlock(
     ws.getCell(r, COL.supply).value = formatStatementAmount(item.supply)
     ws.getCell(r, COL.vat).value = formatStatementAmount(item.vat)
     ws.getCell(r, COL.total).value = formatStatementAmount(item.total)
-    ws.getCell(r, COL.origin).value = null // ⚠️ 원산지는 만들지 않는다 (docs §19)
+    /*
+      ★ **원산지는 신세계 월별 단가표에서만 온다** (docs §21).
+      못 찾으면 빈칸이다 — 품목명에서 추정하면 **틀린 원산지를 유치원에 주는
+      문서**가 된다 (§19 원칙).
+    */
+    ws.getCell(r, COL.origin).value = item.origin || null
     cursor = r + 1
   }
 

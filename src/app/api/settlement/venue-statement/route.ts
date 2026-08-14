@@ -3,6 +3,7 @@ import { requireApiUser } from '@/features/shared/auth'
 import {
   buildShinsegaeStatement,
   isExcelUpload,
+  loadPriceLookup,
   loadSettlementMaster,
   NO_SOURCE_MESSAGE,
   resolveSources,
@@ -108,6 +109,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    /*
+      ★ **원산지는 신세계 월별 단가표에서 온다** (docs §21).
+      기본은 정산월 단가표다. 다른 달을 쓰려면 `priceBookPeriod`로 넘긴다 —
+      단가표가 늦게 오거나 과거 달을 재발행할 때 필요하다.
+    */
+    const priceBookPeriod = String(form.get('priceBookPeriod') ?? '') || period
+    const originByCode = new Map<string, string>()
+    for (const [code, v] of await loadPriceLookup(
+      priceBookPeriod,
+      items.map((i) => i.productCode)
+    )) {
+      if (v.origin) originByCode.set(code, v.origin)
+    }
+
     const statement = buildShinsegaeStatement({
       businessName: inv.companyName,
       period,
@@ -118,6 +133,7 @@ export async function POST(request: NextRequest) {
         address: inv.address ?? '',
       },
       items,
+      originByCode,
     })
 
     const bytes = await writeShinsegaeStatementXlsx(statement)

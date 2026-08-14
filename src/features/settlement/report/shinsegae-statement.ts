@@ -31,11 +31,23 @@ export interface ShinsegaeStatementInput {
   period: string
   buyer: ShinsegaeStatementBuyer
   items: readonly VenueStatementItem[]
+  /**
+   * 품목코드 → 원산지 (docs §21).
+   *
+   * 신세계 월별 단가표에서 온다. 우리 원천에는 원산지가 없어 §19에서 열을
+   * 비워 뒀는데, 단가표를 받게 되면서 채울 수 있게 됐다.
+   *
+   * ⚠️ **못 찾으면 빈칸으로 둔다.** 품목명에 `국내산`이 있다고 추정해 넣으면
+   * **틀린 원산지를 유치원에 주는 문서**가 된다 (§19 원칙).
+   */
+  originByCode?: ReadonlyMap<string, string>
 }
 
 export interface ShinsegaeStatementRow {
   no: number
   temperature: string
+  /** 단가표에서 찾은 원산지. 못 찾으면 빈 문자열 (§19 원칙) */
+  origin: string
   productName: string
   spec: string
   unit: string
@@ -87,8 +99,19 @@ export interface ShinsegaeSummaryRow {
   total: number
 }
 
+export interface OriginReport {
+  /** 원천 품목 행 수 */
+  total: number
+  /** 단가표에서 원산지를 찾은 행 수 */
+  filled: number
+  /** 못 찾은 품목코드 (중복 제거) */
+  missing: string[]
+}
+
 export interface ShinsegaeStatement {
   title: string
+  /** 원산지를 얼마나 채웠는지 — 화면이 생성 전에 보여준다 */
+  originReport: OriginReport
   buyer: ShinsegaeStatementBuyer
   summary: ShinsegaeSummaryRow[]
   summaryTotal: Omit<ShinsegaeSummaryRow, 'no' | 'name'>
@@ -121,6 +144,10 @@ export function formatStatementDate(date: string): string {
 }
 
 export function buildShinsegaeStatement(input: ShinsegaeStatementInput): ShinsegaeStatement {
+  /** 원산지를 얼마나 채웠는지 — 생성 전에 사용자에게 보여준다 */
+  let originFilled = 0
+  const originMissing = new Set<string>()
+
   const byRestaurant = new Map<string, VenueStatementItem[]>()
   for (const it of input.items) {
     const list = byRestaurant.get(it.restaurantName)
@@ -152,6 +179,10 @@ export function buildShinsegaeStatement(input: ShinsegaeStatementInput): Shinseg
       let vat = 0
 
       const rows: ShinsegaeStatementRow[] = dayItems.map((it, i) => {
+        const code = it.productCode ?? ''
+        const origin = input.originByCode?.get(code) ?? ''
+        if (origin) originFilled++
+        else originMissing.add(code)
         if (it.taxable) {
           taxableSupply += it.supply
           vat += it.vat
@@ -161,6 +192,7 @@ export function buildShinsegaeStatement(input: ShinsegaeStatementInput): Shinseg
         return {
           no: i + 1,
           temperature: extractTemperature(it.productName),
+          origin: origin,
           productName: it.productName,
           spec: it.spec,
           unit: it.unit,
@@ -234,7 +266,19 @@ export function buildShinsegaeStatement(input: ShinsegaeStatementInput): Shinseg
   const [year, month] = input.period.split('-')
   const title = `${input.businessName}_${year.slice(2)}년 ${Number(month)}월 급식 청구`
 
-  return { title, buyer: input.buyer, summary, summaryTotal, sheets }
+  return {
+    title,
+    originReport: {
+      total: input.items.length,
+      filled: originFilled,
+      // ⚠️ 못 찾은 코드는 **빈칸으로 둔다** — 추정해 넣으면 틀린 원산지가 나간다
+      missing: [...originMissing].filter((c) => c !== '').sort(),
+    },
+    buyer: input.buyer,
+    summary,
+    summaryTotal,
+    sheets,
+  }
 }
 
 export type { StatementIssuer }

@@ -41,6 +41,14 @@ interface AnalyzedPartner {
 }
 
 /** 서버에 보관된 원천 한 건 (docs §20) */
+interface PriceBookSummary {
+  period: string
+  itemCount: number
+  originCount: number
+  uploadedAt: string
+  uploadedBy: string
+}
+
 interface ArchivedSource {
   id: string
   kind: 'shinsegae' | 'cj' | 'cj_statement'
@@ -178,6 +186,15 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 말일 5시간 동안 창을 닫아도 이어서 할 수 있다.
    */
   const [archived, setArchived] = useState<ArchivedSource[] | null>(null)
+  /**
+   * 보관된 신세계 월별 단가표 (docs §21).
+   * 거래명세표의 **원산지**가 여기서 온다 — 우리 원천에는 원산지 열이 없다.
+   */
+  const [priceBooks, setPriceBooks] = useState<PriceBookSummary[]>([])
+  /** 명세표에 쓸 단가표 연월. 기본은 정산월 */
+  const [priceBookPeriod, setPriceBookPeriod] = useState('')
+  const [priceBookBusy, setPriceBookBusy] = useState(false)
+  const [priceBookNotice, setPriceBookNotice] = useState<string | null>(null)
   /** 보관본을 조회하는 중 — 잠깐 빈 화면이 되는 걸 설명해 준다 */
   const [checkingArchive, setCheckingArchive] = useState(false)
   /**
@@ -253,6 +270,28 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true
     }
+  }, [issueMonth])
+
+  /** 보관된 단가표 목록 (docs §21) — 한 번만 읽으면 된다 */
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/settlement/price-book')
+        const json = (await res.json()) as { success?: boolean; books?: PriceBookSummary[] }
+        if (!cancelled && json.success) setPriceBooks(json.books ?? [])
+      } catch {
+        // 목록을 못 읽어도 명세표 생성은 막지 않는다 — 원산지만 빈다
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /** 정산월이 바뀌면 단가표 선택도 그 달로 되돌린다 */
+  useEffect(() => {
+    setPriceBookPeriod(issueMonth)
   }, [issueMonth])
 
   /** 정산월이 바뀌면 그 달의 보관 원천을 다시 읽는다 (docs §20) */
@@ -509,6 +548,40 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
   }
 
   /**
+   * 신세계 월별 단가표 올리기 (docs §21).
+   *
+   * ⚠️ **파일에 연월이 없다.** 사용자가 고른 달로 저장하고, 서버가 직전 달
+   * 결정단가와 대조해 오선택을 막는다. 실측: 맞으면 100% 일치, 한 달 건너뛰면 88.8%.
+   */
+  async function uploadPriceBook(file: File, period: string) {
+    setPriceBookBusy(true)
+    setError(null)
+    setPriceBookNotice(null)
+    try {
+      const fd = new FormData()
+      fd.append('files', file)
+      fd.append('period', period)
+      const res = await fetch('/api/settlement/price-book', { method: 'POST', body: fd })
+      const json = (await res.json()) as {
+        success?: boolean
+        error?: string
+        saved?: number
+        books?: PriceBookSummary[]
+      }
+      if (!res.ok || !json.success) {
+        setError(json.error ?? '단가표 저장에 실패했습니다.')
+        return
+      }
+      setPriceBooks(json.books ?? [])
+      setPriceBookNotice(`${period} 단가표 ${won(json.saved ?? 0)}개 품목을 저장했습니다.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '단가표 저장 중 오류가 발생했습니다.')
+    } finally {
+      setPriceBookBusy(false)
+    }
+  }
+
+  /**
    * 유치원 제공 거래명세표 (docs §19).
    *
    * 유치원마다 **따로** 받는다 — 한 파일에 여러 곳을 담으면 다른 유치원 단가가
@@ -521,6 +594,8 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
       const fd = buildFormData()
       fd.append('period', issueMonth)
       fd.append('businessCode', businessCode)
+      // 원산지를 어느 달 단가표에서 가져올지 (docs §21)
+      fd.append('priceBookPeriod', priceBookPeriod || issueMonth)
 
       const res = await fetch('/api/settlement/venue-statement', { method: 'POST', body: fd })
       if (!res.ok) {
@@ -1436,8 +1511,68 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
               <h2 className="font-semibold text-gray-900">9. 유치원 제공 거래명세표</h2>
               <p className="mt-1 text-xs text-gray-500">
                 유치원에 보내는 문서입니다. 집계표 + 식당별 일자 명세로 구성되고, 금액은
-                유치원 청구가(단가) 기준입니다. 조정이 있으면 조정 내역 시트가 함께 붙습니다.
+                유치원 청구가(단가) 기준입니다.
               </p>
+
+              {/*
+                ★ **원산지는 신세계 월별 단가표에서 온다** (docs §21).
+                우리 원천에는 원산지 열이 없다. 단가표가 없으면 그 열이 통째로 빈다.
+                신세계가 매달 10일 전에 보내 준다.
+              */}
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm font-medium text-gray-900">신세계 단가표</span>
+                  <select
+                    value={priceBookPeriod}
+                    onChange={(e) => setPriceBookPeriod(e.target.value)}
+                    className="rounded border border-gray-300 px-2 py-1 text-sm"
+                  >
+                    {priceBooks.length === 0 && <option value={issueMonth}>보관된 단가표 없음</option>}
+                    {priceBooks.map((b) => (
+                      <option key={b.period} value={b.period}>
+                        {b.period} · 품목 {won(b.itemCount)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-gray-500">원산지를 이 단가표에서 채웁니다</span>
+                </div>
+
+                {priceBooks.some((b) => b.period === priceBookPeriod) ? (
+                  priceBookPeriod !== issueMonth && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      ⚠️ 정산월({issueMonth})과 다른 달 단가표입니다. 단가가 매달 5~10% 바뀌니
+                      원산지가 그 달과 다를 수 있습니다.
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-2 text-xs text-amber-800">
+                    <span className="font-medium">{priceBookPeriod} 단가표가 없습니다.</span>{' '}
+                    지금 만들면 <span className="font-medium">원산지 열이 빕니다.</span> 신세계가 매달
+                    10일 전에 보내 주는 원가 파일을 올려 주세요.
+                  </p>
+                )}
+
+                <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.xlsm"
+                    className="hidden"
+                    disabled={priceBookBusy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) void uploadPriceBook(f, priceBookPeriod || issueMonth)
+                      e.target.value = ''
+                    }}
+                  />
+                  <span className="rounded-lg border border-gray-300 bg-white px-3 py-1 transition hover:bg-gray-50">
+                    {priceBookBusy ? '저장 중…' : `${priceBookPeriod || issueMonth} 단가표 올리기`}
+                  </span>
+                </label>
+                {priceBookNotice && (
+                  <p className="mt-2 text-xs text-emerald-700">{priceBookNotice}</p>
+                )}
+              </div>
+
               <ul className="mt-4 space-y-2">
                 {analysis.statementVenues.map((v) => (
                   <li
