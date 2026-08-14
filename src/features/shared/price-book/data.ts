@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkPriceBookPeriod, type PriceBookItem } from './parse'
 import { applyPeriodPrices, type PricedRow } from './apply'
+import { createPeriodPriceCache, type PeriodPriceMap } from './cache'
 
 /**
  * 신세계 월별 단가표 저장·조회 — docs/systems/settlement/단가표.md §21
@@ -171,21 +172,54 @@ export async function listPriceBooks(): Promise<PriceBookSummary[]> {
 }
 
 /**
+ * 그 달 단가표를 통째로 읽는다 — 7,800행 남짓.
+ *
+ * ⚠️ PostgREST는 한 번에 **1,000행**만 준다. 나눠 읽지 않으면 8,000개 중 1,000개만
+ * 덮이고 나머지는 조용히 낡은 단가로 남는다.
+ */
+async function fetchPeriodPrices(period: string): Promise<PeriodPriceMap> {
+  const supabase = createAdminClient()
+  const map = new Map<string, { price: number }>()
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select('product_code, price')
+      .eq('period', period)
+      .range(from, from + PAGE - 1)
+    if (error) throw new PriceBookError(`단가표 조회 실패: ${error.message}`)
+    for (const r of data ?? []) map.set(r.product_code, { price: Number(r.price) })
+    if (!data || data.length < PAGE) break
+  }
+  return map
+}
+
+/**
+ * ★ **왜 달 단위로 캐시하나** — 매칭은 품목 한 건씩 돌면서 후보 단가를 덮는다.
+ * 명세표 한 장이 품목 200개면 조회가 200번 나간다. 달 단위로 한 번 읽어 들고
+ * 있으면 **1번**이 된다 (`cache.ts`).
+ */
+const periodPriceCache = createPeriodPriceCache({ fetch: fetchPeriodPrices })
+
+/**
  * 세션의 기준월 단가를 읽어 덮는다 — docs/systems/comparison.md §9
  *
  * `applyPeriodPrices`(순수)에 맵을 물어다 주는 서버 쪽 껍데기다.
  *
  * ⚠️ **`period`가 없으면 조회조차 하지 않는다.** 기존 세션은 지금까지의 절감액을
  * 그대로 유지해야 한다 — 조회 실패로 단가가 비는 일도 없어야 한다.
+ *
+ * ⚠️ **조회가 실패하면 던진다.** 낡은 단가로 조용히 계산을 이어가면 사용자가 고른
+ * 기준월이 무시된 채 절감액이 나온다 — 우리가 고치려는 버그 그 자체다.
  */
 export async function withPeriodPrices<T extends PricedRow>(
   rows: readonly T[],
   period: string | null | undefined
 ): Promise<(T & { priceBookMissing?: boolean })[]> {
   if (!period) return applyPeriodPrices(rows, null)
+  if (rows.length === 0) return []
 
-  const codes = rows.map((r) => r.product_code ?? '').filter((c) => c !== '')
-  const lookup = await loadPriceLookup(period, codes)
+  const lookup = await periodPriceCache.get(period)
   return applyPeriodPrices(rows, lookup)
 }
 

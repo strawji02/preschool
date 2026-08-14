@@ -24,6 +24,7 @@ import {
   computeSavings,
 } from '@/lib/unit-conversion'
 import type { ComparisonItem, SupplierMatch } from '@/types/audit'
+import { useSessionScopeParam } from '../../hooks/useSessionScope'
 
 interface PrecisionViewProps {
   item: ComparisonItem
@@ -50,6 +51,8 @@ export function PrecisionView({
   onSelectCandidate,
   onResearch,
 }: PrecisionViewProps) {
+  // 세션 기준월 단가로 답하게 한다 (comparison.md §9). 세션이 없으면 기존 동작
+  const scope = useSessionScopeParam()
   // 세션 복원 시 ssg_match.product_name이 비어있을 수 있으므로 lazy fetch.
   // ssg_candidates도 비어있으면 extracted_name으로 자동 검색해 채움.
   const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>(() => item.ssg_candidates ?? [])
@@ -154,7 +157,7 @@ export function PrecisionView({
     if (!q.trim()) return
     setSearching(true)
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10${scope}`)
       const data = await res.json()
       if (data.success && Array.isArray(data.products)) {
         setSearchResults(data.products as SupplierMatch[])
@@ -174,7 +177,7 @@ export function PrecisionView({
     if (!q) return
     let cancelled = false
     setLoadingCandidates(true)
-    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10`)
+    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=10${scope}`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return

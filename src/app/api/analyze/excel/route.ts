@@ -66,7 +66,9 @@ export async function POST(request: NextRequest) {
     // 1. Verify session exists
     const { data: session, error: sessionError } = await supabase
       .from('audit_sessions')
-      .select('id')
+      // price_book_period: 세션 기준월 단가로 비교한다 (comparison.md §9).
+      // NULL이면 products.standard_price를 쓰는 기존 동작.
+      .select('id, price_book_period')
       .eq('id', body.session_id)
       .single()
 
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
         quantity: item.quantity,
         unit_price: item.unit_price,
         total_price: item.total_price,
-      })
+      }, session.price_book_period)
     })
     
     const matchResults = await Promise.all(matchPromises)

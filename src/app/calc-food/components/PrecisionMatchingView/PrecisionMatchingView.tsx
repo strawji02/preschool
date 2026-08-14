@@ -29,6 +29,7 @@ import type { ReferenceProduct } from '@/lib/naver-shopping'
 import { findMatchConflicts, type MatchConflict } from '@/lib/match-propagation'
 import { computeMatchingKpi } from '@/lib/matching-kpi'
 import { useSupplyRate } from '../../hooks/useSupplyRate'
+import { useSessionId, useSessionScopeParam } from '../../hooks/useSessionScope'
 import { SupplyRateInput } from '../ReportStep/SupplyRateInput'
 import {
   getCommonTokens, getMatchConfidence, type MatchConfidence,
@@ -1624,6 +1625,8 @@ function ShinsegaeMatching({
   matchDetail: ProductDetail | null
   setMatchDetail: (d: ProductDetail | null) => void
 }) {
+  // 세션 기준월 단가로 답하게 한다 (comparison.md §9). 세션이 없으면 기존 동작
+  const scopeSessionId = useSessionId()
   // ssg_match가 부모에서 props로 변경되면 즉시 반영 (P0 버그 fix)
   const [enrichedMatch, setEnrichedMatch] = useState<SupplierMatch | undefined>(item.ssg_match)
   useEffect(() => {
@@ -1759,7 +1762,7 @@ function ShinsegaeMatching({
       return
     }
     let cancelled = false
-    fetch(`/api/products/${ssgMatch.id}`)
+    fetch(`/api/products/${ssgMatch.id}${scopeSessionId ? `?sessionId=${scopeSessionId}` : ''}`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return
@@ -2246,6 +2249,8 @@ function CandidatesAndSearchPanel({
   const [liveCandidates, setLiveCandidates] = useState<SupplierMatch[]>([])
   const [loadingCandidates, setLoadingCandidates] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  // 세션 기준월 단가로 답하게 한다 (comparison.md §9). 세션이 없으면 기존 동작
+  const scope = useSessionScopeParam()
   const [searchResults, setSearchResults] = useState<SupplierMatch[]>([])
   const [searching, setSearching] = useState(false)
   const candidates = liveCandidates
@@ -2266,7 +2271,7 @@ function CandidatesAndSearchPanel({
     let cancelled = false
     setLoadingCandidates(true)
     setLiveCandidates([]) // 항목 전환 시 이전 후보 즉시 비움 (잘못된 정렬 표시 방지)
-    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30`)
+    fetch(`/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=30${scope}`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return
@@ -2458,7 +2463,7 @@ function CandidatesAndSearchPanel({
       // broad=true: 다중 필드 검색 (spec/origin/category/subcategory/협력사) — limit 50 (사용자가 모두 보기 위함)
       // limit=30: 다양한 결과 수집 후 토큰 정렬에서 best 위로
       const res = await fetch(
-        `/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=50&broad=true`,
+        `/api/products/search?q=${encodeURIComponent(q)}&supplier=SHINSEGAE&limit=50&broad=true${scope}`,
       )
       const data = await res.json()
       if (data.success && Array.isArray(data.products)) {

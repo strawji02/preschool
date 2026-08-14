@@ -5,6 +5,7 @@ import { Search, Loader2, Check, Star, ArrowRight, RotateCcw, CheckCircle } from
 import { cn } from '@/lib/cn'
 import { formatCurrency } from '@/lib/format'
 import { calculatePricePerUnit } from '@/lib/funnel/price-normalizer'
+import { useSessionId } from '../../hooks/useSessionScope'
 import type { ComparisonItem, SupplierMatch, MatchCandidate } from '@/types/audit'
 import { FEATURE_FLAGS } from '../../config'
 
@@ -146,6 +147,7 @@ export function SearchPanel({
   invoiceSupplierName = '업체',
   onOpenPrecision,
 }: SearchPanelProps) {
+  const scopeSessionId = useSessionId()
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [results, setResults] = useState<MatchCandidate[]>([])
@@ -204,6 +206,8 @@ export function SearchPanel({
         supplier: targetSupplier || supplier,
         limit: '20',
       })
+      // 세션 기준월 단가로 답하게 한다 (comparison.md §9). 없으면 기존 동작
+      if (scopeSessionId) params.set('sessionId', scopeSessionId)
 
       const res = await fetch(`/api/products/search?${params}`)
       const data = await res.json()

@@ -6,6 +6,7 @@ import { ArrowLeft, RefreshCw, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { COMPARISON_VERSION } from '@/features/shared/version'
 import { useAuditSession } from './hooks/useAuditSession'
+import { SessionScopeProvider } from './hooks/useSessionScope'
 import { InvoiceReviewModal } from './components/InvoiceReviewModal'
 
 // SSR 비활성화 - PDF.js가 클라이언트에서만 동작
@@ -111,6 +112,12 @@ export default function CalcFoodPage() {
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false)
 
   return (
+    /*
+      세션 id를 화면 전체가 공유한다 (comparison.md §9). 품목 검색·상세 API가
+      **세션 기준월 단가**로 답해야 하는데, 그 API를 부르는 자리가 6곳에
+      흩어져 있고 어느 것도 세션 id를 받지 않는다.
+    */
+    <SessionScopeProvider sessionId={state.sessionId}>
     <div className="min-h-screen bg-gray-100">
       {/* 헤더 — PDF/인쇄 시 숨김 (제안서 본문만 출력되도록) */}
       <header className="bg-white shadow-sm print:hidden">
@@ -306,5 +313,6 @@ export default function CalcFoodPage() {
         onExtendUpload={extendSession}
       />
     </div>
+    </SessionScopeProvider>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { X, Search, Loader2, Check, GripVertical } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { useSessionId } from '../hooks/useSessionScope'
 import type { ComparisonItem, MatchCandidate, Supplier } from '@/types/audit'
 
 interface ProductSearchModalProps {
@@ -21,6 +22,7 @@ export function ProductSearchModal({
   onClose,
   onSelect,
 }: ProductSearchModalProps) {
+  const scopeSessionId = useSessionId()
   const [query, setQuery] = useState('')
   const [supplier, setSupplier] = useState<Supplier | ''>(initialSupplier || '')
   const [results, setResults] = useState<MatchCandidate[]>([])
@@ -54,6 +56,8 @@ export function ProductSearchModal({
       if (searchSupplier) {
         params.set('supplier', searchSupplier)
       }
+      // 세션 기준월 단가로 답하게 한다 (comparison.md §9). 없으면 기존 동작
+      if (scopeSessionId) params.set('sessionId', scopeSessionId)
 
       const res = await fetch(`/api/products/search?${params}`)
       const data = await res.json()

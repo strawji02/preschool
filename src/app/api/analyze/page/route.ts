@@ -54,7 +54,8 @@ export async function POST(request: NextRequest) {
     // 1. Verify session exists
     const { data: session, error: sessionError } = await supabase
       .from('audit_sessions')
-      .select('id')
+      // price_book_period: 세션 기준월 단가로 비교한다 (comparison.md §9)
+      .select('id, price_book_period')
       .eq('id', body.session_id)
       .single()
 
@@ -139,7 +140,8 @@ export async function POST(request: NextRequest) {
     const matchStartTime = Date.now()
     const matchPromises = ocrResult.items.map((item, idx) => {
       console.log(`[${body.session_id}] Matching item ${idx + 1}: ${item.name}`)
-      return findComparisonMatches(item.name, supabase, undefined, item) // extractedItem 전달
+      // 5번째 인자 = 세션 기준월. NULL이면 기존 동작 (comparison.md §9)
+      return findComparisonMatches(item.name, supabase, undefined, item, session.price_book_period)
     })
     const matchResults = await Promise.all(matchPromises)
 

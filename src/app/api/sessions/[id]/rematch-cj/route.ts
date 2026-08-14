@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { findComparisonMatches } from '@/lib/matching'
+import { loadSessionPricePeriod } from '@/features/shared/price-book'
 import { getTokenMatchRatio, MIN_VALID_MATCH_RATIO } from '@/lib/token-match'
 import { apiError } from '@/lib/api-error'
 
@@ -32,6 +33,12 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 })
     }
     const supabase = createAdminClient()
+
+    /*
+      세션 기준월을 **루프 밖에서 한 번** 읽는다 (comparison.md §9).
+      NULL이면 지금까지의 동작 그대로 — 이미 만든 제안서의 절감액이 바뀌면 안 된다.
+    */
+    const pricePeriod = await loadSessionPricePeriod(id)
 
     // 1) 대상 audit_items 가져오기 — product_name까지 가져와서 토큰 매칭 검증
     const { data: itemsRaw, error: fetchErr } = await supabase
@@ -99,7 +106,7 @@ export async function POST(
           unit: it.extracted_unit ?? undefined,
           quantity: Number(it.extracted_quantity ?? 1),
           unit_price: Number(it.extracted_unit_price ?? 0),
-        })
+        }, pricePeriod)
 
         const ssgMatch = result.ssg_match
         // 채택 기준: hybrid score >= 0.005 AND 토큰 매칭 비율 >= 0.3
