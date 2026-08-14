@@ -1,6 +1,6 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { checkPriceBookPeriod, type PriceBookItem } from '../parse/price-book'
+import { checkPriceBookPeriod, type PriceBookItem } from './parse'
 
 /**
  * 신세계 월별 단가표 저장·조회 — docs/systems/settlement/단가표.md §21

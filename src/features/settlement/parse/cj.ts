@@ -1,4 +1,4 @@
-import { numCell, textCell } from './cell'
+import { numCell, textCell } from '@/lib/excel-cell'
 import type { NormalizedVenue, ParseResult } from './types'
 
 /**

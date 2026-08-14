@@ -1,4 +1,4 @@
-import { numCell, textCell } from './cell'
+import { numCell, textCell } from '@/lib/excel-cell'
 
 /**
  * 신세계 월별 단가표 — docs/systems/settlement/단가표.md §21

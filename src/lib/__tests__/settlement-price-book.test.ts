@@ -3,7 +3,7 @@ import {
   checkPriceBookPeriod,
   normalizeProductCode,
   parsePriceBookSheet,
-} from '@/features/settlement/parse/price-book'
+} from '@/features/shared/price-book'
 
 /**
  * [정산] 신세계 월별 단가표 (docs §21)

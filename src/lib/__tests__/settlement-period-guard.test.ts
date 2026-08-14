@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dateCell } from '@/features/settlement/parse/cell'
+import { dateCell } from '@/lib/excel-cell'
 import { checkSourcePeriod } from '@/features/settlement/calc/period-guard'
 
 /**

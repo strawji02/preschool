@@ -292,24 +292,26 @@ export {
 
 export { parseShinsegaeSheet } from './parse/shinsegae'
 
+/*
+  단가표는 **정산·비교 공용**이라 `features/shared/price-book`에 있다 (docs §21, 비교 §9).
+  여기서 다시 내보내는 이유: 정산 라우트들이 이미 `@/features/settlement`에서
+  가져오고 있어 호출부를 흔들지 않는다. settlement → shared는 허용된 방향이다.
+*/
 export {
   parsePriceBookSheet,
   checkPriceBookPeriod,
   normalizeProductCode,
-  type PriceBookItem,
-  type PriceBookResult,
-} from './parse/price-book'
-
-export {
   PriceBookError,
   savePriceBook,
   loadPriceLookup,
   loadPriceBookPrices,
   listPriceBooks,
   previousPeriod,
+  type PriceBookItem,
+  type PriceBookResult,
   type PriceBookSummary,
   type PriceLookup,
-} from './data/price-book'
+} from '@/features/shared/price-book'
 export { parseCjSheet } from './parse/cj'
 export { parseCjStatementSheet } from './parse/cj-statement'
 
