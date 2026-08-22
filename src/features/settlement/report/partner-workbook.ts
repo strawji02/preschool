@@ -402,7 +402,7 @@ function buildSummarySheet(
     ['소득세', 'ROUNDDOWN(B17*3%,-1)', partner.incomeTax],
     ['지방소득세', 'ROUNDDOWN(B14*10%,-1)', partner.localTax],
     ['실지급액', 'B13-B14-B15', partner.netPay],
-    ['사업소득 신고액', 'IF($E$7="코파운더",B13+B10,B13)', partner.declared],
+    ['사업소득 신고액', 'IF($E$7="영업 파트너",B13,B13+B10)', partner.declared],
   ]
   summaryRows.forEach(([label, formula, result], index) => {
     const rowNumber = 7 + index

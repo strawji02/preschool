@@ -124,6 +124,10 @@ describe('파트너 배포용 정산서', () => {
       formula: 'B13-B14-B15',
       result: 35,
     })
+    expect(summary.getCell('B17').value).toMatchObject({
+      formula: 'IF($E$7="영업 파트너",B13,B13+B10)',
+      result: 35,
+    })
     expect(detail.getCell('F5').value).toMatchObject({ formula: 'SUM(C5:E5)', result: 100 })
     expect(summary.getCell('D6').value).toBe('산출 근거')
     expect(summary.getCell('D15').value).toBe('계산식 안내')
