@@ -141,6 +141,10 @@ export default async function ReportPage({
                   period={period}
                   taxableCount={taxableCount}
                   exemptCount={exemptCount}
+                  partners={detail.partners.map((p) => ({
+                    partnerId: p.partnerId,
+                    partnerName: p.partnerName,
+                  }))}
                 />
               )}
               <ReportBody detail={detail} collection={collection} />

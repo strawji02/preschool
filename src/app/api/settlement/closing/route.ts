@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     // 스냅샷에는 **재현에 필요한 것을 전부** 담는다. 정규화하지 않는 이유는
     // 스키마가 바뀌어도 과거 리비전을 그대로 읽어야 하기 때문이다.
     const snapshot = {
-      version: 1,
+      version: 2,
       period,
       savedAt: new Date().toISOString(),
       sources: result.sources,
@@ -166,6 +166,10 @@ export async function POST(request: NextRequest) {
         }
         return out
       })(),
+      // 외부 사입은 승인 상태·증빙 메타까지 함께 굳힌다. 재발급 시 현재 DB를
+      // 다시 읽으면 이후 수정으로 과거 파트너 파일이 달라질 수 있다.
+      manualItems: result.manualItems,
+      manualDeductionItems: result.manualDeductionItems,
     }
 
     const saved = await saveClosing({

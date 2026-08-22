@@ -23,6 +23,9 @@ import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-
 import { parseCjStatementSheet, type CjStatementResult } from '../parse/cj-statement'
 import { applyAdjustments, sumAdjustments } from '../calc/adjustment'
 import { listAdjustments, type AdjustmentRecord } from '../data/adjustment'
+import { applyManualItems, type ManualItemRecord, type ManualNormalizedVenue } from '../calc/manual-item'
+import { listManualItems } from '../data/manual-item'
+import type { DeductionItem } from '../calc/deduction'
 import {
   crossCheckCjStatement,
   cjCrossCheckMessage,
@@ -70,6 +73,10 @@ export interface PartnerSummary {
   costVat: number
   priceTotal: number
   priceVat: number
+  /** 외부 사입 중 파트너 부담 서비스가 자동으로 더한 사업자공제 */
+  manualDeduction: number
+  /** 품목별 적립금 미적용을 반영한 실제 적립금 공급가 기준 */
+  platformFeeBaseSupply: number
   settlement: SettlementResult
 }
 
@@ -120,6 +127,10 @@ export interface SettlementRunResult {
   adjustments: AdjustmentRecord[]
   /** 조정으로 줄어든 청구액 합계. 이동은 사업장 합계를 바꾸지 않아 세지 않는다. */
   adjustmentTotal: number
+  /** 외부 사입 전체. 작성중·취소도 화면과 감사용으로 돌려준다. */
+  manualItems: ManualItemRecord[]
+  /** 파트너 부담 서비스가 Q에 더한 상세. 사용자 수기 공제와 구분해 보여준다. */
+  manualDeductionItems: Record<string, DeductionItem[]>
   /**
    * 조정에 쓸 수 있는 원천 품목. 화면에서 **골라서** 조정하므로 필요하다.
    * 거래명세서가 없으면 빈 배열 — 그때는 조정을 추가할 수 없다.
@@ -131,7 +142,12 @@ export interface SettlementRunResult {
    */
   shinsegaeItems: ShinsegaeItem[]
   /** 거래명세표를 만들 수 있는 신세계 유치원 목록 (본사·제외 사업장 뺀 것) */
-  statementVenues: { businessCode: string; businessName: string; itemCount: number }[]
+  statementVenues: {
+    source: 'shinsegae' | 'cj'
+    businessCode: string
+    businessName: string
+    itemCount: number
+  }[]
   /** 내역서 생성 입력 — 정산 제외 블록이 맨 앞에 온다 (원본과 동일 순서) */
   blocks: ReportPartnerBlock[]
   /**
@@ -243,15 +259,34 @@ export async function runSettlement(
   const shinsegaeItems = (ss.items ?? []) as ShinsegaeItem[]
 
   const adjustments = req.period ? await listAdjustments(req.period) : []
+  const master = await loadSettlementMaster()
   const applied = applyAdjustments(rawVenues, statement?.items ?? [], adjustments)
   errors.push(...applied.errors)
-  const venues = applied.venues
 
-  const master = await loadSettlementMaster()
-  const agg = aggregateByPartner(venues, master.mapping)
+  // 외부 사입은 원천 대조·품목 조정 뒤에만 얹는다. 원천 교차검증에 섞으면
+  // CJ/신세계 오류와 우리 수기 입력을 구분할 수 없다.
+  const manualItems = req.period ? await listManualItems(req.period) : []
+  const manual = applyManualItems(applied.venues, manualItems, master.mapping)
+  errors.push(...manual.errors)
+  const venues = manual.financialVenues
+  const settlementVenues = manual.settlementVenues
+
+  const agg = aggregateByPartner(settlementVenues, master.mapping)
   warnings.push(...agg.warnings)
 
   const deductions = req.deductions ?? {}
+  const manualDeductionItems: Record<string, DeductionItem[]> = {}
+  for (const item of manual.applied) {
+    if (item.burden !== 'partner') continue
+    const partnerId = master.mapping[`${item.source}:${item.businessCode}`]
+    if (!partnerId) continue
+    const amount = item.charge.total > 0 ? item.charge.total : item.purchase.total
+    ;(manualDeductionItems[partnerId] ??= []).push({
+      category: `외부 사입 · ${item.productName}`,
+      amount,
+      note: item.reason,
+    })
+  }
 
   const partners: PartnerSummary[] = agg.partners.map((p) => {
     const record = master.partners.get(p.partnerId)
@@ -261,6 +296,11 @@ export async function runSettlement(
         `영업자 정보를 찾을 수 없습니다 (id: ${p.partnerId}). 마스터 데이터를 확인하세요.`
       )
     }
+    const manualDeduction = manual.partnerDeductions[p.partnerId] ?? 0
+    const platformFeeBaseSupply = Math.max(
+      0,
+      p.costTotal - p.costVat - (manual.platformFeeExcludedBase[p.partnerId] ?? 0)
+    )
     const settlement = calcSettlement({
       costTotal: p.costTotal,
       costVat: p.costVat,
@@ -268,7 +308,8 @@ export async function runSettlement(
       priceVat: p.priceVat,
       partnerType: record?.partnerType ?? 'partner',
       commissionPercent: record?.commissionPercent,
-      businessDeduction: deductions[p.partnerId] ?? 0,
+      businessDeduction: (deductions[p.partnerId] ?? 0) + manualDeduction,
+      platformFeeBaseSupply,
     })
     warnings.push(...settlement.warnings)
 
@@ -281,6 +322,8 @@ export async function runSettlement(
       costVat: p.costVat,
       priceTotal: p.priceTotal,
       priceVat: p.priceVat,
+      manualDeduction,
+      platformFeeBaseSupply,
       settlement,
     }
   })
@@ -291,6 +334,22 @@ export async function runSettlement(
     blocks.push({
       partnerName: '본사',
       lines: agg.excluded.map(toLine),
+      settlement: null,
+    })
+  }
+  const settlementManualIds = new Set(
+    settlementVenues
+      .map((v) => (v as ManualNormalizedVenue).manualItemId)
+      .filter((id): id is string => Boolean(id))
+  )
+  const directManual = venues.filter((v) => {
+    const id = (v as ManualNormalizedVenue).manualItemId
+    return Boolean(id) && !settlementManualIds.has(id!)
+  })
+  if (directManual.length > 0) {
+    blocks.push({
+      partnerName: '본사 직접',
+      lines: directManual.map(toLine),
       settlement: null,
     })
   }
@@ -313,7 +372,10 @@ export async function runSettlement(
   // 그건 이미 `unmapped`로 잡히므로 여기서 중복 경고하지 않는다.
   // 절사 방식은 설정에서 온다 — 세무사 협의로 바뀔 수 있다 (docs §6-2)
   const invoice = collectInvoiceRows(
-    buildInvoiceLines(venues, master),
+    [
+      ...buildInvoiceLines(applied.venues, master),
+      ...buildManualInvoiceLines(manual.invoiceItems, master),
+    ],
     master.issuer?.roundingMode ?? 'vat'
   )
   const issuer = master.issuer
@@ -327,12 +389,19 @@ export async function runSettlement(
   // 거래명세표를 줄 유치원 — **정산 제외 사업장(본사)은 뺀다.**
   const excludedCodes = new Set(agg.excluded.map((v) => v.businessCode))
   const statementVenues = (() => {
-    const map = new Map<string, { businessCode: string; businessName: string; itemCount: number }>()
+    const map = new Map<string, { source: 'shinsegae' | 'cj'; businessCode: string; businessName: string; itemCount: number }>()
     for (const it of shinsegaeItems) {
       if (excludedCodes.has(it.businessCode)) continue
-      const cur = map.get(it.businessCode)
+      const key = `shinsegae:${it.businessCode}`
+      const cur = map.get(key)
       if (cur) cur.itemCount += 1
-      else map.set(it.businessCode, { businessCode: it.businessCode, businessName: it.businessName, itemCount: 1 })
+      else map.set(key, { source: 'shinsegae', businessCode: it.businessCode, businessName: it.businessName, itemCount: 1 })
+    }
+    for (const it of manual.invoiceItems) {
+      const key = `${it.source}:${it.businessCode}`
+      const cur = map.get(key)
+      if (cur) cur.itemCount += 1
+      else map.set(key, { source: it.source, businessCode: it.businessCode, businessName: it.businessName, itemCount: 1 })
     }
     return [...map.values()].sort((a, b) => a.businessName.localeCompare(b.businessName))
   })()
@@ -350,6 +419,8 @@ export async function runSettlement(
     cjStatementItemCount: statement ? statement.items.length : null,
     adjustments,
     adjustmentTotal: sumAdjustments(statement?.items ?? [], adjustments),
+    manualItems,
+    manualDeductionItems,
     statementItems: statement?.items ?? [],
     shinsegaeItems,
     statementVenues,
@@ -419,7 +490,7 @@ const DEFAULT_COMMISSION_FALLBACK = 5
 
 /** 식당 단위 확정값 — 담당 영업자 이름까지 굳힌다 */
 function buildClosingVenues(
-  venues: readonly NormalizedVenue[],
+  venues: readonly ManualNormalizedVenue[],
   master: SettlementMaster
 ): ClosingVenueRow[] {
   const byKey = new Map(
@@ -427,7 +498,9 @@ function buildClosingVenues(
   )
   return venues.map((v) => {
     const rec = byKey.get(`${v.source}:${v.businessCode}`)
-    const partnerId = rec?.partnerId ?? null
+    const isPartnerManual =
+      v.manualItemId && v.manualBurden === 'venue' && v.manualPartnerIncluded !== false
+    const partnerId = v.manualItemId && !isPartnerManual ? null : rec?.partnerId ?? null
     return {
       source: v.source,
       businessCode: v.businessCode,
@@ -441,6 +514,13 @@ function buildClosingVenues(
       exclusionReason: rec?.exclusionReason ?? null,
       cost: v.cost,
       price: v.price,
+      ...(v.manualItemId
+        ? {
+            manualItemId: v.manualItemId,
+            manualBurden: v.manualBurden,
+            manualPartnerIncluded: v.manualPartnerIncluded,
+          }
+        : {}),
     }
   })
 }
@@ -518,6 +598,50 @@ function buildInvoiceLines(
   })
 }
 
+/** 승인된 외부 사입을 홈택스 계산서 입력 줄로 바꾼다. */
+function buildManualInvoiceLines(
+  items: readonly ManualItemRecord[],
+  master: SettlementMaster
+): InvoiceVenueLine[] {
+  const byKey = new Map(
+    master.venues.map((v) => [`${v.source}:${v.businessCode}`, v] as const)
+  )
+  return items.map((item) => {
+    const rec = byKey.get(`${item.source}:${item.businessCode}`)
+    const complete = rec !== undefined && missingInvoiceFields(rec).length === 0
+    const buyer: InvoiceParty | null = complete && rec
+      ? {
+          bizRegNo: rec.invoice.bizRegNo!,
+          companyName: rec.invoice.companyName!,
+          ceoName: rec.invoice.ceoName!,
+          address: rec.invoice.address!,
+          bizType: rec.invoice.bizType!,
+          bizItem: rec.invoice.bizItem!,
+          email: rec.invoice.email!,
+          email2: rec.invoice.email2,
+        }
+      : null
+    const invoiceName =
+      item.invoiceMode === 'separate' ? item.productName : item.invoiceItemName
+    return {
+      source: item.source,
+      businessCode: item.businessCode,
+      businessName: item.businessName,
+      restaurantCode: `manual:${item.id}`,
+      restaurantName: `외부사입 · ${item.productName}`,
+      price: item.charge,
+      isExcluded: rec?.isExcluded ?? true,
+      roundDown: rec?.invoiceRoundDown ?? false,
+      buyer,
+      itemNames: {
+        taxable: item.chargeTaxKind === 'taxable' ? invoiceName : null,
+        exempt: item.chargeTaxKind === 'exempt' ? invoiceName : null,
+      },
+      groupKey: item.invoiceMode === 'separate' ? `manual:${item.id}` : undefined,
+    }
+  })
+}
+
 function emptyResult(base: { warnings: string[]; errors: string[] }): SettlementRunResult {
   return {
     partners: [],
@@ -529,6 +653,8 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     cjStatementItemCount: null,
     adjustments: [],
     adjustmentTotal: 0,
+    manualItems: [],
+    manualDeductionItems: {},
     statementItems: [],
     shinsegaeItems: [],
     statementVenues: [],

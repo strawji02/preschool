@@ -288,3 +288,58 @@ describe('closingTotals — 경계', () => {
     expect(t.costOfSales).toBe(1_000)
   })
 })
+
+describe('closingTotals — 외부 사입 부담 주체', () => {
+  const purchase = { taxableSupply: 100_000, vat: 10_000, exempt: 0, total: 110_000 }
+  const charge = { taxableSupply: 140_000, vat: 14_000, exempt: 0, total: 154_000 }
+
+  it('파트너 미포함 유치원 청구 건의 마진은 전부 본사 몫이다', () => {
+    const t = closingTotals([
+      venue({
+        manualItemId: 'manual-venue',
+        manualBurden: 'venue',
+        manualPartnerIncluded: false,
+        cost: purchase,
+        price: charge,
+      }),
+    ], [])
+
+    expect(t.revenue).toBe(154_000)
+    expect(t.costOfSales).toBe(110_000)
+    expect(t.hqShare).toBe(44_000)
+    expect(t.operatingProfit).toBe(44_000)
+  })
+
+  it('파트너 부담 서비스는 공제와 마케팅비가 서로 상쇄된다', () => {
+    const t = closingTotals([
+      venue({
+        manualItemId: 'manual-partner',
+        manualBurden: 'partner',
+        manualPartnerIncluded: false,
+        cost: purchase,
+        price: zero,
+      }),
+    ], [partner({ businessDeduction: 110_000, preTax: -110_000, netPay: -110_000 })])
+
+    expect(t.revenue).toBe(0)
+    expect(t.marketingCost).toBe(110_000)
+    expect(t.hqShare).toBe(110_000)
+    expect(t.operatingProfit).toBe(0)
+  })
+
+  it('본사 부담 서비스는 마케팅비로만 반영한다', () => {
+    const t = closingTotals([
+      venue({
+        manualItemId: 'manual-hq',
+        manualBurden: 'hq',
+        manualPartnerIncluded: false,
+        cost: purchase,
+        price: zero,
+      }),
+    ], [])
+
+    expect(t.marketingCost).toBe(110_000)
+    expect(t.hqShare).toBe(0)
+    expect(t.operatingProfit).toBe(-110_000)
+  })
+})

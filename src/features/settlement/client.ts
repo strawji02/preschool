@@ -127,4 +127,16 @@ export {
   type AdjustmentKind,
 } from './calc/adjustment'
 
+export {
+  calculateChargeTotal,
+  calculateTaxBreakdown,
+  validateManualItem,
+  type ManualItemBurden,
+  type ManualItemInvoiceMode,
+  type ManualItemKind,
+  type ManualItemRecord,
+  type ManualItemStatus,
+  type ManualItemTaxKind,
+} from './calc/manual-item'
+
 export type { SettlementSource, TaxBreakdown } from './parse/types'

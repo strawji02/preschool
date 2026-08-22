@@ -205,7 +205,6 @@ function itemHeaders(n: number, withVat: boolean): string[] {
 
 /** 데이터 시작 행 (0-based). 1~5행 비움 + 6행 헤더 */
 const HEADER_ROW = 5
-const FIRST_DATA_ROW = HEADER_ROW + 1
 
 export interface InvoiceParty {
   /** 10자리, 하이픈 없음 */
@@ -244,6 +243,8 @@ export interface InvoiceVenueLine {
   buyer: InvoiceParty | null
   /** 과세구분별 품목명. 미지정이면 null */
   itemNames: { taxable: string | null; exempt: string | null }
+  /** 외부 사입을 별도 계산서 행으로 유지할 때 사용하는 묶음 식별자 */
+  groupKey?: string
 }
 
 /** 계산서 한 장 */
@@ -393,7 +394,10 @@ export function collectInvoiceRows(
         continue
       }
 
-      const key = `${kind} ${line.buyer.bizRegNo} ${itemName}`
+      const baseKey = `${kind} ${line.buyer.bizRegNo} ${itemName}`
+      // 외부 사입을 `별도`로 선택한 경우 같은 품목명이더라도 기존 계산서 품목이나
+      // 다른 수기 건에 합치지 않는다. 일반 원천 줄은 기존 그룹 규칙을 그대로 쓴다.
+      const key = line.groupKey ? `${baseKey} ${line.groupKey}` : baseKey
       const existing = groups.get(key)
       if (existing) {
         existing.supply += supply

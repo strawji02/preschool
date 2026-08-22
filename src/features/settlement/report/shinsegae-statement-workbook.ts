@@ -10,6 +10,7 @@ import {
   type ShinsegaeStatementBlock,
   type ShinsegaeStatementBuyer,
 } from './shinsegae-statement'
+import type { ManualItemRecord } from '../calc/manual-item'
 
 /**
  * 신세계 거래명세표 엑셀 — **템플릿의 블록을 복제해 텍스트만 넣는다** (docs §19-2)
@@ -339,7 +340,7 @@ function formatBizRegNo(raw: string): string {
  * 겹치면 뒤에 번호를 붙인다. 식당명이 길어 잘리는 일이 실제로 있다.
  */
 function sheetName(raw: string, used: Set<string>): string {
-  let base = raw.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) || '식당'
+  const base = raw.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) || '식당'
   let name = base
   let i = 2
   while (used.has(name)) {
@@ -355,7 +356,10 @@ const TEMPLATE_PATH = path.join(
   'src/features/settlement/report/templates/신세계_거래명세표.xlsx'
 )
 
-export async function writeShinsegaeStatementXlsx(st: ShinsegaeStatement): Promise<Uint8Array> {
+export async function writeShinsegaeStatementXlsx(
+  st: ShinsegaeStatement,
+  manualItems: readonly ManualItemRecord[] = []
+): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook()
   // `readFile`은 NonSharedBuffer를 주는데 exceljs 타입은 Buffer를 요구한다. 내용은 같다.
   const bytes = await readFile(TEMPLATE_PATH)
@@ -454,6 +458,71 @@ export async function writeShinsegaeStatementXlsx(st: ShinsegaeStatement): Promi
   // 템플릿용 빈 명세서 시트는 결과물에 남기지 않는다
   wb.removeWorksheet(blockWs.id)
 
+  appendManualItemSheet(wb, manualItems)
+
   const out = await wb.xlsx.writeBuffer()
   return out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBuffer)
+}
+
+/** CJ 유치원은 기존 CJ 명세서를 별도로 받으므로 외부 사입 부분만 독립 파일로 만든다. */
+export async function writeManualItemStatementXlsx(input: {
+  businessName: string
+  period: string
+  items: readonly ManualItemRecord[]
+}): Promise<Uint8Array> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = '키즈웰에듀푸드 정산 시스템'
+  wb.created = new Date()
+  const ws = wb.addWorksheet('외부 사입')
+  ws.addRow([`${input.businessName} 외부 사입 거래명세표`, input.period])
+  appendManualRows(ws, input.items, 3)
+  const out = await wb.xlsx.writeBuffer()
+  return out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBuffer)
+}
+
+function appendManualItemSheet(wb: ExcelJS.Workbook, items: readonly ManualItemRecord[]): void {
+  if (items.length === 0) return
+  const ws = wb.addWorksheet('외부 사입')
+  appendManualRows(ws, items, 1)
+}
+
+function appendManualRows(
+  ws: ExcelJS.Worksheet,
+  items: readonly ManualItemRecord[],
+  headerRow: number
+): void {
+  const headers = [
+    '거래일', '납품일', '품목명', '규격', '수량', '단위', '매입처',
+    '과세구분', '공급가', '부가세', '면세', '합계', '비고',
+  ]
+  const row = ws.getRow(headerRow)
+  headers.forEach((value, i) => { row.getCell(i + 1).value = value })
+  row.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF365A67' } }
+  items.forEach((item, i) => {
+    const r = ws.getRow(headerRow + i + 1)
+    ;[
+      item.transactionDate,
+      item.deliveryDate ?? '',
+      item.productName,
+      item.specification,
+      item.quantity,
+      item.unit,
+      item.vendorName,
+      item.chargeTaxKind === 'taxable' ? '과세' : '면세',
+      item.charge.taxableSupply,
+      item.charge.vat,
+      item.charge.exempt,
+      item.charge.total,
+      item.reason,
+    ].forEach((value, c) => { r.getCell(c + 1).value = value })
+    for (let c = 9; c <= 12; c++) r.getCell(c).numFmt = '#,##0'
+  })
+  const totalRow = ws.getRow(headerRow + items.length + 1)
+  totalRow.getCell(1).value = '합계'
+  totalRow.getCell(12).value = items.reduce((sum, item) => sum + item.charge.total, 0)
+  totalRow.getCell(12).numFmt = '#,##0'
+  totalRow.font = { bold: true }
+  ws.columns = [12, 12, 28, 18, 10, 10, 16, 10, 14, 12, 14, 14, 30].map((width) => ({ width }))
+  ws.views = [{ state: 'frozen', ySplit: headerRow }]
 }

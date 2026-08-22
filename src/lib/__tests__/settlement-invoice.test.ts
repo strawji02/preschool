@@ -189,6 +189,16 @@ describe('collectInvoiceRows — 발행 단위 (유치원 × 품목 × 과세구
     expect(rows.find((r) => r.taxKind === 'taxable')!.itemName).toBe('원아급간식')
     expect(rows.find((r) => r.taxKind === 'exempt')!.itemName).toBe('급식재료')
   })
+
+  it('외부 사입 별도 발행 키가 있으면 같은 유치원·품목명이어도 합치지 않는다', () => {
+    const price = { taxableSupply: 100, vat: 10, exempt: 0, total: 110 }
+    const { rows } = collectInvoiceRows([
+      line({ price, groupKey: 'manual:1' }),
+      line({ price, groupKey: 'manual:2' }),
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => row.mergedFrom === 1)).toBe(true)
+  })
 })
 
 describe('collectInvoiceRows — 발행하지 않는 경우', () => {

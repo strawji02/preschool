@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx'
 import type { DeductionSheet } from '../calc/deduction'
 import { ADJUSTMENT_COL_WIDTHS, type AdjustmentSheet } from './adjustment-sheet'
 import type { DeclarationSheet } from './declaration-sheet'
+import type { ManualItemSheet } from './manual-item-sheet'
 import { REPORT_COL, type SettlementSheet } from './settlement-sheet'
 
 /**
@@ -51,6 +52,8 @@ export interface WorkbookOptions {
    * 영업자에게 설명할 근거가 없다 — 금액만이 아니라 **사유와 요청자**를 함께 싣는다.
    */
   adjustmentSheet?: AdjustmentSheet | null
+  /** 외부 사입·임의 청구 승인 건 상세 */
+  manualItemSheet?: ManualItemSheet | null
 }
 
 export function buildSettlementWorkbook(
@@ -101,6 +104,16 @@ export function buildSettlementWorkbook(
     aws['!cols'] = ADJUSTMENT_COL_WIDTHS.map((wch) => ({ wch }))
     applyMoneyFormat(aws)
     XLSX.utils.book_append_sheet(wb, aws, '품목 조정 내역')
+  }
+
+  const manual = options.manualItemSheet
+  if (manual) {
+    const mws = XLSX.utils.aoa_to_sheet(manual.rows as unknown[][])
+    mws['!cols'] = new Array(25).fill(null).map((_, i) => ({
+      wch: i === 0 || i === 4 || i === 22 ? 24 : 13,
+    }))
+    applyMoneyFormat(mws)
+    XLSX.utils.book_append_sheet(wb, mws, '외부 사입 상세')
   }
 
   return wb

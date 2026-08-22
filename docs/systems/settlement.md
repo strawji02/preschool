@@ -20,6 +20,7 @@
 | 유치원 제공 거래명세표 | `settlement/조정.md` | §19 |
 | 원천 파일 서버 보관 | `settlement/원천보관.md` | §20 |
 | `단가표.md` | §21 신세계 월별 단가표 — 원산지·원가 |
+| 외부 사입·파트너 배포 정산서 | `settlement/조정.md` | §22 |
 | 로그인·권한·배포 버전 | `settlement/권한과배포.md` | §15~§17 |
 
 **두 개 이상을 동시에 열지 않는다.** 마감 버그를 잡을 때 수금 문서는 필요 없다.
@@ -36,9 +37,10 @@
 
 ```
 원천 업로드(신세계·CJ) → 파싱·정규화 → 영업자-유치원 매핑
+  → [예외] 승인된 외부 사입·서비스 항목 합산
   → [매출] 과세/면세 분리 → 유치원 청구액
   → [정산] 마진 → 공제 → 3.3% → 영업자 지급액
-  → 엑셀 3종 출력 (홈택스 / 영업자 / 세무사)
+  → 관리자 산출물 + 파트너별 독립 정산서 출력
 ```
 
 ## 3. 정산 산식 ★ (실제 엑셀 수식에서 추출, 역검증 완료)
@@ -245,6 +247,8 @@
 | 조정 시트 (내역서) | `report/adjustment-sheet.ts` | **프로덕션 반영** (§18) |
 | 유치원 제공 거래명세표 | `report/venue-statement.ts`, `api/settlement/venue-statement` | **프로덕션 반영** (§19) |
 | 원천 서버 보관 | migration 060, `data/source-archive.ts`, `service/resolve-sources.ts` | **프로덕션 반영** (§20) |
+| 외부 사입·임의 청구 | migration 063, `calc/manual-item.ts`, `app/app/settlement/manual-item-panel.tsx` | **프로덕션 반영** (§22) |
+| 파트너별 독립 정산서·ZIP | `report/partner-workbook.ts`, `api/settlement/partner-report` | **프로덕션 반영** (§22) |
 
 ### 역검증 근거
 

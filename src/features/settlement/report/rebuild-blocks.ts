@@ -70,6 +70,13 @@ export function rebuildClosingBlocks(
     blocks.push({ partnerName: '본사', lines: excluded.map(toLine), settlement: null })
   }
 
+  // 파트너 미포함 외부 사입·본사/파트너 부담 서비스. 관리자 통합 내역에는
+  // 보여야 하지만 특정 파트너의 정산 합계에는 섞이면 안 된다.
+  const direct = venues.filter((v) => !v.isExcluded && !v.partnerId)
+  if (direct.length > 0) {
+    blocks.push({ partnerName: '본사 직접', lines: direct.map(toLine), settlement: null })
+  }
+
   // 영업자 순서는 `closingPartners` 배열 순서를 따른다. 스냅샷은 JSON 배열이라
   // 마감 당시 순서가 그대로 보존된다 (DB 테이블은 정렬이 보장되지 않는다).
   for (const p of partners) {

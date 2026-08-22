@@ -8,6 +8,7 @@ import {
   buildDeductionSheet,
   buildSettlementSheet,
   buildSettlementWorkbook,
+  buildManualItemSheet,
   isExcelUpload,
   isValidPeriod,
   loadClosingSnapshot,
@@ -21,6 +22,7 @@ import {
   type ClosingVenueRow,
   type DeclarationSplit,
   type DeductionItem,
+  type ManualItemRecord,
 } from '@/features/settlement'
 import * as XLSX from 'xlsx'
 
@@ -68,6 +70,8 @@ export async function GET(request: NextRequest) {
       // 조정은 2026-07-31부터 굳힌다 (docs §18). 그 전 리비전에는 없다.
       adjustments?: AdjustmentRecord[]
       adjustmentAmounts?: Record<string, number>
+      manualItems?: ManualItemRecord[]
+      manualDeductionItems?: Record<string, DeductionItem[]>
     }
     if (!Array.isArray(snap.closingVenues) || !Array.isArray(snap.closingPartners)) {
       return NextResponse.json(
@@ -87,7 +91,10 @@ export async function GET(request: NextRequest) {
     const deductionSheet = buildDeductionSheet(
       partners.map((p) => ({
         partnerName: p.partnerName,
-        items: itemsByPartner[p.partnerId] ?? [],
+        items: [
+          ...(itemsByPartner[p.partnerId] ?? []),
+          ...(snap.manualDeductionItems?.[p.partnerId] ?? []),
+        ],
       }))
     )
     const declarationSheet = buildDeclarationSheet({
@@ -110,6 +117,7 @@ export async function GET(request: NextRequest) {
       deductionSheet,
       declarationSheet,
       adjustmentSheet,
+      manualItemSheet: buildManualItemSheet(snap.manualItems ?? []),
     })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
 
@@ -193,7 +201,10 @@ export async function POST(request: NextRequest) {
     const deductionSheet = buildDeductionSheet(
       result.partners.map((p) => ({
         partnerName: p.partnerName,
-        items: itemsByPartner[p.partnerId] ?? [],
+        items: [
+          ...(itemsByPartner[p.partnerId] ?? []),
+          ...(result.manualDeductionItems[p.partnerId] ?? []),
+        ],
       }))
     )
     // 사업소득 지급명세서 (docs §6-3). 본사는 정산 대상이 아니라 여기 들어오지 않는다.
@@ -233,6 +244,7 @@ export async function POST(request: NextRequest) {
       deductionSheet,
       declarationSheet,
       adjustmentSheet: buildAdjustmentSheet(result.adjustments, adjAmounts),
+      manualItemSheet: buildManualItemSheet(result.manualItems),
     })
     const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array
     return reportResponse(bytes, periodLabel || '기간미지정')

@@ -13,23 +13,26 @@ import { useState } from 'react'
  * 여기서는 마감 스냅샷으로만 만들므로 언제 받아도 같은 파일이다.
  */
 
-type Kind = 'taxable' | 'exempt' | 'report'
+type Kind = 'taxable' | 'exempt' | 'report' | 'partner-all' | `partner:${string}`
 
-const LABEL: Record<Kind, string> = {
+const LABEL: Record<'taxable' | 'exempt' | 'report' | 'partner-all', string> = {
   taxable: '세금계산서 (과세)',
   exempt: '계산서 (면세)',
   report: '정산 내역서',
+  'partner-all': '파트너 정산서 전체',
 }
 
 export default function ReportDownloads({
   period,
   taxableCount,
   exemptCount,
+  partners,
 }: {
   /** `YYYY-MM` */
   period: string
   taxableCount: number
   exemptCount: number
+  partners: { partnerId: string; partnerName: string }[]
 }) {
   const [busy, setBusy] = useState<Kind | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,15 +41,19 @@ export default function ReportDownloads({
     setBusy(kind)
     setError(null)
     try {
-      const url =
-        kind === 'report'
+      const url = kind === 'partner-all'
+        ? `/api/settlement/partner-report?period=${period}`
+        : kind.startsWith('partner:')
+          ? `/api/settlement/partner-report?period=${period}&partnerId=${encodeURIComponent(kind.slice(8))}`
+        : kind === 'report'
           ? `/api/settlement/report?period=${period}`
           : `/api/settlement/invoice?period=${period}&kind=${kind}`
       const res = await fetch(url)
 
       if (!res.ok) {
         const json = (await res.json().catch(() => null)) as { error?: string } | null
-        setError(json?.error ?? `${LABEL[kind]}를 만들지 못했습니다.`)
+        const label = kind.startsWith('partner:') ? '파트너 정산서' : LABEL[kind as keyof typeof LABEL]
+        setError(json?.error ?? `${label}를 만들지 못했습니다.`)
         return
       }
 
@@ -104,13 +111,39 @@ export default function ReportDownloads({
         >
           {busy === 'report' ? '생성 중…' : '정산 내역서'}
         </button>
+        <button
+          type="button"
+          onClick={() => void download('partner-all')}
+          disabled={busy !== null || partners.length === 0}
+          className="rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy === 'partner-all' ? '생성 중…' : `파트너 정산서 ZIP (${partners.length}명)`}
+        </button>
       </div>
 
+      {partners.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {partners.map((partner) => (
+            <button
+              key={partner.partnerId}
+              type="button"
+              onClick={() => void download(`partner:${partner.partnerId}`)}
+              disabled={busy !== null}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {busy === `partner:${partner.partnerId}` ? '생성 중…' : partner.partnerName}
+            </button>
+          ))}
+        </div>
+      )}
+
       <p className="mt-3 text-xs text-gray-400">
-        내역서에는 <span className="font-medium text-gray-600">집계표_정산용</span> ·{' '}
+        관리자 내역서에는 <span className="font-medium text-gray-600">집계표_정산용</span> ·{' '}
         <span className="font-medium text-gray-600">사업자공제 상세</span> ·{' '}
         <span className="font-medium text-gray-600">사업소득 신고내역</span> 시트가 함께
-        들어 있습니다. 지급명세서의 주민번호 칸은 비어 있습니다.
+        들어 있고, 해당 데이터가 있으면 조정·외부 사입 상세가 추가됩니다. 지급명세서의
+        주민번호 칸은 비어 있습니다.
+        <br />파트너 정산서는 요약·유치원별 상세·공제 근거만 담은 독립 파일입니다.
       </p>
     </section>
   )

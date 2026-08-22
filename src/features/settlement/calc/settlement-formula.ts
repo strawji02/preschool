@@ -35,6 +35,11 @@ export interface PlatformFeeInput {
   costVat: number
   /** 수수료율 %. 기본 5 */
   commissionPercent?: number
+  /**
+   * 품목별 적립금 제외가 있을 때 사용할 공급가 기준액.
+   * 생략하면 기존 규칙대로 `costTotal - costVat`을 쓴다.
+   */
+  platformFeeBaseSupply?: number
 }
 
 /**
@@ -46,8 +51,9 @@ export function calcPlatformFee({
   costTotal,
   costVat,
   commissionPercent = DEFAULT_COMMISSION_PERCENT,
+  platformFeeBaseSupply,
 }: PlatformFeeInput): number {
-  const supplyBase = costTotal - costVat
+  const supplyBase = platformFeeBaseSupply ?? costTotal - costVat
   return percentRoundUpTo10(supplyBase, commissionPercent)
 }
 
@@ -147,10 +153,16 @@ export function calcSettlement(input: SettlementInput): SettlementResult {
     partnerType,
     businessDeduction = 0,
     commissionPercent,
+    platformFeeBaseSupply,
   } = input
 
   const margin = priceTotal - costTotal
-  const platformFee = calcPlatformFee({ costTotal, costVat, commissionPercent })
+  const platformFee = calcPlatformFee({
+    costTotal,
+    costVat,
+    commissionPercent,
+    platformFeeBaseSupply,
+  })
   const vatDiff = priceVat - costVat
   const preTaxRaw = margin - platformFee - vatDiff - businessDeduction
 

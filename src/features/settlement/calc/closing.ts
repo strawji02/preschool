@@ -1,5 +1,6 @@
 import type { PartnerType } from './settlement-formula'
 import type { SettlementSource, TaxBreakdown } from '../parse/types'
+import type { ManualItemBurden } from './manual-item'
 
 /**
  * 월 마감 합계 (docs/systems/settlement.md §8, §13).
@@ -36,6 +37,10 @@ export interface ClosingVenueRow {
   exclusionReason: string | null
   cost: TaxBreakdown
   price: TaxBreakdown
+  /** 외부 사입 합성 행. 과거 스냅샷에는 없으므로 선택 필드다. */
+  manualItemId?: string
+  manualBurden?: ManualItemBurden
+  manualPartnerIncluded?: boolean
 }
 
 /** 마감 스냅샷의 영업자 한 줄 — 산식 결과를 그대로 굳힌다 (docs §3) */
@@ -93,7 +98,7 @@ export interface ClosingTotals {
   /** 사업소득 신고액 V 합계 */
   declared: number
 
-  /** 본사 몫 = O + P + Q (= 총마진 − 영업자 세전) */
+  /** 본사 몫 = 총마진 − 영업자 세전. 일반 거래만 있으면 O + P + Q와 같다. */
   hqShare: number
   /** 영업이익 = 본사 몫 − 마케팅비 */
   operatingProfit: number
@@ -198,7 +203,7 @@ export function closingTotals(
     // 매입세액은 제외 사업장까지 전부 센다 — 마케팅비의 매입세액도 공제 대상이다
     purchaseVat += v.cost.vat
 
-    if (v.isExcluded) {
+    if (v.isExcluded || v.manualBurden === 'partner' || v.manualBurden === 'hq') {
       marketingCost += v.cost.total
       // 제외 사업장은 계산서를 발행하지 않으므로 매출·매출세액에 넣지 않는다
       continue
@@ -222,7 +227,9 @@ export function closingTotals(
   const declared = sum((p) => p.declared)
 
   const grossMargin = revenue - costOfSales
-  const hqShare = platformFee + vatDiff + businessDeduction
+  // 파트너 정산에서 제외한 외부 사입 마진도 본사 몫이다. 일반 거래만 있으면
+  // 이 항등식은 기존 O + P + Q와 정확히 같은 값이다.
+  const hqShare = grossMargin - partnerPreTax
   const vatPayable = salesVat - purchaseVat
 
   return {

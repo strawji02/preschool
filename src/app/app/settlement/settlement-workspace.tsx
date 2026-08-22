@@ -7,6 +7,7 @@ import AdjustmentPanel, {
   type AdjustmentRow,
   type StatementItem,
 } from './adjustment-panel'
+import ManualItemPanel, { type ManualItemVenue } from './manual-item-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
@@ -38,6 +39,8 @@ interface AnalyzedPartner {
   costVat: number
   priceTotal: number
   priceVat: number
+  manualDeduction: number
+  platformFeeBaseSupply: number
 }
 
 /** 서버에 보관된 원천 한 건 (docs §20) */
@@ -90,15 +93,22 @@ interface AnalyzeResponse {
   adjustments: AdjustmentRow[]
   /** 조정으로 줄어든 청구액. 이동은 사업장 합계를 안 바꾸므로 세지 않는다. */
   adjustmentTotal: number
+  manualItems: import('@/features/settlement/client').ManualItemRecord[]
+  manualDeductionItems: Record<string, DeductionItem[]>
   /** 조정할 때 고르는 원천 품목 */
   statementItems: StatementItem[]
   /**
    * 식당별 담당 영업자 (docs §18-3). 조정 패널이 요청자 기본값에 쓴다.
    * 마감 스냅샷용으로 이미 만들던 값이라 따로 계산하지 않는다.
    */
-  closingVenues: { businessName: string; restaurantName: string; partnerName: string | null }[]
+  closingVenues: ManualItemVenue[]
   /** 거래명세표를 줄 수 있는 신세계 유치원 (docs §19) */
-  statementVenues: { businessCode: string; businessName: string; itemCount: number }[]
+  statementVenues: {
+    source: 'shinsegae' | 'cj'
+    businessCode: string
+    businessName: string
+    itemCount: number
+  }[]
   canClose: boolean
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
@@ -587,13 +597,18 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 유치원마다 **따로** 받는다 — 한 파일에 여러 곳을 담으면 다른 유치원 단가가
    * 섞인다. 신세계 유치원만 만들 수 있다 (CJ 집계표에는 품목이 없다).
    */
-  async function downloadVenueStatement(businessCode: string, businessName: string) {
-    setBusy(`vs:${businessCode}`)
+  async function downloadVenueStatement(
+    source: 'shinsegae' | 'cj',
+    businessCode: string,
+    businessName: string
+  ) {
+    setBusy(`vs:${source}:${businessCode}`)
     setError(null)
     try {
       const fd = buildFormData()
       fd.append('period', issueMonth)
       fd.append('businessCode', businessCode)
+      fd.append('source', source)
       // 원산지를 어느 달 단가표에서 가져올지 (docs §21)
       fd.append('priceBookPeriod', priceBookPeriod || issueMonth)
 
@@ -715,7 +730,11 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           priceTotal: p.priceTotal,
           priceVat: p.priceVat,
           partnerType: p.partnerType,
-          businessDeduction: sumDeductionItems(deductions[p.partnerId] ?? []),
+          platformFeeBaseSupply: p.platformFeeBaseSupply,
+          // 파트너 부담 외부 사입은 서버가 구조화한 자동 공제다. 사용자가 입력한
+          // 사업자공제와 합쳐야 화면·다운로드·마감이 같은 숫자가 된다.
+          businessDeduction:
+            sumDeductionItems(deductions[p.partnerId] ?? []) + p.manualDeduction,
         })
       )
     }
@@ -1095,9 +1114,18 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             onChanged={() => void analyze({ keepInputs: true })}
           />
 
-          {/* 4. 사업자공제 */}
+          <ManualItemPanel
+            period={issueMonth}
+            venues={analysis.closingVenues}
+            items={analysis.manualItems}
+            locked={locked}
+            isAdmin={isAdmin}
+            onChanged={() => void analyze({ keepInputs: true })}
+          />
+
+          {/* 5. 사업자공제 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">4. 사업자공제 입력</h2>
+            <h2 className="font-semibold text-gray-900">5. 사업자공제 입력</h2>
             <p className="mt-1 text-xs text-gray-500">
               항목별로 넣으면 합계가 산식의 공제액(Q)이 됩니다. 입력 내역은 내역서의{' '}
               <span className="font-medium">사업자공제 상세</span> 시트로 함께 저장됩니다.
@@ -1120,7 +1148,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 4. 정산 결과 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">5. 영업자별 정산</h2>
+            <h2 className="font-semibold text-gray-900">6. 영업자별 정산</h2>
 
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[820px] text-right text-sm">
@@ -1199,7 +1227,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 5. 분할 신고 + 지급명세서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">6. 사업소득 지급명세서</h2>
+            <h2 className="font-semibold text-gray-900">7. 사업소득 지급명세서</h2>
             <p className="mt-1 text-xs leading-relaxed text-gray-500">
               세무사 제출용입니다. 비워 두면 영업자 본인 명의로 신고합니다. 여러 명 명의로
               나눠 신고하려면 아래에 성명과 금액을 넣으세요 — <strong>합계가 신고액과
@@ -1305,7 +1333,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 6. 홈택스 계산서 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">7. 홈택스 계산서 일괄발행</h2>
+            <h2 className="font-semibold text-gray-900">8. 홈택스 계산서 일괄발행</h2>
             <p className="mt-1 text-xs leading-relaxed text-gray-500">
               과세는 <span className="font-medium text-gray-700">세금계산서</span>, 면세는{' '}
               <span className="font-medium text-gray-700">계산서</span>로 양식이 달라 파일을
@@ -1460,7 +1488,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
           {/* 7. 다운로드 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 className="font-semibold text-gray-900">8. 내역서 다운로드</h2>
+            <h2 className="font-semibold text-gray-900">9. 내역서 다운로드</h2>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               {/*
                 파일명·표지에 쓰는 라벨은 정산월에서 만든다 (docs §8-5).
@@ -1493,7 +1521,8 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
               기존 <code className="rounded bg-gray-100 px-1">집계표_정산용</code> 시트와 같은
               레이아웃으로 만듭니다. 열 위치가 동일하니 나란히 놓고 대조해 보세요.
               <br />
-              시트 3개가 들어갑니다 —{' '}
+              기본 시트 3개와, 해당 월에 데이터가 있으면 조정·외부 사입 상세 시트가
+              들어갑니다 —{' '}
               <span className="font-medium text-gray-700">집계표_정산용</span> ·{' '}
               <span className="font-medium text-gray-700">사업자공제 상세</span> ·{' '}
               <span className="font-medium text-gray-700">사업소득 신고내역</span>
@@ -1503,15 +1532,16 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           {/*
             9. 유치원 제공 거래명세표 (docs §19).
 
-            **신세계 유치원만** 만들 수 있다 — CJ는 집계표만 받아 품목이 없다.
+            신세계는 원천 집계표·일자 명세를 재현하고 외부 사입을 별도 시트로 붙인다.
+            CJ는 원천 품목 상세가 없어 승인된 외부 사입이 있을 때만 외부 사입 명세를 만든다.
             유치원마다 따로 받는다. 한 파일에 여러 곳을 담으면 다른 유치원 단가가 섞인다.
           */}
           {analysis.statementVenues.length > 0 && (
             <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="font-semibold text-gray-900">9. 유치원 제공 거래명세표</h2>
+              <h2 className="font-semibold text-gray-900">10. 유치원 제공 거래명세표</h2>
               <p className="mt-1 text-xs text-gray-500">
-                유치원에 보내는 문서입니다. 집계표 + 식당별 일자 명세로 구성되고, 금액은
-                유치원 청구가(단가) 기준입니다.
+                유치원에 보내는 문서입니다. 원천 거래 내역과 승인된 외부 사입을 함께
+                제공하며, 금액은 유치원 청구가(단가) 기준입니다.
               </p>
 
               {/*
@@ -1576,7 +1606,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
               <ul className="mt-4 space-y-2">
                 {analysis.statementVenues.map((v) => (
                   <li
-                    key={v.businessCode}
+                    key={`${v.source}:${v.businessCode}`}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3"
                   >
                     <span className="text-sm">
@@ -1585,11 +1615,11 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => void downloadVenueStatement(v.businessCode, v.businessName)}
+                      onClick={() => void downloadVenueStatement(v.source, v.businessCode, v.businessName)}
                       disabled={busy !== null}
                       className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {busy === `vs:${v.businessCode}` ? '만드는 중…' : '거래명세표 받기'}
+                      {busy === `vs:${v.source}:${v.businessCode}` ? '만드는 중…' : '거래명세표 받기'}
                     </button>
                   </li>
                 ))}

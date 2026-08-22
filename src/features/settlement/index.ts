@@ -1,7 +1,7 @@
 /**
  * features/settlement — 급식 정산 도메인.
  *
- * CLAUDE.md 규칙: features/comparison을 직접 import하지 않는다.
+ * AGENTS.md 규칙: features/comparison을 직접 import하지 않는다.
  * 공유가 필요하면 features/shared 또는 lib을 경유한다.
  */
 export {
@@ -238,7 +238,10 @@ export {
   type OriginReport,
 } from './report/shinsegae-statement'
 
-export { writeShinsegaeStatementXlsx } from './report/shinsegae-statement-workbook'
+export {
+  writeShinsegaeStatementXlsx,
+  writeManualItemStatementXlsx,
+} from './report/shinsegae-statement-workbook'
 
 export {
   buildVenueStatementWorkbook,
@@ -263,6 +266,50 @@ export {
   type AdjustmentKind,
   type StoredAdjustment,
 } from './calc/adjustment'
+
+export {
+  applyManualItems,
+  calculateChargeTotal,
+  calculateTaxBreakdown,
+  validateManualItem,
+  type ApplyManualItemsResult,
+  type CreateManualItemInput,
+  type ManualItemBurden,
+  type ManualItemEvidence,
+  type ManualItemInvoiceMode,
+  type ManualItemKind,
+  type ManualItemPayload,
+  type ManualItemRecord,
+  type ManualItemStatus,
+  type ManualItemTaxKind,
+  type ManualNormalizedVenue,
+} from './calc/manual-item'
+
+export {
+  ManualItemError,
+  addManualItemEvidence,
+  approveManualItem,
+  cancelManualItem,
+  createManualItem,
+  downloadManualItemEvidence,
+  findManualItemDuplicates,
+  getManualItem,
+  listManualItems,
+  updateManualItem,
+} from './data/manual-item'
+
+export {
+  buildPartnerSettlementWorkbook,
+  partnerReportFileName,
+  type BuildPartnerSettlementWorkbookInput,
+} from './report/partner-workbook'
+
+export { createZipArchive, type ZipEntry } from './report/zip'
+
+export {
+  buildManualItemSheet,
+  type ManualItemSheet,
+} from './report/manual-item-sheet'
 
 export {
   MasterWriteError,

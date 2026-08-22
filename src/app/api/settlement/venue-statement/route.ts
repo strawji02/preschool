@@ -9,6 +9,7 @@ import {
   resolveSources,
   runSettlement,
   writeShinsegaeStatementXlsx,
+  writeManualItemStatementXlsx,
 } from '@/features/settlement'
 
 /**
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
 
   const period = String(form.get('period') ?? '')
   const businessCode = String(form.get('businessCode') ?? '')
+  const source = form.get('source') === 'cj' ? 'cj' : 'shinsegae'
   if (!/^\d{4}-\d{2}$/.test(period) || !businessCode) {
     return NextResponse.json(
       { success: false, error: '정산월과 유치원을 지정해 주세요.' },
@@ -67,8 +69,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const items = result.shinsegaeItems.filter((i) => i.businessCode === businessCode)
-    if (items.length === 0) {
+    const items = source === 'shinsegae'
+      ? result.shinsegaeItems.filter((i) => i.businessCode === businessCode)
+      : []
+    const manualItems = result.manualItems.filter(
+      (i) => i.status === 'approved' && i.burden === 'venue' && i.source === source && i.businessCode === businessCode
+    )
+    if (items.length === 0 && manualItems.length === 0) {
       return NextResponse.json(
         { success: false, error: '이 유치원의 품목을 찾지 못했습니다.' },
         { status: 404 }
@@ -81,14 +88,14 @@ export async function POST(request: NextRequest) {
     */
     const master = await loadSettlementMaster()
     const venue = master.venues.find(
-      (v) => v.source === 'shinsegae' && v.businessCode === businessCode
+      (v) => v.source === source && v.businessCode === businessCode
     )
     const inv = venue?.invoice
     if (!inv?.companyName || !inv.bizRegNo) {
       return NextResponse.json(
         {
           success: false,
-          error: `${items[0].businessName}: 상호·사업자등록번호가 없어 명세표를 만들 수 없습니다. 마스터를 채워 주세요.`,
+          error: `${items[0]?.businessName ?? manualItems[0]?.businessName ?? businessCode}: 상호·사업자등록번호가 없어 명세표를 만들 수 없습니다. 마스터를 채워 주세요.`,
         },
         { status: 409 }
       )
@@ -98,7 +105,9 @@ export async function POST(request: NextRequest) {
       ⚠️ **조정(§18)은 싣지 않는다.** 조정은 CJ 거래명세서 품목에만 걸리므로
       신세계 유치원에는 생길 수 없다. 혹시 생기면 아래에서 걸러 알린다.
     */
-    const stray = result.adjustments.filter((a) => a.businessName === items[0].businessName)
+    const stray = items.length > 0
+      ? result.adjustments.filter((a) => a.businessName === items[0].businessName)
+      : []
     if (stray.length > 0) {
       return NextResponse.json(
         {
@@ -114,6 +123,21 @@ export async function POST(request: NextRequest) {
       기본은 정산월 단가표다. 다른 달을 쓰려면 `priceBookPeriod`로 넘긴다 —
       단가표가 늦게 오거나 과거 달을 재발행할 때 필요하다.
     */
+    if (items.length === 0) {
+      const bytes = await writeManualItemStatementXlsx({
+        businessName: inv.companyName,
+        period,
+        items: manualItems,
+      })
+      const name = `거래명세표_${inv.companyName}_${period}.xlsx`
+      return new NextResponse(bytes as unknown as BodyInit, {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        },
+      })
+    }
+
     const priceBookPeriod = String(form.get('priceBookPeriod') ?? '') || period
     const originByCode = new Map<string, string>()
     for (const [code, v] of await loadPriceLookup(
@@ -136,7 +160,7 @@ export async function POST(request: NextRequest) {
       originByCode,
     })
 
-    const bytes = await writeShinsegaeStatementXlsx(statement)
+    const bytes = await writeShinsegaeStatementXlsx(statement, manualItems)
     const name = `거래명세표_${inv.companyName}_${period}.xlsx`
     return new NextResponse(bytes as unknown as BodyInit, {
       headers: {
