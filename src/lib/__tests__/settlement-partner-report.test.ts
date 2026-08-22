@@ -4,6 +4,7 @@ import {
   buildPartnerSettlementWorkbook,
   createZipArchive,
   partnerReportFileName,
+  writePartnerSettlementWorkbook,
   type ClosingPartnerRow,
   type ClosingVenueRow,
   type ManualItemRecord,
@@ -95,6 +96,16 @@ describe('파트너 배포용 정산서', () => {
     const text = XLSX.utils.sheet_to_csv(wb.Sheets['공제·조정·외부사입'])
     expect(text).not.toContain('승인 전 품목')
     expect(text).not.toContain('취소 품목')
+  })
+
+  it('ZIP에 넣을 XLSX를 실제 Uint8Array로 직렬화한다', () => {
+    const bytes = writePartnerSettlementWorkbook({
+      period: '2026-08', status: 'closed', partner: partners[0], venues,
+      deductionItems: [], adjustments: [], adjustmentAmounts: {}, manualItems: [manualItem],
+    })
+    expect(bytes).toBeInstanceOf(Uint8Array)
+    const wb = XLSX.read(bytes, { type: 'array' })
+    expect(wb.SheetNames).toEqual(['정산 요약', '유치원별 상세', '공제·조정·외부사입'])
   })
 })
 

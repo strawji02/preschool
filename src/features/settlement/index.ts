@@ -301,6 +301,7 @@ export {
 export {
   buildPartnerSettlementWorkbook,
   partnerReportFileName,
+  writePartnerSettlementWorkbook,
   type BuildPartnerSettlementWorkbookInput,
 } from './report/partner-workbook'
 

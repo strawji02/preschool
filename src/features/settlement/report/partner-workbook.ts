@@ -146,6 +146,17 @@ export function buildPartnerSettlementWorkbook(
   return wb
 }
 
+/** Node의 xlsx `type: array` 반환값(ArrayBuffer)을 ZIP 입력용 Uint8Array로 굳힌다. */
+export function writePartnerSettlementWorkbook(
+  input: BuildPartnerSettlementWorkbookInput
+): Uint8Array {
+  const out = XLSX.write(buildPartnerSettlementWorkbook(input), {
+    type: 'array',
+    bookType: 'xlsx',
+  }) as ArrayBuffer | Uint8Array
+  return out instanceof Uint8Array ? out : new Uint8Array(out)
+}
+
 function safeFilePart(value: string): string {
   return value
     .normalize('NFC')

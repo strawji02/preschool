@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireApiUser } from '@/features/shared/auth'
 import {
-  buildPartnerSettlementWorkbook,
   createZipArchive,
   isValidPeriod,
   loadClosingSnapshot,
   partnerReportFileName,
+  writePartnerSettlementWorkbook,
   type AdjustmentRecord,
   type ClosingPartnerRow,
   type ClosingVenueRow,
@@ -13,7 +13,6 @@ import {
   type DeductionItem,
   type ManualItemRecord,
 } from '@/features/settlement'
-import * as XLSX from 'xlsx'
 
 interface PartnerSnapshot {
   closingVenues?: ClosingVenueRow[]
@@ -56,7 +55,7 @@ export async function GET(request: NextRequest) {
         .filter((name, index, all) => all.indexOf(name) !== index)
     )
     const files = partners.map((partner) => {
-      const wb = buildPartnerSettlementWorkbook({
+      const bytes = writePartnerSettlementWorkbook({
         period,
         status: loaded.closing.status,
         partner,
@@ -74,7 +73,7 @@ export async function GET(request: NextRequest) {
         : partner.partnerName
       return {
         name: partnerReportFileName(period, nameForFile, loaded.closing.status),
-        bytes: XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array,
+        bytes,
       }
     })
 
