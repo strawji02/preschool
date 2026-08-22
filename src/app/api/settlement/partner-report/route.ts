@@ -12,9 +12,11 @@ import {
   type DeclarationSplit,
   type DeductionItem,
   type ManualItemRecord,
+  type PartnerSummary,
 } from '@/features/settlement'
 
 interface PartnerSnapshot {
+  partners?: Array<Pick<PartnerSummary, 'partnerId' | 'platformFeeBaseSupply'>>
   closingVenues?: ClosingVenueRow[]
   closingPartners?: ClosingPartnerRow[]
   deductionItems?: Record<string, DeductionItem[]>
@@ -54,8 +56,9 @@ export async function GET(request: NextRequest) {
         .map((p) => p.partnerName)
         .filter((name, index, all) => all.indexOf(name) !== index)
     )
-    const files = partners.map((partner) => {
-      const bytes = writePartnerSettlementWorkbook({
+    const files = await Promise.all(partners.map(async (partner) => {
+      const summary = snap.partners?.find((item) => item.partnerId === partner.partnerId)
+      const bytes = await writePartnerSettlementWorkbook({
         period,
         status: loaded.closing.status,
         partner,
@@ -67,6 +70,7 @@ export async function GET(request: NextRequest) {
         adjustments: snap.adjustments ?? [],
         adjustmentAmounts: snap.adjustmentAmounts ?? {},
         manualItems: snap.manualItems ?? [],
+        platformFeeBaseSupply: summary?.platformFeeBaseSupply,
       })
       const nameForFile = duplicateNames.has(partner.partnerName)
         ? `${partner.partnerName}_${partner.partnerId.slice(0, 8)}`
@@ -75,7 +79,7 @@ export async function GET(request: NextRequest) {
         name: partnerReportFileName(period, nameForFile, loaded.closing.status),
         bytes,
       }
-    })
+    }))
 
     if (selectedId) return fileResponse(files[0].bytes, files[0].name, 'xlsx')
     const zip = createZipArchive(files)

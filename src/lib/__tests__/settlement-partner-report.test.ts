@@ -65,10 +65,12 @@ describe('파트너 배포용 정산서', () => {
       deductionItems: [{ category: '커피차', amount: 5 }], adjustments: [],
       adjustmentAmounts: {}, manualItems: [manualItem],
     })
-    expect(wb.SheetNames).toEqual(['정산 요약', '유치원별 상세', '공제·조정·외부사입'])
+    expect(wb.worksheets.map((sheet) => sheet.name)).toEqual([
+      '정산 요약', '유치원별 상세', '공제·조정·외부사입',
+    ])
 
-    const text = wb.SheetNames.map((n) =>
-      XLSX.utils.sheet_to_csv(wb.Sheets[n])
+    const text = wb.worksheets.flatMap((sheet) =>
+      sheet.getSheetValues().flatMap((row) => Array.isArray(row) ? row : [])
     ).join('\n')
     expect(text).toContain('김명일')
     expect(text).toContain('가유치원')
@@ -93,13 +95,59 @@ describe('파트너 배포용 정산서', () => {
         { ...manualItem, id: 'cancel-item', status: 'cancelled', productName: '취소 품목' },
       ],
     })
-    const text = XLSX.utils.sheet_to_csv(wb.Sheets['공제·조정·외부사입'])
+    const text = wb.getWorksheet('공제·조정·외부사입')!
+      .getSheetValues()
+      .flatMap((row) => Array.isArray(row) ? row : [])
+      .join('\n')
     expect(text).not.toContain('승인 전 품목')
     expect(text).not.toContain('취소 품목')
   })
 
-  it('ZIP에 넣을 XLSX를 실제 Uint8Array로 직렬화한다', () => {
-    const bytes = writePartnerSettlementWorkbook({
+  it('요약 금액을 상세·근거 시트 참조 수식으로 연결하고 산출 근거를 표시한다', () => {
+    const wb = buildPartnerSettlementWorkbook({
+      period: '2026-08', status: 'closed', partner: partners[0], venues,
+      deductionItems: [{ category: '커피차', amount: 5 }], adjustments: [],
+      adjustmentAmounts: {}, manualItems: [manualItem], platformFeeBaseSupply: 100,
+    })
+    const summary = wb.getWorksheet('정산 요약')!
+    const detail = wb.getWorksheet('유치원별 상세')!
+
+    expect(summary.getCell('B7').value).toMatchObject({
+      formula: "'유치원별 상세'!F6",
+      result: 100,
+    })
+    expect(summary.getCell('B12').value).toMatchObject({
+      formula: "'공제·조정·외부사입'!B5",
+      result: 5,
+    })
+    expect(summary.getCell('B16').value).toMatchObject({
+      formula: 'B13-B14-B15',
+      result: 35,
+    })
+    expect(detail.getCell('F5').value).toMatchObject({ formula: 'SUM(C5:E5)', result: 100 })
+    expect(summary.getCell('D6').value).toBe('산출 근거')
+    expect(summary.getCell('D15').value).toBe('계산식 안내')
+  })
+
+  it('차분한 색상·고정 영역·통화 형식을 적용한다', () => {
+    const wb = buildPartnerSettlementWorkbook({
+      period: '2026-08', status: 'closed', partner: partners[0], venues,
+      deductionItems: [], adjustments: [], adjustmentAmounts: {}, manualItems: [],
+    })
+    const summary = wb.getWorksheet('정산 요약')!
+    const detail = wb.getWorksheet('유치원별 상세')!
+
+    expect(summary.getCell('A1').fill).toMatchObject({
+      type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF365A67' },
+    })
+    expect(summary.getCell('B7').numFmt).toBe('#,##0"원"')
+    expect(summary.views[0]).toMatchObject({ showGridLines: false, state: 'frozen' })
+    expect(detail.autoFilter).toEqual('A4:K4')
+    expect(detail.views[0]).toMatchObject({ showGridLines: false, state: 'frozen', ySplit: 4 })
+  })
+
+  it('ZIP에 넣을 XLSX를 실제 Uint8Array로 직렬화한다', async () => {
+    const bytes = await writePartnerSettlementWorkbook({
       period: '2026-08', status: 'closed', partner: partners[0], venues,
       deductionItems: [], adjustments: [], adjustmentAmounts: {}, manualItems: [manualItem],
     })
