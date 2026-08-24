@@ -8,6 +8,9 @@ import { parseInvoiceExcel, isExcelFile } from '@/lib/excel-parser'
 import { estimateSsgTotal } from '@/lib/unit-conversion'
 import { findPropagationTargets, applyPropagation, findSimilarSuggestions, applySuggestions, normalizeItemName } from '@/lib/match-propagation'
 import { canConfirmItem, healConfirmedWithoutMatch } from '@/lib/confirm-guard'
+import { extractSupplierName } from '@/lib/supplier-name'
+
+export { extractSupplierName } from '@/lib/supplier-name'
 
 // 상태 타입
 // 'excel_preview' — 2026-04-21 추가: 엑셀 파싱 후 담당자 확인 절차
@@ -88,40 +91,6 @@ export interface AuditState {
   reanalyzingPage: number | null
   // 엑셀 파싱 후 담당자 확인 단계용 임시 데이터 (2026-04-21 추가)
   excelPreview: ExcelPreviewData | null
-}
-
-// 파일명에서 업체명(유치원 이름) 추출
-// 예시 패턴 — "_" 뒤의 마지막 세그먼트가 업체명으로 관례화되어 있음:
-//   "8월 급식 거래명세서_만안.xlsx"     → "만안"
-//   "2024.12월 급식 거래명세서_로사.pdf" → "로사"
-//   "25년6월검수일지_선경.xlsx"          → "선경"
-//   "청정원 8월 거래명세서_예은.pdf"     → "예은"
-// fallback: 파일명 전체에서 "명세서" 앞 부분
-export function extractSupplierName(fileName: string): string {
-  const nameWithoutExt = fileName.replace(/\.(pdf|xlsx|xls|heic|jpg|jpeg|png)$/i, '').trim()
-
-  // 패턴 1: 마지막 언더스코어 뒤 부분 (가장 흔한 관례)
-  const underscoreMatch = nameWithoutExt.match(/_([^_]+)$/)
-  if (underscoreMatch && underscoreMatch[1]) {
-    const candidate = underscoreMatch[1].trim()
-    // 너무 길면(>10자) 아마 업체명이 아니라 수식어 → 다음 패턴으로
-    if (candidate.length <= 10 && !/^\d+$/.test(candidate)) {
-      return candidate
-    }
-  }
-
-  // 패턴 2: "명세서"/"명세" 앞 부분의 마지막 단어
-  const nameseoMatch = nameWithoutExt.match(/(.+?)(거래명세서|거래명세|명세서|명세|검수일지|검수)/)
-  if (nameseoMatch && nameseoMatch[1]) {
-    const beforeNamese = nameseoMatch[1].trim()
-    // 마지막 공백 뒤 단어
-    const words = beforeNamese.split(/\s+/).filter(Boolean)
-    const lastWord = words[words.length - 1]
-    if (lastWord && lastWord.length <= 10) return lastWord
-  }
-
-  // 최종 fallback: 파일명 그대로 (수동 수정 가능)
-  return nameWithoutExt
 }
 
 // 액션 타입

@@ -44,6 +44,12 @@ function parseNumber(value: unknown): number {
   return 0
 }
 
+function hasCellValue(row: unknown[], index: number): boolean {
+  if (index === -1) return false
+  const value = row[index]
+  return value !== undefined && value !== null && String(value).trim() !== ''
+}
+
 // 컬럼 이름 매핑 (다양한 형식 지원)
 // 주의: 세액 포함 "총액" vs 세액 미포함 "공급가액"을 구분하기 위해 별도 키로 분리
 const COLUMN_ALIASES: Record<string, string[]> = {
@@ -62,6 +68,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     '출고량', '출고수량', '배송량', '납품량', '납품수량',
     // (2026-06-26) 공급사 거래내역서 표기 추가 — 풀무원 ERP "매출량", 일부 공급사 "판매량/공급량"
     '매출량', '판매량', '공급량', '판매수량', '공급수량', '매출수량',
+    // (2026-08-24) 푸디스트 거래내역서
+    '입고량', '입고수량',
   ],
   unit_price: [
     '단가', '개당가격', '단위가격', 'price', 'unit_price', 'unit price', '동행',
@@ -74,12 +82,16 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     // (2026-06-30) 아워홈 ERP "합계(VAT포함)", 과세 총액 표기 추가
     '합계(VAT포함)', '합계(vat포함)', 'VAT포함', 'vat포함', '합계 vat포함', 'VAT포함합계',
     '과세 계(VAT포함)', '과세계(VAT포함)', '과세계vat포함',
+    // (2026-08-24) 푸디스트 거래내역서
+    '입고총액',
   ],
   // 세액 미포함 공급가액 (별도 파싱 → total 없으면 supply+tax로 합산)
   supply_amount: [
     '공급가액', '공급가', 'supply_amount',
     // (2026-06-30) 아워홈 ERP "계(VAT제외)", "VAT제외" 표기
     '계(VAT제외)', '계(vat제외)', 'VAT제외', 'vat제외', '순공급가',
+    // (2026-08-24) 푸디스트 거래내역서
+    '입고금액',
   ],
   tax_amount: ['세액', '부가세', '부가가치세', 'tax_amount', 'vat', 'VAT'],
   // 일반 "금액" (총액/공급가액 미검출 시 fallback)
@@ -282,6 +294,11 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       const taxAmount = taxIdx !== -1 ? parseNumber(row[taxIdx]) : 0
       const explicitTotal = totalPriceIdx !== -1 ? parseNumber(row[totalPriceIdx]) : 0
       const fallbackAmount = amountIdx !== -1 ? parseNumber(row[amountIdx]) : 0
+      const hasSupplyAmount = hasCellValue(row, supplyIdx)
+      const hasTaxAmount = hasCellValue(row, taxIdx)
+      const hasTaxContribution = hasTaxAmount && taxAmount !== 0
+      const hasExplicitTotal = hasCellValue(row, totalPriceIdx)
+      const hasFallbackAmount = hasCellValue(row, amountIdx)
 
       // (2026-05-11) 수량 안전망 — quantity 컬럼 미검출(default 1) + supply/unit_price 정수비 일치 시 역산
       // 예: '주문량' 같은 미등록 헤더로 qtyIdx=-1 → default 1 → supply 28140, unit_price 9380 → ratio 3.0 → quantity=3 보정
@@ -293,26 +310,37 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       }
 
       let totalPrice = 0
-      if (explicitTotal > 0) {
+      if (hasExplicitTotal) {
         totalPrice = explicitTotal
-      } else if (supplyAmount > 0) {
+      } else if (hasSupplyAmount || hasTaxContribution) {
         totalPrice = supplyAmount + taxAmount
-      } else if (fallbackAmount > 0) {
+      } else if (hasFallbackAmount) {
         totalPrice = fallbackAmount
       }
 
-      // 단가 또는 총액 중 하나라도 있어야 함
-      if (unitPrice === 0 && totalPrice === 0) continue
+      // 값이 전부 0인 빈/안내 행만 제외한다. 음수 매출 보정은 원장 합계를 구성하므로 보존한다.
+      if (
+        unitPrice === 0 &&
+        supplyAmount === 0 &&
+        taxAmount === 0 &&
+        totalPrice === 0
+      ) continue
 
       // 단가가 없으면 (공급가액/수량) 또는 (총액/수량)
       const finalUnitPrice = unitPrice || (quantity > 0
-        ? Math.round((supplyAmount || totalPrice) / quantity)
+        ? Math.round((hasSupplyAmount ? supplyAmount : totalPrice) / quantity)
         : 0)
       // 총액이 없으면 (단가×수량) + 세액
-      const finalTotalPrice = totalPrice || (finalUnitPrice * quantity + taxAmount)
+      const hasAmountSource = hasExplicitTotal
+        || hasSupplyAmount
+        || hasTaxContribution
+        || hasFallbackAmount
+      const finalTotalPrice = hasAmountSource
+        ? totalPrice
+        : finalUnitPrice * quantity + taxAmount
 
       // 공급가액 최종값: 명시적 컬럼 우선, 없으면 단가×수량
-      const finalSupplyAmount = supplyIdx !== -1 && supplyAmount > 0
+      const finalSupplyAmount = hasSupplyAmount
         ? supplyAmount
         : finalUnitPrice * quantity
 
