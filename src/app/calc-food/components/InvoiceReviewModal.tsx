@@ -45,7 +45,7 @@ interface InvoiceReviewModalProps {
   onUpdatePageOcrTotal?: (pageNumber: number, ocrTotal: number | null) => void
   onTogglePageReviewed?: (pageNumber: number) => void
   onReplacePage?: (pageNumber: number, file: File) => Promise<void> | void
-  onExtendUpload?: (files: File[]) => void
+  onExtendUpload?: (files: File[], sourceSupplierName: string) => void
 }
 
 export function InvoiceReviewModal({

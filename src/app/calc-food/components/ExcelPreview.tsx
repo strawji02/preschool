@@ -19,6 +19,7 @@ import type { ExcelPreviewData } from '../hooks/useAuditSession'
 interface ExcelPreviewProps {
   preview: ExcelPreviewData
   onSupplierNameChange: (name: string) => void
+  onSourceSupplierNameChange: (name: string) => void
   onItemChange: (rowIndex: number, patch: Partial<ExcelPreviewData['items'][number]>) => void
   onItemRemove: (rowIndex: number) => void
   onCancel: () => void
@@ -28,6 +29,7 @@ interface ExcelPreviewProps {
 export function ExcelPreview({
   preview,
   onSupplierNameChange,
+  onSourceSupplierNameChange,
   onItemChange,
   onItemRemove,
   onCancel,
@@ -35,6 +37,8 @@ export function ExcelPreview({
 }: ExcelPreviewProps) {
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(preview.supplierName)
+  const [editingSourceSupplier, setEditingSourceSupplier] = useState(false)
+  const [sourceSupplierDraft, setSourceSupplierDraft] = useState(preview.sourceSupplierName)
 
   const [editingRow, setEditingRow] = useState<number | null>(null)
   const [rowDraft, setRowDraft] = useState<{
@@ -49,6 +53,13 @@ export function ExcelPreview({
       onSupplierNameChange(supplierDraft.trim())
     }
     setEditingSupplier(false)
+  }
+
+  const saveSourceSupplier = () => {
+    if (sourceSupplierDraft.trim() && sourceSupplierDraft !== preview.sourceSupplierName) {
+      onSourceSupplierNameChange(sourceSupplierDraft.trim())
+    }
+    setEditingSourceSupplier(false)
   }
 
   const startEditRow = (rowIndex: number) => {
@@ -100,10 +111,10 @@ export function ExcelPreview({
           </button>
         </div>
 
-        {/* 업체명 inline edit */}
+        {/* 기관명과 원본 공급사를 분리 — 다중 공급사 세션의 핵심 경계 */}
         <div className="mt-4 flex items-center gap-3">
-          <label className="text-sm font-medium text-blue-900">업체명:</label>
-          {editingSupplier ? (
+          <label className="text-sm font-medium text-blue-900">기관명:</label>
+          {editingSupplier && !preview.appendToSessionId ? (
             <div className="flex items-center gap-2">
               <input
                 type="text"
@@ -137,18 +148,68 @@ export function ExcelPreview({
               <span className="rounded bg-white px-3 py-1 text-base font-bold text-blue-900 shadow-sm">
                 {preview.supplierName}
               </span>
-              <button
+              {!preview.appendToSessionId && <button
                 onClick={() => setEditingSupplier(true)}
                 className="flex items-center gap-1 rounded text-sm text-blue-600 hover:text-blue-800"
               >
                 <Edit3 size={14} />
                 수정
-              </button>
+              </button>}
             </div>
           )}
           <span className="text-xs text-blue-700">
             (파일: {preview.fileName})
           </span>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <label className="text-sm font-medium text-blue-900">원본 공급사:</label>
+          {editingSourceSupplier ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={sourceSupplierDraft}
+                onChange={(e) => setSourceSupplierDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveSourceSupplier()
+                  if (e.key === 'Escape') {
+                    setSourceSupplierDraft(preview.sourceSupplierName)
+                    setEditingSourceSupplier(false)
+                  }
+                }}
+                autoFocus
+                className="rounded-lg border border-blue-400 px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button onClick={saveSourceSupplier} className="rounded bg-blue-600 p-1 text-white hover:bg-blue-700">
+                <Check size={16} />
+              </button>
+              <button
+                onClick={() => {
+                  setSourceSupplierDraft(preview.sourceSupplierName)
+                  setEditingSourceSupplier(false)
+                }}
+                className="rounded bg-gray-400 p-1 text-white hover:bg-gray-500"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-white px-3 py-1 text-base font-bold text-blue-900 shadow-sm">
+                {preview.sourceSupplierName}
+              </span>
+              <button
+                onClick={() => setEditingSourceSupplier(true)}
+                className="flex items-center gap-1 rounded text-sm text-blue-600 hover:text-blue-800"
+              >
+                <Edit3 size={14} /> 수정
+              </button>
+            </div>
+          )}
+          {preview.appendToSessionId && (
+            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+              기존 세션에 추가
+            </span>
+          )}
         </div>
 
         {/* KPI */}
@@ -312,10 +373,10 @@ export function ExcelPreview({
         </button>
         <button
           onClick={() => onConfirm(preview)}
-          disabled={preview.items.length === 0}
+          disabled={preview.items.length === 0 || preview.sourceSupplierName === '공급사 확인 필요'}
           className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
         >
-          확인 완료 → 매칭 시작 ({formatNumber(preview.items.length)}개)
+          {preview.appendToSessionId ? '추가 품목 매칭 시작' : '확인 완료 → 매칭 시작'} ({formatNumber(preview.items.length)}개)
         </button>
       </div>
     </div>

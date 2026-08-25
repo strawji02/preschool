@@ -92,6 +92,7 @@ export default function CalcFoodPage() {
     updateExcelPreviewItem,
     removeExcelPreviewItem,
     updateExcelPreviewSupplier,
+    updateExcelPreviewSourceSupplier,
     clearExcelPreview,
     // 비교 제외 / 업체명 수정 (2026-04-21)
     toggleExclude,
@@ -215,6 +216,7 @@ export default function CalcFoodPage() {
           <ExcelPreview
             preview={state.excelPreview}
             onSupplierNameChange={updateExcelPreviewSupplier}
+            onSourceSupplierNameChange={updateExcelPreviewSourceSupplier}
             onItemChange={updateExcelPreviewItem}
             onItemRemove={removeExcelPreviewItem}
             onCancel={clearExcelPreview}
@@ -230,7 +232,7 @@ export default function CalcFoodPage() {
             supplierName={state.supplierName || '업체'}
             pageTotals={state.pageTotals}
             pageSourceFiles={state.pageSourceFiles}
-            totalPages={state.totalPages}
+            totalPages={state.processingBatchPages || state.totalPages}
             sessionId={state.sessionId}
             pages={state.pages}
             onSupplierNameChange={updateSupplierName}
@@ -343,7 +345,10 @@ export default function CalcFoodPage() {
         onUpdatePageOcrTotal={updatePageOcrTotal}
         onTogglePageReviewed={togglePageReviewed}
         onReplacePage={replacePage}
-        onExtendUpload={extendSession}
+        onExtendUpload={(files, sourceSupplierName) => {
+          setInvoiceModalOpen(false)
+          void extendSession(files, sourceSupplierName)
+        }}
       />
     </div>
     </SessionScopeProvider>

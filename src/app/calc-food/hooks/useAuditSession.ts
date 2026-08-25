@@ -9,6 +9,7 @@ import { estimateSsgTotal } from '@/lib/unit-conversion'
 import { findPropagationTargets, applyPropagation, findSimilarSuggestions, applySuggestions, normalizeItemName } from '@/lib/match-propagation'
 import { canConfirmItem, healConfirmedWithoutMatch } from '@/lib/confirm-guard'
 import { extractSupplierName } from '@/lib/supplier-name'
+import { sha256File, sha256FileBatch } from '@/lib/file-hash'
 
 export { extractSupplierName } from '@/lib/supplier-name'
 
@@ -20,7 +21,11 @@ export type AuditStatus = 'empty' | 'excel_preview' | 'image_preview' | 'process
 // 엑셀 파싱 결과 (담당자 확인용 임시 데이터)
 export interface ExcelPreviewData {
   fileName: string
+  fileHash: string
   supplierName: string
+  sourceSupplierName: string
+  appendToSessionId?: string
+  pageNumber?: number
   items: Array<{
     name: string
     spec?: string
@@ -84,6 +89,7 @@ export interface AuditState {
   processingStartedAt: number | null   // epoch ms — 업로드 시작 시각
   processingRetryRound: number          // 0=1차 처리, 1+=실패 페이지 재시도 라운드
   processingFailedPages: number         // 현재까지 실패한 페이지 수 (재시도 대상)
+  processingBatchPages: number          // 이번 업로드에서 처리하는 페이지 수
   error: string | null
   fileName: string | null
   supplierName: string | null  // 파일명에서 추출한 공급업체명
@@ -128,6 +134,7 @@ type AuditAction =
   | { type: 'UPDATE_PROCESSING_PAGE'; page: number }
   | { type: 'ADD_PAGE_ITEMS'; items: ComparisonItem[] }
   | { type: 'COMPLETE_ANALYSIS' }
+  | { type: 'COMPLETE_EXCEL_APPEND'; totalPages: number }
   | { type: 'SET_CURRENT_PAGE'; page: number }
   | { type: 'UPDATE_ITEM_MATCH'; itemId: string; supplier: Supplier; match: SupplierMatch }
   | { type: 'SET_ERROR'; error: string }
@@ -154,6 +161,7 @@ type AuditAction =
   | { type: 'UPDATE_EXCEL_PREVIEW_ITEM'; rowIndex: number; patch: Partial<ExcelPreviewData['items'][number]> }
   | { type: 'REMOVE_EXCEL_PREVIEW_ITEM'; rowIndex: number }
   | { type: 'UPDATE_EXCEL_PREVIEW_SUPPLIER'; supplierName: string }
+  | { type: 'UPDATE_EXCEL_PREVIEW_SOURCE_SUPPLIER'; sourceSupplierName: string }
   | { type: 'CLEAR_EXCEL_PREVIEW' }
   // PDF/이미지 담당자 확인 단계 (2026-04-23 추가)
   | { type: 'SHOW_IMAGE_PREVIEW' }
@@ -187,6 +195,7 @@ const initialState: AuditState = {
   processingStartedAt: null,
   processingRetryRound: 0,
   processingFailedPages: 0,
+  processingBatchPages: 0,
   error: null,
   fileName: null,
   supplierName: null,
@@ -209,6 +218,97 @@ function recalcExcelPreviewTotals(items: ExcelPreviewData['items']) {
   const totalAmount = items.reduce((s, i) => s + i.total_price, 0)
   const mismatchCount = countMismatches(items)
   return { totalAmount, mismatchCount }
+}
+
+function sourceTypeForFiles(files: readonly File[]): 'excel' | 'pdf' | 'image' | 'mixed' {
+  const types = new Set(files.map((file) => {
+    if (isExcelFile(file)) return 'excel'
+    if (isPDF(file)) return 'pdf'
+    return 'image'
+  }))
+  return types.size === 1 ? [...types][0] as 'excel' | 'pdf' | 'image' : 'mixed'
+}
+
+async function createComparisonSource(input: {
+  sessionId: string
+  supplierName: string
+  files: readonly File[]
+  fileHash?: string
+  isAppend?: boolean
+  itemCount?: number
+  sourceTotal?: number
+}): Promise<string> {
+  const fileHash = input.fileHash ?? await sha256FileBatch(input.files)
+  const response = await fetch('/api/comparison/sources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: input.sessionId,
+      supplier_name: input.supplierName,
+      source_type: sourceTypeForFiles(input.files),
+      display_name: input.files.map((file) => file.name).join(', '),
+      file_names: input.files.map((file) => file.name),
+      file_hash: fileHash,
+      is_append: input.isAppend === true,
+      item_count: input.itemCount ?? 0,
+      source_total: input.sourceTotal ?? 0,
+    }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || !body.source_id) {
+    throw new Error(body.error || '원본 공급사 묶음을 만들지 못했습니다.')
+  }
+  return body.source_id as string
+}
+
+async function completeComparisonSource(
+  sourceId: string,
+  itemCount: number,
+  sourceTotal: number,
+): Promise<void> {
+  const response = await fetch('/api/comparison/sources', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_id: sourceId,
+      item_count: itemCount,
+      source_total: sourceTotal,
+      status: 'completed',
+    }),
+  })
+  if (!response.ok) throw new Error('원본 공급사 묶음 완료 처리에 실패했습니다.')
+}
+
+async function buildExcelPreviewData(
+  file: File,
+  options?: {
+    institutionName?: string | null
+    sourceSupplierName?: string
+    appendToSessionId?: string
+    pageNumber?: number
+  },
+): Promise<ExcelPreviewData> {
+  const parseResult = await parseInvoiceExcel(file)
+  if (!parseResult.success) throw new Error(parseResult.error || '엑셀 파싱 실패')
+
+  const items = parseResult.items as ExcelPreviewData['items']
+  return {
+    fileName: file.name,
+    fileHash: await sha256File(file),
+    supplierName:
+      options?.institutionName
+      ?? parseResult.institutionName
+      ?? extractSupplierName(file.name),
+    sourceSupplierName:
+      options?.sourceSupplierName?.trim()
+      || parseResult.sourceSupplierName
+      || '공급사 확인 필요',
+    appendToSessionId: options?.appendToSessionId,
+    pageNumber: options?.pageNumber ?? 1,
+    items,
+    totalAmount: items.reduce((sum, item) => sum + item.total_price, 0),
+    mismatchCount: countMismatches(items),
+  }
 }
 
 function calculateStats(items: ComparisonItem[]): SessionStats {
@@ -297,6 +397,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         processingStartedAt: Date.now(),
         processingRetryRound: 0,
         processingFailedPages: 0,
+        processingBatchPages: action.totalPages,
       }
 
     case 'SET_RETRY_ROUND':
@@ -305,7 +406,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         processingRetryRound: action.round,
         processingFailedPages: action.failedCount,
         processingPage: 0,  // 재시도 라운드는 진행률 0부터 재시작
-        totalPages: action.failedCount,
+        processingBatchPages: action.failedCount,
       }
 
     case 'LOAD_SESSION': {
@@ -332,10 +433,10 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         ...state,
         status: 'processing',
         processingPage: 0,
-        totalPages: action.addedPages,
         processingStartedAt: Date.now(),
         processingRetryRound: 0,
         processingFailedPages: 0,
+        processingBatchPages: action.addedPages,
       }
 
     case 'EXTEND_PAGES':
@@ -343,7 +444,7 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         ...state,
         pages: [...state.pages, ...action.pages],
         pageSourceFiles: [...state.pageSourceFiles, ...action.sourceFiles],
-        totalPages: state.pages.length + action.pages.length,
+        totalPages: state.totalPages + action.pages.length,
       }
 
     case 'SET_SESSION_ID':
@@ -453,6 +554,15 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
 
     case 'COMPLETE_ANALYSIS':
       return { ...state, status: 'analysis' }
+
+    case 'COMPLETE_EXCEL_APPEND':
+      return {
+        ...state,
+        status: 'analysis',
+        currentStep: 'matching',
+        totalPages: action.totalPages,
+        excelPreview: null,
+      }
 
     // PDF/이미지 OCR 완료 → 담당자 확인 단계 진입
     case 'SHOW_IMAGE_PREVIEW':
@@ -573,8 +683,17 @@ function auditReducer(state: AuditState, action: AuditAction): AuditState {
         excelPreview: { ...state.excelPreview, supplierName: action.supplierName },
       }
 
+    case 'UPDATE_EXCEL_PREVIEW_SOURCE_SUPPLIER':
+      if (!state.excelPreview) return state
+      return {
+        ...state,
+        excelPreview: { ...state.excelPreview, sourceSupplierName: action.sourceSupplierName },
+      }
+
     case 'CLEAR_EXCEL_PREVIEW':
-      return { ...state, status: 'empty', excelPreview: null }
+      return state.excelPreview?.appendToSessionId
+        ? { ...state, status: 'analysis', currentStep: 'matching', excelPreview: null }
+        : { ...state, status: 'empty', excelPreview: null }
 
     // 2-Step Workflow 액션 핸들러
     case 'SET_STEP':
@@ -1162,7 +1281,7 @@ export function useAuditSession() {
   // 추가 업로드 — 기존 세션에 페이지/품목 누적 (2026-04-26)
   // 시작 페이지 번호는 현재 totalPages + 1부터 부여, 같은 session_id로 OCR 호출
   const extendSession = useCallback(
-    async (files: File[]) => {
+    async (files: File[], sourceSupplierName?: string) => {
       if (!state.sessionId) {
         dispatch({ type: 'SET_ERROR', error: '활성 세션이 없습니다. 먼저 세션을 불러오세요.' })
         return
@@ -1171,9 +1290,25 @@ export function useAuditSession() {
         dispatch({ type: 'SET_ERROR', error: '파일을 선택해주세요.' })
         return
       }
-      // 엑셀은 추가 업로드 미지원 (단일 시트 가정)
       if (files.some((f) => isExcelFile(f))) {
-        dispatch({ type: 'SET_ERROR', error: '엑셀은 추가 업로드를 지원하지 않습니다. PDF/이미지만 가능합니다.' })
+        if (files.length !== 1 || !isExcelFile(files[0])) {
+          dispatch({ type: 'SET_ERROR', error: '엑셀 추가는 한 번에 한 파일만 가능합니다.' })
+          return
+        }
+        try {
+          const preview = await buildExcelPreviewData(files[0], {
+            institutionName: state.supplierName,
+            sourceSupplierName,
+            appendToSessionId: state.sessionId,
+            pageNumber: state.totalPages + 1,
+          })
+          dispatch({ type: 'SET_EXCEL_PREVIEW', preview })
+        } catch (error) {
+          dispatch({
+            type: 'SET_ERROR',
+            error: error instanceof Error ? error.message : '엑셀 추가 업로드 실패',
+          })
+        }
         return
       }
 
@@ -1183,6 +1318,7 @@ export function useAuditSession() {
       // 1. 새 페이지 추출
       const newPages: PageImage[] = []
       const newSourceFiles: string[] = []
+      let sourceId: string | null = null
       let nextNum = startPageNum
       try {
         for (const file of files) {
@@ -1209,11 +1345,28 @@ export function useAuditSession() {
         return
       }
 
+      try {
+        sourceId = await createComparisonSource({
+          sessionId: baseSessionId,
+          supplierName: sourceSupplierName?.trim() || files[0].name.replace(/\.[^.]+$/, ''),
+          files,
+          isAppend: true,
+        })
+      } catch (error) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: error instanceof Error ? error.message : '원본 공급사 묶음 생성 실패',
+        })
+        return
+      }
+
       dispatch({ type: 'START_EXTEND', addedPages: newPages.length })
 
       // 2. 페이지별 OCR (순차 + 5초 지연, processFiles와 동일 로직)
       const DELAY_MS = 5000
       const collectedTotals: PageTotal[] = []
+      let collectedItemCount = 0
+      let collectedSourceTotal = 0
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
       const analyzeOnePage = async (
@@ -1230,6 +1383,8 @@ export function useAuditSession() {
               page_number: pageNumber,
               image: extractBase64(page.dataUrl),
               source_file_name: sourceFile,
+              source_id: sourceId,
+              source_supplier_name: sourceSupplierName,
             }),
           })
           if (!analyzeRes.ok) {
@@ -1239,6 +1394,12 @@ export function useAuditSession() {
           const analyzeData = await analyzeRes.json()
           if (analyzeData.success && Array.isArray(analyzeData.items)) {
             dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+            collectedItemCount += analyzeData.items.length
+            collectedSourceTotal += analyzeData.items.reduce(
+              (sum: number, item: ComparisonItem) =>
+                sum + (item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity),
+              0,
+            )
             const ocrTotal =
               analyzeData.page_total != null ? Number(analyzeData.page_total) : null
             dispatch({ type: 'ADD_PAGE_TOTAL', pageNumber, ocrTotal, sourceFile })
@@ -1261,6 +1422,12 @@ export function useAuditSession() {
         completedCount += 1
         dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: completedCount })
         if (i < newPages.length - 1) await sleep(DELAY_MS)
+      }
+
+      try {
+        await completeComparisonSource(sourceId, collectedItemCount, collectedSourceTotal)
+      } catch (error) {
+        console.warn('추가 원본 완료 처리 실패:', error)
       }
 
       // 3. pages 누적 + total_pages 업데이트
@@ -1293,7 +1460,7 @@ export function useAuditSession() {
       // 6. 확인 단계로 전환
       dispatch({ type: 'SHOW_IMAGE_PREVIEW' })
     },
-    [state.sessionId, state.totalPages, state.pageTotals],
+    [state.sessionId, state.supplierName, state.totalPages, state.pageTotals],
   )
 
   // 세션 메타데이터 자동 업데이트 — sessionId/currentStep/status 변경 시 백엔드에 PATCH (2026-04-26)
@@ -1399,10 +1566,20 @@ export function useAuditSession() {
 
       dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
 
+      const sourceSupplierName = files[0].name.replace(/\.[^.]+$/, '')
+      const sourceId = await createComparisonSource({
+        sessionId: initData.session_id,
+        supplierName: sourceSupplierName,
+        files,
+        isAppend: false,
+      })
+
       // 3. 페이지 분석 — 순차 처리 + 5초 간격 (Gemini 2.5-flash 무료 티어 10 RPM 대응, 2026-04-24)
       // 품질 우선 + rate limit 회피. 14장 기준 평균 ~3분, 실패 재시도 포함 5~8분 예상.
       const DELAY_MS = 5000
       const collectedTotals: PageTotal[] = []
+      let collectedItemCount = 0
+      let collectedSourceTotal = 0
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
       // 단일 페이지 분석 함수 (재사용 가능)
@@ -1420,6 +1597,8 @@ export function useAuditSession() {
               page_number: pageNumber,
               image: extractBase64(page.dataUrl),
               source_file_name: sourceFile,
+              source_id: sourceId,
+              source_supplier_name: sourceSupplierName,
             }),
           })
 
@@ -1440,6 +1619,12 @@ export function useAuditSession() {
           const analyzeData = await analyzeRes.json()
           if (analyzeData.success && Array.isArray(analyzeData.items)) {
             dispatch({ type: 'ADD_PAGE_ITEMS', items: analyzeData.items })
+            collectedItemCount += analyzeData.items.length
+            collectedSourceTotal += analyzeData.items.reduce(
+              (sum: number, item: ComparisonItem) =>
+                sum + (item.extracted_total_price ?? item.extracted_unit_price * item.extracted_quantity),
+              0,
+            )
             const ocrTotal =
               analyzeData.page_total != null ? Number(analyzeData.page_total) : null
             dispatch({ type: 'ADD_PAGE_TOTAL', pageNumber, ocrTotal, sourceFile })
@@ -1510,6 +1695,8 @@ export function useAuditSession() {
         }
       }
 
+      await completeComparisonSource(sourceId, collectedItemCount, collectedSourceTotal)
+
       // 5. OCR + 매칭 완료 → 담당자 확인 단계로 진입 (엑셀과 UX 통일)
       dispatch({ type: 'SHOW_IMAGE_PREVIEW' })
     } catch (error) {
@@ -1524,27 +1711,19 @@ export function useAuditSession() {
   }, [])
 
   // 엑셀 파일 처리 — 1단계: 파싱 후 담당자 확인을 위한 preview 상태로 전환
-  const processExcelFile = useCallback(async (file: File) => {
+  const processExcelFile = useCallback(async (
+    file: File,
+    options?: { append?: boolean; sourceSupplierName?: string },
+  ) => {
     try {
-      // 클라이언트에서 엑셀 파싱
-      const parseResult = await parseInvoiceExcel(file)
-
-      if (!parseResult.success) {
-        throw new Error(parseResult.error || '엑셀 파싱 실패')
-      }
-
-      console.log(`엑셀에서 ${parseResult.items.length}개 품목 추출`)
-
-      const totalAmount = parseResult.items.reduce((s, i) => s + i.total_price, 0)
-      const mismatchCount = countMismatches(parseResult.items as ExcelPreviewData['items'])
-
-      const preview: ExcelPreviewData = {
-        fileName: file.name,
-        supplierName: extractSupplierName(file.name),
-        items: parseResult.items as ExcelPreviewData['items'],
-        totalAmount,
-        mismatchCount,
-      }
+      const current = stateRef.current
+      if (options?.append && !current.sessionId) throw new Error('추가할 세션이 없습니다.')
+      const preview = await buildExcelPreviewData(file, options?.append ? {
+        institutionName: current.supplierName,
+        sourceSupplierName: options.sourceSupplierName,
+        appendToSessionId: current.sessionId ?? undefined,
+        pageNumber: current.totalPages + 1,
+      } : undefined)
 
       dispatch({ type: 'SET_EXCEL_PREVIEW', preview })
     } catch (error) {
@@ -1556,30 +1735,61 @@ export function useAuditSession() {
   // 엑셀 담당자 확인 완료 — 2단계: 실제 매칭 수행
   // preview 데이터를 명시적으로 인자로 받음 (state snapshot 문제 회피)
   const confirmAndAnalyzeExcel = useCallback(async (preview: ExcelPreviewData) => {
+    let sourceId: string | null = null
     try {
-      dispatch({
-        type: 'START_PROCESSING',
-        fileName: preview.fileName,
-        totalPages: 1,
-        supplierName: preview.supplierName,
-      })
+      const isAppend = Boolean(preview.appendToSessionId)
+      if (isAppend) {
+        dispatch({ type: 'START_EXTEND', addedPages: 1 })
+      } else {
+        dispatch({
+          type: 'START_PROCESSING',
+          fileName: preview.fileName,
+          totalPages: 1,
+          supplierName: preview.supplierName,
+        })
+      }
 
-      // 세션 초기화
-      const initRes = await fetch('/api/session/init', {
+      let sessionId = preview.appendToSessionId
+      if (!sessionId) {
+        const initRes = await fetch('/api/session/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: preview.fileName,
+            total_pages: 1,
+            kindergarten_name: preview.supplierName,
+            price_book_period: priceBookPeriodRef.current,
+          }),
+        })
+        if (!initRes.ok) throw new Error('세션 초기화 실패')
+        const initData = await initRes.json()
+        if (!initData.success || !initData.session_id) {
+          throw new Error(initData.message || '세션 초기화 실패')
+        }
+        sessionId = String(initData.session_id)
+        dispatch({ type: 'SET_SESSION_ID', sessionId })
+      }
+
+      const sourceResponse = await fetch('/api/comparison/sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: preview.fileName,
-          total_pages: 1,
-          // 이 세션이 어느 달 신세계 단가로 비교하는지 (comparison.md §9)
-          price_book_period: priceBookPeriodRef.current,
+          session_id: sessionId,
+          supplier_name: preview.sourceSupplierName,
+          source_type: 'excel',
+          display_name: preview.fileName,
+          file_names: [preview.fileName],
+          file_hash: preview.fileHash,
+          is_append: isAppend,
+          item_count: preview.items.length,
+          source_total: preview.totalAmount,
         }),
       })
-      if (!initRes.ok) throw new Error('세션 초기화 실패')
-      const initData = await initRes.json()
-      if (!initData.success) throw new Error(initData.message || '세션 초기화 실패')
-
-      dispatch({ type: 'SET_SESSION_ID', sessionId: initData.session_id })
+      const sourceBody = await sourceResponse.json().catch(() => ({}))
+      if (!sourceResponse.ok || !sourceBody.source_id) {
+        throw new Error(sourceBody.error || '원본 공급사 묶음 생성 실패')
+      }
+      sourceId = sourceBody.source_id
       dispatch({ type: 'UPDATE_PROCESSING_PAGE', page: 1 })
 
       // 배치로 나눠 매칭
@@ -1594,7 +1804,14 @@ export function useAuditSession() {
         const analyzeRes = await fetch('/api/analyze/excel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: initData.session_id, items: batch }),
+          body: JSON.stringify({
+            session_id: sessionId,
+            items: batch,
+            source_id: sourceId,
+            source_supplier_name: preview.sourceSupplierName,
+            source_file_name: preview.fileName,
+            page_number: preview.pageNumber ?? 1,
+          }),
         })
         if (!analyzeRes.ok) {
           const errorData = await analyzeRes.json().catch(() => ({}))
@@ -1608,8 +1825,27 @@ export function useAuditSession() {
         }
       }
 
-      dispatch({ type: 'COMPLETE_ANALYSIS' })
+      if (!sourceId) throw new Error('원본 공급사 묶음 식별자가 없습니다.')
+      await completeComparisonSource(sourceId, preview.items.length, preview.totalAmount)
+      if (isAppend) {
+        const totalPages = preview.pageNumber ?? stateRef.current.totalPages + 1
+        await fetch(`/api/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ total_pages: totalPages, current_step: 'matching' }),
+        })
+        dispatch({ type: 'COMPLETE_EXCEL_APPEND', totalPages })
+      } else {
+        dispatch({ type: 'COMPLETE_ANALYSIS' })
+      }
     } catch (error) {
+      if (sourceId) {
+        void fetch('/api/comparison/sources', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source_id: sourceId, status: 'error' }),
+        })
+      }
       const message = error instanceof Error ? error.message : '알 수 없는 오류'
       dispatch({ type: 'SET_ERROR', error: message })
     }
@@ -1650,6 +1886,7 @@ export function useAuditSession() {
         standard_price: isClearMatch ? null : candidate.standard_price,
         match_score: isClearMatch ? null : candidate.match_score,
         match_status: isClearMatch ? 'unmatched' : 'manual_matched',
+        _decision_action: isClearMatch ? 'clear' : 'select',
       }
       if (supplier === 'SHINSEGAE') {
         body.adjusted_quantity = null
@@ -1684,6 +1921,7 @@ export function useAuditSession() {
       const body: Record<string, unknown> = {
         match_status: 'manual_matched',
         is_excluded: false,
+        _decision_action: 'confirm',
       }
       if (adjustments) {
         if (adjustments.adjusted_quantity !== undefined) body.adjusted_quantity = adjustments.adjusted_quantity
@@ -1710,6 +1948,7 @@ export function useAuditSession() {
             match_score: source.ssg_match.match_score,
             match_status: 'manual_matched',
             is_excluded: false,
+            _decision_action: 'propagate',
           }
           for (const tid of targetIds) {
             void fetch(`/api/audit-items/${tid}`, {
@@ -1760,6 +1999,7 @@ export function useAuditSession() {
         const body: Record<string, unknown> = {
           match_status: 'manual_matched',
           precision_reviewed_at: item.precision_reviewed_at ?? now,
+          _decision_action: 'confirm',
         }
         if (item.adjusted_quantity !== undefined) body.adjusted_quantity = item.adjusted_quantity
         if (item.adjusted_unit_weight_g !== undefined) body.adjusted_unit_weight_g = item.adjusted_unit_weight_g
@@ -1944,6 +2184,7 @@ export function useAuditSession() {
       match_score: source.ssg_match.match_score,
       match_status: 'manual_matched',
       is_excluded: false,
+      _decision_action: 'propagate',
     }
     for (const tid of targetIds) {
       void fetch(`/api/audit-items/${tid}`, {
@@ -1964,7 +2205,7 @@ export function useAuditSession() {
     void fetch(`/api/audit-items/${itemId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_excluded: newExcluded }),
+      body: JSON.stringify({ is_excluded: newExcluded, _decision_action: newExcluded ? 'exclude' : undefined }),
     }).catch((e) => console.warn('비교불가 상태 저장 실패 (state는 유지):', e))
   }, [state.items])
 
@@ -1980,6 +2221,9 @@ export function useAuditSession() {
   }, [])
   const updateExcelPreviewSupplier = useCallback((supplierName: string) => {
     dispatch({ type: 'UPDATE_EXCEL_PREVIEW_SUPPLIER', supplierName })
+  }, [])
+  const updateExcelPreviewSourceSupplier = useCallback((sourceSupplierName: string) => {
+    dispatch({ type: 'UPDATE_EXCEL_PREVIEW_SOURCE_SUPPLIER', sourceSupplierName })
   }, [])
   const clearExcelPreview = useCallback(() => {
     dispatch({ type: 'CLEAR_EXCEL_PREVIEW' })
@@ -2015,6 +2259,7 @@ export function useAuditSession() {
     updateExcelPreviewItem,
     removeExcelPreviewItem,
     updateExcelPreviewSupplier,
+    updateExcelPreviewSourceSupplier,
     clearExcelPreview,
     // PDF/이미지 담당자 확인 단계 (2026-04-23 추가)
     confirmImagePreview,

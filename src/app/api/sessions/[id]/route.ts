@@ -36,13 +36,22 @@ export async function GET(
     const { data: itemsRaw, error: itemsErr } = await supabase
       .from('audit_items')
       .select(
-        '*, matched_product:products!matched_product_id(id, supplier, product_name, product_code, spec_quantity, spec_unit, unit_normalized, category, origin, origin_detail, tax_type)',
+        '*, matched_product:products!matched_product_id(id, supplier, product_name, product_code, spec_quantity, spec_unit, unit_normalized, category, origin, origin_detail, tax_type), source:comparison_sources!source_id(id, supplier_name, display_name, is_append)',
       )
       .eq('session_id', id)
       .order('page_number', { ascending: true })
       .order('row_index', { ascending: true })
     if (itemsErr) {
       return NextResponse.json({ success: false, error: itemsErr.message }, { status: 500 })
+    }
+
+    const { data: sources, error: sourcesError } = await supabase
+      .from('comparison_sources')
+      .select('id, supplier_name, source_type, display_name, file_names, is_append, item_count, source_total, status, created_at')
+      .eq('session_id', id)
+      .order('created_at', { ascending: true })
+    if (sourcesError) {
+      return NextResponse.json({ success: false, error: sourcesError.message }, { status: 500 })
     }
 
     // 단종/비식자재 후보 제외용 — match_candidates의 product_id 수집 후 일괄 조회
@@ -77,6 +86,12 @@ export async function GET(
       const supplyAmount = it.extracted_supply_amount ?? undefined
       const taxAmount = it.extracted_tax_amount ?? undefined
       const totalPrice = it.extracted_total_price ?? undefined
+      const source = it.source as {
+        id: string
+        supplier_name: string
+        display_name: string
+        is_append?: boolean
+      } | null
 
       // 매칭 supplier 검증: SHINSEGAE만 인정
       const mp = it.matched_product as
@@ -167,6 +182,12 @@ export async function GET(
         extracted_total_price: totalPrice != null ? Number(totalPrice) : undefined,
         page_number: it.page_number ?? undefined,
         source_file_name: it.source_file_name ?? undefined,
+        source_id: it.source_id ?? undefined,
+        source_supplier_name: source?.supplier_name ?? undefined,
+        source_is_append: source?.is_append === true,
+        recommendation_source: it.recommendation_source ?? 'algorithm',
+        learning_evidence_count: Number(it.learning_evidence_count ?? 0),
+        initial_matched_product_id: it.initial_matched_product_id ?? undefined,
         cj_match: undefined,
         ssg_match: ssgMatch,
         cj_candidates: [],
@@ -189,6 +210,7 @@ export async function GET(
       success: true,
       session,
       items,
+      sources: sources ?? [],
       invalidCjMatchCount,
       lowConfidenceMatchCount,
     })

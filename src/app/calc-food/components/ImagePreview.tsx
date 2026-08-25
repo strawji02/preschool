@@ -41,7 +41,7 @@ interface ImagePreviewProps {
   onCancel: () => void
   onConfirm: () => void
   // 기존 세션에 페이지 추가 업로드 (저장된 세션에서 진입한 경우만 의미 있음, 2026-04-26)
-  onExtendUpload?: (files: File[]) => void
+  onExtendUpload?: (files: File[], sourceSupplierName: string) => void
   // Phase 1 검수 단계 — 행 수정/삭제/추가 + OCR 합계 수정 (2026-04-26)
   onUpdateItem?: (itemId: string, patch: Partial<ComparisonItem>) => void
   onRemoveItem?: (itemId: string) => void
@@ -104,9 +104,38 @@ export function ImagePreview({
   const [editingSupplier, setEditingSupplier] = useState(false)
   const [supplierDraft, setSupplierDraft] = useState(supplierName)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [pendingExtendFiles, setPendingExtendFiles] = useState<File[]>([])
+  const [pendingSourceSupplier, setPendingSourceSupplier] = useState('')
   const extendInputRef = useRef<HTMLInputElement | null>(null)
   // dragenter/leave가 자식 요소 진입 시 깜빡임을 일으키므로 카운터로 안정화
   const dragCounter = useRef(0)
+
+  const isSupportedExtendFile = (file: File) => {
+    const lowerName = file.name.toLowerCase()
+    return file.type === 'application/pdf'
+      || file.type.startsWith('image/')
+      || lowerName.endsWith('.xlsx')
+      || lowerName.endsWith('.xls')
+  }
+
+  const stageExtendFiles = (files: File[]) => {
+    const supported = files.filter(isSupportedExtendFile)
+    if (supported.length === 0) return
+    setPendingExtendFiles(supported)
+    setPendingSourceSupplier('')
+  }
+
+  const cancelExtendUpload = () => {
+    setPendingExtendFiles([])
+    setPendingSourceSupplier('')
+  }
+
+  const confirmExtendUpload = () => {
+    const sourceSupplierName = pendingSourceSupplier.trim()
+    if (!onExtendUpload || pendingExtendFiles.length === 0 || !sourceSupplierName) return
+    onExtendUpload(pendingExtendFiles, sourceSupplierName)
+    cancelExtendUpload()
+  }
 
   // 드래그앤드롭 핸들러 (저장된 세션에서만 활성화 — onExtendUpload prop이 있을 때) (2026-04-26)
   const handleDragEnter = (e: React.DragEvent) => {
@@ -136,10 +165,7 @@ export function ImagePreview({
     e.stopPropagation()
     dragCounter.current = 0
     setIsDragOver(false)
-    const dropped = Array.from(e.dataTransfer.files).filter(
-      (f) => f.type === 'application/pdf' || f.type.startsWith('image/'),
-    )
-    if (dropped.length > 0) onExtendUpload(dropped)
+    stageExtendFiles(Array.from(e.dataTransfer.files))
   }
 
   const saveSupplier = () => {
@@ -245,7 +271,7 @@ export function ImagePreview({
             <PlusCircle size={48} className="mx-auto mb-3 text-blue-600" />
             <h3 className="text-xl font-bold text-blue-900">여기에 파일을 놓으세요</h3>
             <p className="mt-1 text-sm text-blue-700">
-              현재 세션에 페이지를 추가합니다 (PDF · 이미지 여러 장 지원)
+              현재 세션에 자료를 추가합니다 (엑셀 · PDF · 이미지 지원)
             </p>
           </div>
         </div>
@@ -271,7 +297,7 @@ export function ImagePreview({
                 <button
                   onClick={() => extendInputRef.current?.click()}
                   className="flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
-                  title="이 세션에 거래명세표 페이지를 추가합니다 (기존 페이지는 OCR 다시 안 함). 화면에 파일을 드래그해서 놓는 것도 가능합니다."
+                  title="다른 공급사의 거래명세표를 이 세션에 추가합니다. 기존 자료와 매칭은 그대로 유지됩니다."
                 >
                   <PlusCircle size={16} />
                   추가 업로드
@@ -283,11 +309,11 @@ export function ImagePreview({
                   ref={extendInputRef}
                   type="file"
                   multiple
-                  accept="application/pdf,image/*"
+                  accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.xlsx,.xls,application/pdf,image/*"
                   className="hidden"
                   onChange={(e) => {
                     const files = e.target.files ? Array.from(e.target.files) : []
-                    if (files.length > 0) onExtendUpload(files)
+                    if (files.length > 0) stageExtendFiles(files)
                     if (extendInputRef.current) extendInputRef.current.value = ''
                   }}
                 />
@@ -356,6 +382,72 @@ export function ImagePreview({
           </span>
         </div>
       </div>
+
+      {pendingExtendFiles.length > 0 && onExtendUpload && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="source-supplier-dialog-title"
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-5">
+              <h3 id="source-supplier-dialog-title" className="text-lg font-bold text-slate-900">
+                원본 공급사 확인
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                이 이름으로 거래명세표 묶음과 품목 출처를 구분합니다. 다른 공급사끼리는 같은 날짜·품목이어도 중복으로 차단하지 않습니다.
+              </p>
+            </div>
+
+            <div className="mb-4 rounded-xl bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-semibold text-slate-500">추가할 파일</p>
+              <ul className="max-h-28 space-y-1 overflow-y-auto text-sm text-slate-700">
+                {pendingExtendFiles.map((file) => (
+                  <li key={`${file.name}-${file.size}`} className="truncate">• {file.name}</li>
+                ))}
+              </ul>
+            </div>
+
+            <label className="block text-sm font-semibold text-slate-800" htmlFor="source-supplier-name">
+              급식 공급사명 <span className="text-rose-600">*</span>
+            </label>
+            <input
+              id="source-supplier-name"
+              value={pendingSourceSupplier}
+              onChange={(event) => setPendingSourceSupplier(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') confirmExtendUpload()
+                if (event.key === 'Escape') cancelExtendUpload()
+              }}
+              placeholder="예: 푸디스트 주식회사"
+              className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              autoFocus
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              엑셀은 한 번에 1개, PDF·이미지는 같은 공급사 자료를 여러 개 선택할 수 있습니다.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelExtendUpload}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmExtendUpload}
+                disabled={!pendingSourceSupplier.trim()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                공급사 확인 후 추가
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 요약 KPI */}
       <div className="mb-4 grid grid-cols-5 gap-3">

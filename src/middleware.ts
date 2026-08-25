@@ -33,6 +33,7 @@ import { updateSession, copyCookies } from '@/lib/supabase/middleware'
 const COMPARISON_API_PREFIXES = [
   '/api/analyze',
   '/api/audit-items',
+  '/api/comparison',
   '/api/ocr-corrections',
   '/api/products',
   '/api/reference-search',

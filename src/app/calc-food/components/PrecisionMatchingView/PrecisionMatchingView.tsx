@@ -82,7 +82,7 @@ interface ProductDetail {
 
 const PACK_UNITS = ['EA', 'BAG', 'BOX', 'PAC', '봉', 'KG', 'L'] as const
 type SortMode = 'match' | 'price' | 'per_kg' | 'savings'
-type FilterMode = 'all' | 'unconfirmed' | 'unmatched' | 'excluded'
+type FilterMode = 'all' | 'added' | 'unconfirmed' | 'unmatched' | 'excluded'
 
 const SORT_LABEL: Record<SortMode, string> = {
   match: '일치율 높은 순',
@@ -93,9 +93,30 @@ const SORT_LABEL: Record<SortMode, string> = {
 
 const FILTER_LABEL: Record<FilterMode, string> = {
   all: '전체',
+  added: '이번 추가분',
   unconfirmed: '미확정만',
   unmatched: '매칭 없는 것만',
   excluded: '비교불가만',
+}
+
+function recommendationBadge(item: ComparisonItem): { label: string; className: string } | null {
+  const count = item.learning_evidence_count ?? 0
+  if (item.recommendation_source === 'session_exact') {
+    return { label: '현재 세션 확정 승계', className: 'bg-blue-100 text-blue-700' }
+  }
+  if (item.recommendation_source === 'history_supplier') {
+    return {
+      label: `공급사 학습${count > 0 ? ` · ${count}회` : ''}`,
+      className: 'bg-violet-100 text-violet-700',
+    }
+  }
+  if (item.recommendation_source === 'history_global') {
+    return {
+      label: `과거 확정${count > 0 ? ` · ${count}회` : ''}`,
+      className: 'bg-teal-100 text-teal-700',
+    }
+  }
+  return null
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -364,6 +385,7 @@ export function PrecisionMatchingView({
         if (filterMode === 'unconfirmed') return !it.is_confirmed && !it.is_excluded
         if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match && !it.is_excluded
         if (filterMode === 'excluded') return it.is_excluded === true
+        if (filterMode === 'added') return it.source_is_append === true
         return true
       })
       .map(({ idx }) => idx)
@@ -479,7 +501,7 @@ export function PrecisionMatchingView({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">필터:</span>
-          {(['all', 'unconfirmed', 'unmatched', 'excluded'] as FilterMode[]).map((m) => (
+          {(['all', 'added', 'unconfirmed', 'unmatched', 'excluded'] as FilterMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setFilterMode(m)}
@@ -841,6 +863,7 @@ function ItemListPanel({
       if (filterMode === 'unconfirmed') return !it.is_confirmed && !it.is_excluded
       if (filterMode === 'unmatched') return !it.cj_match && !it.ssg_match && !it.is_excluded
       if (filterMode === 'excluded') return it.is_excluded === true
+      if (filterMode === 'added') return it.source_is_append === true
       return true
     })
     // 2) 품목명 검색 (extracted_name + extracted_spec 부분 매칭)
@@ -995,6 +1018,32 @@ function ItemListPanel({
                         {it.extracted_spec}
                       </div>
                     )}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {it.source_is_append && (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800">
+                          이번 추가분
+                        </span>
+                      )}
+                      {it.source_supplier_name && (
+                        <span
+                          className="max-w-[140px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-600"
+                          title={`원본 공급사: ${it.source_supplier_name}`}
+                        >
+                          {it.source_supplier_name}
+                        </span>
+                      )}
+                      {(() => {
+                        const badge = recommendationBadge(it)
+                        return badge ? (
+                          <span
+                            className={cn('rounded px-1.5 py-0.5 text-[9px] font-semibold', badge.className)}
+                            title="사용자가 과거에 확정한 매핑을 추천 순위에 반영했습니다. 자동 확정되지는 않습니다."
+                          >
+                            {badge.label}
+                          </span>
+                        ) : null
+                      })()}
+                    </div>
                     {/* (2026-07-04) 총 발주 무게 + kg당 단가 — 규격/단위 환산 결과 */}
                     {(() => {
                       const { totalWeightG, unitPricePerKg } = computeInvoiceWeight(it)
@@ -1137,6 +1186,24 @@ function ExistingItemDetail({
           <span>
             🗄️ 기존 업체 품목 <span className="ml-1 text-[11px] font-normal text-gray-400">Read-only</span>
           </span>
+          {item.source_supplier_name && (
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              원본 공급사 · {item.source_supplier_name}
+            </span>
+          )}
+          {item.source_is_append && (
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+              이번 추가분
+            </span>
+          )}
+          {(() => {
+            const badge = recommendationBadge(item)
+            return badge ? (
+              <span className={cn('rounded px-2 py-0.5 text-[10px] font-semibold', badge.className)}>
+                {badge.label}
+              </span>
+            ) : null
+          })()}
           {/* (2026-07-04) 검토 중 비교불가 토글 — 확정 품목도 담당자가 비교불가로 처리 가능.
               비교불가면 최종 보고서 절감 계산에서 제외된다. */}
           {onToggleExclude && (

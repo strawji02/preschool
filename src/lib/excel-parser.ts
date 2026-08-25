@@ -29,7 +29,33 @@ export interface ExcelParseResult {
   success: boolean
   items: ExtractedExcelItem[]
   fileName: string
+  /** 거래명세표의 수신 기관. 공급사와 분리해 세션명에 사용한다. */
+  institutionName?: string
+  /** 거래명세표를 발행한 원본 공급사. 다중 원본 묶음의 식별자다. */
+  sourceSupplierName?: string
   error?: string
+}
+
+function extractWorkbookParties(rawData: unknown[][]): {
+  institutionName?: string
+  sourceSupplierName?: string
+} {
+  const metadata = rawData
+    .slice(0, 10)
+    .flatMap((row) => row ?? [])
+    .map((cell) => String(cell ?? '').trim())
+    .filter(Boolean)
+    .join(' | ')
+
+  const institution =
+    metadata.match(/(?:사업장|기관명|수신처)\s*[:：]\s*([^|]+)/i)?.[1]?.trim()
+    ?? metadata.match(/거래(?:내역서|명세서|명세표)\s*\(([^)]+)\)/i)?.[1]?.trim()
+  const supplier = metadata.match(/(?:공급업체|공급사|납품업체)\s*[:：]\s*([^|]+)/i)?.[1]?.trim()
+
+  return {
+    institutionName: institution || undefined,
+    sourceSupplierName: supplier || undefined,
+  }
 }
 
 // 숫자 파싱 (문자열에서 숫자만 추출)
@@ -133,6 +159,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
     
     // 시트를 2D 배열로 변환 (헤더 포함)
     const rawData: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+    const parties = extractWorkbookParties(rawData)
     
     if (rawData.length < 2) {
       return {
@@ -387,6 +414,7 @@ export async function parseInvoiceExcel(file: File): Promise<ExcelParseResult> {
       success: true,
       items,
       fileName: file.name,
+      ...parties,
     }
   } catch (error) {
     return {

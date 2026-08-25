@@ -4,6 +4,12 @@ export type Supplier = 'CJ' | 'SHINSEGAE'
 // 매칭 상태
 export type MatchStatus = 'auto_matched' | 'pending' | 'manual_matched' | 'unmatched'
 
+export type ComparisonRecommendationSource =
+  | 'algorithm'
+  | 'session_exact'
+  | 'history_supplier'
+  | 'history_global'
+
 // ========================================
 // Side-by-Side Comparison Types
 // ========================================
@@ -61,6 +67,12 @@ export interface ComparisonItem {
   extracted_total_price?: number     // 부가세 포함 최종 합계
   page_number?: number               // 속한 거래명세표 페이지 번호 (그룹핑용, 2026-04-23 추가)
   source_file_name?: string          // 원본 파일명 (여러 파일 업로드 시 페이지-파일 매핑, 2026-04-23)
+  source_id?: string                 // 다중 공급사 원본 묶음 (migration 064)
+  source_supplier_name?: string      // 명세표 발행 공급사 (기관명과 별개)
+  source_is_append?: boolean         // 최초 원본(false) / 진행 중 추가 원본(true)
+  recommendation_source?: ComparisonRecommendationSource
+  learning_evidence_count?: number
+  initial_matched_product_id?: string
 
   // 현재 선택된 매칭 (Top 1 또는 사용자 선택)
   cj_match?: SupplierMatch
@@ -275,6 +287,8 @@ export interface AnalyzePageRequest {
   page_number: number
   image: string  // Base64
   source_file_name?: string  // 원본 파일명 (여러 파일 업로드 시, 2026-04-23 추가)
+  source_id?: string         // 다중 공급사 원본 묶음
+  source_supplier_name?: string
   // 재촬영 모드 (2026-04-26): true면 같은 page_number의 기존 audit_items 삭제 후 재처리
   replace_existing?: boolean
 }

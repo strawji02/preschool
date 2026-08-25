@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { findComparisonMatches, calculateComparisonSavings } from '@/lib/matching'
-import type { ComparisonItem } from '@/types/audit'
+import { mergeLearnedCandidate } from '@/lib/comparison-match-learning'
+import { loadLearnedComparisonRecommendations } from '@/lib/comparison-match-learning-server'
+import type { ComparisonItem, ComparisonRecommendationSource, ExtractedItem } from '@/types/audit'
 
 // Node.js Runtime (Edge runtime의 자체 타임아웃으로 인해 대량 품목 처리 시 504 발생하여 전환)
 // 프론트엔드에서 20개씩 배치로 나눠 호출하므로 각 호출은 60초 내에 완료되어야 함
@@ -24,6 +26,10 @@ interface ExcelItem {
 interface ExcelAnalyzeRequest {
   session_id: string
   items: ExcelItem[]
+  source_id?: string
+  source_supplier_name?: string
+  source_file_name?: string
+  page_number?: number
 }
 
 interface ExcelAnalyzeResponse {
@@ -83,6 +89,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    let sourceSupplierName = String(body.source_supplier_name ?? '').trim()
+    let sourceIsAppend = false
+    if (body.source_id) {
+      const { data: source, error: sourceError } = await supabase
+        .from('comparison_sources')
+        .select('id, supplier_name, is_append')
+        .eq('id', body.source_id)
+        .eq('session_id', body.session_id)
+        .single()
+      if (sourceError || !source) {
+        return NextResponse.json<ExcelAnalyzeResponse>(
+          { success: false, items: [], error: '원본 공급사 묶음을 찾을 수 없습니다.' },
+          { status: 404 },
+        )
+      }
+      sourceSupplierName = source.supplier_name
+      sourceIsAppend = source.is_append === true
+    }
+
     console.log(`[${body.session_id}] Processing ${body.items.length} items from Excel...`)
 
     // 2. 각 품목에 대해 CJ/SSG 매칭 수행
@@ -92,17 +117,50 @@ export async function POST(request: NextRequest) {
         name: item.name,
         spec: item.spec,
         origin: item.origin,  // (2026-05-11) D열 원산지 컬럼 전달 — matching origin 가중치 적용
+        unit: item.unit,
         quantity: item.quantity,
         unit_price: item.unit_price,
+        supply_amount: item.supply_amount,
+        tax_amount: item.tax_amount,
         total_price: item.total_price,
       }, session.price_book_period)
     })
     
     const matchResults = await Promise.all(matchPromises)
+    const extractedItems: ExtractedItem[] = body.items.map((item) => ({
+      name: item.name,
+      spec: item.spec,
+      origin: item.origin,
+      unit: item.unit,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      supply_amount: item.supply_amount,
+      tax_amount: item.tax_amount,
+      total_price: item.total_price,
+    }))
+    const learned = await loadLearnedComparisonRecommendations({
+      supabase,
+      sessionId: body.session_id,
+      sourceSupplierName,
+      items: extractedItems,
+      priceBookPeriod: session.price_book_period,
+    })
+
+    const recommendationMeta = learned.map((recommendation, index) => {
+      if (!recommendation) {
+        return { source: 'algorithm' as ComparisonRecommendationSource, evidenceCount: 0 }
+      }
+      const match = matchResults[index]
+      match.ssg_candidates = mergeLearnedCandidate(match.ssg_candidates, recommendation.candidate)
+      match.ssg_match = recommendation.candidate
+      match.status = 'pending' // 자동 선택만 하고 최종 확정은 담당자가 수행
+      return { source: recommendation.source, evidenceCount: recommendation.evidenceCount }
+    })
 
     // 3. 결과 정리 및 DB 저장
     const processedItems = body.items.map((item, index) => {
       const match = matchResults[index]
+      const meta = recommendationMeta[index]
 
       const savings = calculateComparisonSavings(
         item.unit_price,
@@ -113,9 +171,11 @@ export async function POST(request: NextRequest) {
         match.ssg_match?.tax_type
       )
 
-      const bestMatch = savings.best_supplier === 'CJ' ? match.cj_match
-        : savings.best_supplier === 'SHINSEGAE' ? match.ssg_match
-        : match.cj_match ?? match.ssg_match
+      const bestMatch = meta.source !== 'algorithm'
+        ? match.ssg_match
+        : savings.best_supplier === 'CJ' ? match.cj_match
+          : savings.best_supplier === 'SHINSEGAE' ? match.ssg_match
+            : match.cj_match ?? match.ssg_match
 
       // match_score를 0~9.9999 범위로 제한 (NUMERIC(5,4) 호환)
       const safeMatchScore = bestMatch?.match_score 
@@ -139,6 +199,7 @@ export async function POST(request: NextRequest) {
           extracted_tax_amount: item.tax_amount,
           extracted_total_price: item.total_price,
           matched_product_id: bestMatch?.id,
+          initial_matched_product_id: bestMatch?.id,
           match_score: safeMatchScore,
           // 옵션 3 (2026-05-04): ssg_candidates를 DB에 저장
           match_candidates: match.ssg_candidates && match.ssg_candidates.length > 0
@@ -148,8 +209,12 @@ export async function POST(request: NextRequest) {
           standard_price: bestMatch?.standard_price,
           price_difference: bestMatch ? item.unit_price - bestMatch.standard_price : undefined,
           loss_amount: savings.max,
-          page_number: 1, // 엑셀은 단일 페이지로 처리
+          page_number: body.page_number ?? 1, // 추가 엑셀은 세션 다음 페이지 번호 사용
           row_index: item.row_index,
+          source_id: body.source_id,
+          source_file_name: body.source_file_name,
+          recommendation_source: meta.source,
+          learning_evidence_count: meta.evidenceCount,
           is_excluded: autoExcluded,  // 2026-04-21: 미매칭 자동 제외
         },
         cj_match: match.cj_match,
@@ -178,6 +243,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const recommendationEvents = processedItems.flatMap((item, index) => {
+      const itemId = insertedItems?.[index]?.id
+      if (!itemId || !item.dbRecord.matched_product_id) return []
+      return [{
+        session_id: body.session_id,
+        item_id: itemId,
+        source_id: body.source_id ?? null,
+        event_type: 'recommended',
+        to_product_id: item.dbRecord.matched_product_id,
+        recommendation_source: item.dbRecord.recommendation_source,
+        algorithm_version: 'comparison-v2-learning',
+        item_snapshot: {
+          name: item.dbRecord.extracted_name,
+          spec: item.dbRecord.extracted_spec,
+          origin: item.dbRecord.extracted_origin,
+          unit: item.dbRecord.extracted_unit,
+        },
+      }]
+    })
+    if (recommendationEvents.length > 0) {
+      const { error: eventError } = await supabase.from('comparison_match_events').insert(recommendationEvents)
+      if (eventError) console.warn('[analyze-excel] 추천 이벤트 저장 실패:', eventError.message)
+    }
+
     // 5. 세션 통계 업데이트
     await supabase.rpc('update_session_stats', { session_uuid: body.session_id })
 
@@ -193,6 +282,14 @@ export async function POST(request: NextRequest) {
       extracted_supply_amount: item.dbRecord.extracted_supply_amount,
       extracted_tax_amount: item.dbRecord.extracted_tax_amount,
       extracted_total_price: item.dbRecord.extracted_total_price,
+      page_number: item.dbRecord.page_number,
+      source_file_name: item.dbRecord.source_file_name,
+      source_id: item.dbRecord.source_id,
+      source_supplier_name: sourceSupplierName || undefined,
+      source_is_append: sourceIsAppend,
+      recommendation_source: item.dbRecord.recommendation_source,
+      learning_evidence_count: item.dbRecord.learning_evidence_count,
+      initial_matched_product_id: item.dbRecord.initial_matched_product_id,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
       cj_candidates: item.cj_candidates,

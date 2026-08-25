@@ -95,6 +95,14 @@ describe('비교 시스템 접근 정책', () => {
     expect(res.status).toBe(403)
   })
 
+  it('다중 공급사 원본 API도 비교 권한이 없으면 403', async () => {
+    loginWithComparison(false)
+    const res = await middleware(
+      req('/api/comparison/sources', { 'sec-fetch-site': 'same-origin' }),
+    )
+    expect(res.status).toBe(403)
+  })
+
   it('권한이 있으면 통과한다', async () => {
     loginWithComparison()
     const res = await middleware(req('/api/analyze', { 'sec-fetch-site': 'same-origin' }))

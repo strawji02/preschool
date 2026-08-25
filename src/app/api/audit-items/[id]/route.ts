@@ -43,6 +43,14 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
+    const actionMap: Record<string, 'selected' | 'confirmed' | 'propagated' | 'excluded' | 'cleared'> = {
+      select: 'selected',
+      confirm: 'confirmed',
+      propagate: 'propagated',
+      exclude: 'excluded',
+      clear: 'cleared',
+    }
+    const decisionAction = actionMap[String(body._decision_action ?? '')]
 
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const f of ALLOWED_FIELDS) {
@@ -50,9 +58,31 @@ export async function PATCH(
     }
 
     const supabase = createAdminClient()
+    const { data: before } = decisionAction
+      ? await supabase
+          .from('audit_items')
+          .select('matched_product_id')
+          .eq('id', id)
+          .maybeSingle()
+      : { data: null }
     const { error } = await supabase.from('audit_items').update(update).eq('id', id)
     if (error) {
       return apiError(error, 500, 'audit-items-patch')
+    }
+    if (decisionAction) {
+      const toProductId = body.matched_product_id !== undefined
+        ? body.matched_product_id
+        : before?.matched_product_id ?? null
+      const { error: eventError } = await supabase.rpc('record_comparison_match_decision', {
+        p_item_id: id,
+        p_event_type: decisionAction,
+        p_from_product_id: before?.matched_product_id ?? null,
+        p_to_product_id: toProductId,
+        p_algorithm_version: 'comparison-v2-learning',
+      })
+      if (eventError) {
+        console.warn('[audit-items-patch] 매핑 결정 이벤트 저장 실패:', eventError.message)
+      }
     }
     return NextResponse.json({ success: true })
   } catch (error) {

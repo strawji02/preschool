@@ -29,6 +29,8 @@ describe('비교 거래내역서 엑셀 파서', () => {
     const result = await parseInvoiceExcel(file)
 
     expect(result.success).toBe(true)
+    expect(result.institutionName).toBe('소망유치원')
+    expect(result.sourceSupplierName).toBe('푸디스트 주식회사')
     expect(result.items).toHaveLength(3)
     expect(result.items[0]).toMatchObject({
       quantity: 2,

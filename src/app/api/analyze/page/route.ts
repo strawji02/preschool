@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { extractItemsFromImage } from '@/lib/gemini'
 import { findComparisonMatches, calculateComparisonSavings } from '@/lib/matching'
+import { mergeLearnedCandidate } from '@/lib/comparison-match-learning'
+import { loadLearnedComparisonRecommendations } from '@/lib/comparison-match-learning-server'
 import { validateImageBase64, imageTypeToMime } from '@/lib/file-validator'
 import type {
   AnalyzePageRequest,
   ComparisonPageResponse,
   ComparisonItem,
+  ComparisonRecommendationSource,
 } from '@/types/audit'
 
 // Node.js Runtime (Edge에서 Gemini API 호출 문제로 롤백)
@@ -69,6 +72,30 @@ export async function POST(request: NextRequest) {
         },
         { status: 404 }
       )
+    }
+
+    let sourceSupplierName = String(body.source_supplier_name ?? '').trim()
+    let sourceIsAppend = false
+    if (body.source_id) {
+      const { data: source, error: sourceError } = await supabase
+        .from('comparison_sources')
+        .select('id, supplier_name, is_append')
+        .eq('id', body.source_id)
+        .eq('session_id', body.session_id)
+        .single()
+      if (sourceError || !source) {
+        return NextResponse.json<ComparisonPageResponse>(
+          {
+            success: false,
+            page_number: body.page_number,
+            items: [],
+            error: '원본 공급사 묶음을 찾을 수 없습니다.',
+          },
+          { status: 404 },
+        )
+      }
+      sourceSupplierName = source.supplier_name
+      sourceIsAppend = source.is_append === true
     }
 
     console.log(`[${body.session_id}] Processing page ${body.page_number}...`)
@@ -144,12 +171,30 @@ export async function POST(request: NextRequest) {
       return findComparisonMatches(item.name, supabase, undefined, item, session.price_book_period)
     })
     const matchResults = await Promise.all(matchPromises)
+    const learned = await loadLearnedComparisonRecommendations({
+      supabase,
+      sessionId: body.session_id,
+      sourceSupplierName,
+      items: ocrResult.items,
+      priceBookPeriod: session.price_book_period,
+    })
+    const recommendationMeta = learned.map((recommendation, index) => {
+      if (!recommendation) {
+        return { source: 'algorithm' as ComparisonRecommendationSource, evidenceCount: 0 }
+      }
+      const match = matchResults[index]
+      match.ssg_candidates = mergeLearnedCandidate(match.ssg_candidates, recommendation.candidate)
+      match.ssg_match = recommendation.candidate
+      match.status = 'pending'
+      return { source: recommendation.source, evidenceCount: recommendation.evidenceCount }
+    })
 
     console.log(`[${body.session_id}] Step 4: Matching completed in ${Date.now() - matchStartTime}ms (total: ${Date.now() - startTime}ms)`)
 
     // 5. Prepare items for DB insert and response
     const processedItems = ocrResult.items.map((item, index) => {
       const match = matchResults[index]
+      const meta = recommendationMeta[index]
 
       // Calculate savings for both suppliers (with VAT normalization)
       const savings = calculateComparisonSavings(
@@ -162,9 +207,11 @@ export async function POST(request: NextRequest) {
       )
 
       // For DB: 최고 절감 공급사의 매칭 정보 저장 (호환성)
-      const bestMatch = savings.best_supplier === 'CJ' ? match.cj_match
-        : savings.best_supplier === 'SHINSEGAE' ? match.ssg_match
-        : match.cj_match ?? match.ssg_match
+      const bestMatch = meta.source !== 'algorithm'
+        ? match.ssg_match
+        : savings.best_supplier === 'CJ' ? match.cj_match
+          : savings.best_supplier === 'SHINSEGAE' ? match.ssg_match
+            : match.cj_match ?? match.ssg_match
 
       // match_score를 0~9.9999 범위로 제한 (NUMERIC(5,4) 호환)
       const safeMatchScore = bestMatch?.match_score 
@@ -185,6 +232,7 @@ export async function POST(request: NextRequest) {
           extracted_tax_amount: item.tax_amount,
           extracted_total_price: item.total_price,
           matched_product_id: bestMatch?.id,
+          initial_matched_product_id: bestMatch?.id,
           match_score: safeMatchScore,
           // 옵션 3 (2026-05-04): ssg_candidates를 DB에 저장 → 세션 복원 시 후보 일관성 보장
           match_candidates: match.ssg_candidates && match.ssg_candidates.length > 0
@@ -197,6 +245,9 @@ export async function POST(request: NextRequest) {
           page_number: body.page_number,
           row_index: index,
           source_file_name: body.source_file_name,
+          source_id: body.source_id,
+          recommendation_source: meta.source,
+          learning_evidence_count: meta.evidenceCount,
         },
         // Response용 추가 데이터
         cj_match: match.cj_match,
@@ -226,6 +277,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const recommendationEvents = processedItems.flatMap((item, index) => {
+      const itemId = insertedItems?.[index]?.id
+      if (!itemId || !item.dbRecord.matched_product_id) return []
+      return [{
+        session_id: body.session_id,
+        item_id: itemId,
+        source_id: body.source_id ?? null,
+        event_type: 'recommended',
+        to_product_id: item.dbRecord.matched_product_id,
+        recommendation_source: item.dbRecord.recommendation_source,
+        algorithm_version: 'comparison-v2-learning',
+        item_snapshot: {
+          name: item.dbRecord.extracted_name,
+          spec: item.dbRecord.extracted_spec,
+          origin: item.dbRecord.extracted_origin,
+          unit: item.dbRecord.extracted_unit,
+        },
+      }]
+    })
+    if (recommendationEvents.length > 0) {
+      const { error: eventError } = await supabase.from('comparison_match_events').insert(recommendationEvents)
+      if (eventError) console.warn('[analyze-page] 추천 이벤트 저장 실패:', eventError.message)
+    }
+
     console.log(`[${body.session_id}] DB insert completed (${Date.now() - startTime}ms)`)
 
     // 7. Update session stats
@@ -248,6 +323,12 @@ export async function POST(request: NextRequest) {
       extracted_total_price: item.dbRecord.extracted_total_price,
       page_number: item.dbRecord.page_number,
       source_file_name: item.dbRecord.source_file_name,
+      source_id: item.dbRecord.source_id,
+      source_supplier_name: sourceSupplierName || undefined,
+      source_is_append: sourceIsAppend,
+      recommendation_source: item.dbRecord.recommendation_source,
+      learning_evidence_count: item.dbRecord.learning_evidence_count,
+      initial_matched_product_id: item.dbRecord.initial_matched_product_id,
       cj_match: item.cj_match,
       ssg_match: item.ssg_match,
       cj_candidates: item.cj_candidates,
