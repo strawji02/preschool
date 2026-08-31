@@ -130,10 +130,10 @@ interface AnalyzeResponse {
       restaurantName: string
       taxKind: 'taxable' | 'exempt'
       amount: number
+      suggestedItemName: string
+      itemNameOptions: string[]
     }[]
   }
-  /** 기존 품목명 (빈도순) — 오타로 계산서가 쪼개지지 않게 콤보로 제시한다 */
-  itemNameOptions: string[]
   /** 활성 영업자 전체. 이번 달 데이터가 없는 영업자도 배정할 수 있어야 한다 */
   allPartners: { partnerId: string; partnerName: string }[]
   invoiceSummary: {
@@ -1095,7 +1095,6 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             pendingItems={analysis.pending.itemNames}
             splitBlocked={splitBlocked}
             partners={analysis.allPartners}
-            itemNameOptions={analysis.itemNameOptions}
             onResolved={() => void analyze({ keepInputs: true })}
           />
 

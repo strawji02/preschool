@@ -22,6 +22,7 @@ import {
 import { venueDisplayName, type ReportPartnerBlock } from '../report/settlement-sheet'
 import { parseCjStatementSheet, type CjStatementResult } from '../parse/cj-statement'
 import { applyAdjustments, sumAdjustments } from '../calc/adjustment'
+import { suggestInvoiceItemName, venueItemNameOptions } from '../calc/item-name-suggestion'
 import { listAdjustments, type AdjustmentRecord } from '../data/adjustment'
 import { applyManualItems, type ManualItemRecord, type ManualNormalizedVenue } from '../calc/manual-item'
 import { listManualItems } from '../data/manual-item'
@@ -179,13 +180,8 @@ export interface SettlementRunResult {
    */
   pending: {
     buyers: PendingBuyer[]
-    itemNames: PendingItemName[]
+    itemNames: PendingItemNameResolution[]
   }
-  /**
-   * 이미 쓰이고 있는 품목명 — 빈도순. 화면에서 콤보로 제시한다.
-   * 오타로 새 품목이 생기면 계산서가 쪼개지므로 기존 값을 먼저 보여주는 게 중요하다.
-   */
-  itemNameOptions: string[]
   /**
    * **활성 영업자 전체.** `partners`는 이번 달 데이터가 있는 영업자만 담으므로
    * 신규 사업장에 담당자를 배정할 때 쓸 수 없다 (담당 유치원이 아직 없는 영업자가 빠진다).
@@ -199,6 +195,12 @@ export interface SettlementRunResult {
   closingVenues: ClosingVenueRow[]
   /** 마감 스냅샷에 굳힐 영업자 단위 산식 결과 */
   closingPartners: ClosingPartnerRow[]
+}
+
+/** 미매칭 행에 원본 추천값과 해당 유치원 전용 후보를 붙인 화면 계약. */
+export interface PendingItemNameResolution extends PendingItemName {
+  suggestedItemName: string
+  itemNameOptions: string[]
 }
 
 export async function runSettlement(
@@ -378,6 +380,10 @@ export async function runSettlement(
     ],
     master.issuer?.roundingMode ?? 'vat'
   )
+  const pending = {
+    buyers: invoice.pending.buyers,
+    itemNames: resolvePendingItemNames(invoice.pending.itemNames, master),
+  }
   const issuer = master.issuer
   const invoiceProblems = [...invoice.problems]
   if (!issuer) {
@@ -448,8 +454,7 @@ export async function runSettlement(
     issuer,
     canIssueInvoices:
       errors.length === 0 && unmapped.length === 0 && invoiceProblems.length === 0,
-    pending: invoice.pending,
-    itemNameOptions: itemNameOptions(master),
+    pending,
     allPartners: [...master.partners.values()]
       .filter((p) => p.isActive)
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -525,20 +530,21 @@ function buildClosingVenues(
   })
 }
 
-/**
- * 이미 등록된 품목명을 빈도순으로 모은다.
- *
- * 오타로 새 품목이 생기면 계산서가 두 장으로 쪼개진다(`급식재료`와 `급식재료 `).
- * 자주 쓰는 것을 앞에 두면 사용자가 직접 타이핑할 일이 줄어든다.
- */
-function itemNameOptions(master: SettlementMaster): string[] {
-  const counts = new Map<string, number>()
-  for (const item of master.venueItems.values()) {
-    counts.set(item.invoiceItemName, (counts.get(item.invoiceItemName) ?? 0) + 1)
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([name]) => name)
+function resolvePendingItemNames(
+  items: readonly PendingItemName[],
+  master: SettlementMaster
+): PendingItemNameResolution[] {
+  const history = [...master.venueItems.values()]
+  return items.map((item) => ({
+    ...item,
+    suggestedItemName: suggestInvoiceItemName(item.restaurantName, item.businessName),
+    itemNameOptions: venueItemNameOptions(
+      history,
+      item.source,
+      item.businessCode,
+      item.taxKind
+    ),
+  }))
 }
 
 function toLine(v: NormalizedVenue) {
@@ -668,7 +674,6 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     issuer: null,
     canIssueInvoices: false,
     pending: { buyers: [], itemNames: [] },
-    itemNameOptions: [],
     allPartners: [],
     closingVenues: [],
     closingPartners: [],

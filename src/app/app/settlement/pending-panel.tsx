@@ -38,6 +38,8 @@ export interface PendingItemRow {
   restaurantName: string
   taxKind: 'taxable' | 'exempt'
   amount: number
+  suggestedItemName: string
+  itemNameOptions: string[]
 }
 
 export interface PartnerOption {
@@ -79,7 +81,6 @@ export default function PendingPanel({
   pendingItems,
   splitBlocked,
   partners,
-  itemNameOptions,
   onResolved,
 }: {
   unmapped: UnmappedVenue[]
@@ -87,7 +88,6 @@ export default function PendingPanel({
   pendingItems: PendingItemRow[]
   splitBlocked: boolean
   partners: PartnerOption[]
-  itemNameOptions: string[]
   onResolved: () => void
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null)
@@ -318,7 +318,6 @@ export default function PendingPanel({
                 <li key={key} className="rounded-xl border border-gray-200 px-4 py-3">
                   <ItemNameForm
                     item={it}
-                    options={itemNameOptions}
                     busy={busy === key}
                     onSubmit={(invoiceItemName) =>
                       save(
@@ -629,17 +628,17 @@ function InvoiceInputs({
 
 function ItemNameForm({
   item,
-  options,
   busy,
   onSubmit,
 }: {
   item: PendingItemRow
-  options: string[]
   busy: boolean
   onSubmit: (name: string) => void
 }) {
-  const [name, setName] = useState('')
+  const [name, setName] = useState(item.suggestedItemName)
+  const options = item.itemNameOptions
   const trimmed = name.trim()
+  const listId = `item-names-${item.source}-${item.businessCode}-${item.restaurantCode}-${item.taxKind}`
   /** 앞뒤 공백만 다른 기존 이름이 있으면 알려준다 — 계산서가 쪼개지는 원인이다 */
   const nearMiss =
     trimmed !== '' &&
@@ -649,6 +648,7 @@ function ItemNameForm({
   return (
     <div className="space-y-2">
       <div className="text-sm">
+        <span className="text-xs text-gray-500">원본 식당명</span>{' '}
         <span className="font-medium text-gray-900">{item.restaurantName}</span>
         <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
           {item.taxKind === 'taxable' ? '과세' : '면세'}
@@ -657,16 +657,22 @@ function ItemNameForm({
           {item.businessName} · {won(item.amount)}원
         </span>
       </div>
+      {item.suggestedItemName && (
+        <p className="text-xs text-emerald-700">
+          원본 식당명 추천: <span className="font-medium">{item.suggestedItemName}</span> — 확인 후
+          저장해 주세요.
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
-          list={`item-names-${item.taxKind}`}
+          list={listId}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="품목명 (예: 급식재료)"
           className="w-56 rounded border border-gray-300 px-2 py-1 text-sm focus:border-gray-500 focus:outline-none"
         />
-        <datalist id={`item-names-${item.taxKind}`}>
+        <datalist id={listId}>
           {options.map((o) => (
             <option key={o} value={o} />
           ))}

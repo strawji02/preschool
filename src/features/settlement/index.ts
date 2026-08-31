@@ -48,6 +48,12 @@ export {
   type RoundedInvoice,
 } from './calc/invoice-rounding'
 
+export {
+  suggestInvoiceItemName,
+  venueItemNameOptions,
+  type VenueItemNameHistory,
+} from './calc/item-name-suggestion'
+
 // 수금·지급도 순수 산식이다 (docs §9)
 export {
   buildCollectionSummary,
@@ -133,6 +139,7 @@ export {
   type ExcludedSummary,
   type UnmappedSummary,
   type SourceSummary,
+  type PendingItemNameResolution,
 } from './service/run-settlement'
 
 export {
