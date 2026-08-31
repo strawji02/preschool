@@ -1,5 +1,7 @@
 # Code Analysis Report - Preschool Project
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 **Date**: 2026-02-05
 **Analyzer**: Claude Code (Sonnet 4.5)
 **Project**: Preschool Invoice Audit System
@@ -961,4 +963,3 @@ The preschool project demonstrates **solid engineering fundamentals** with stron
 **Analysis Time**: ~15 minutes
 **Files Analyzed**: 53 TypeScript files
 **Lines of Code**: ~5,000-6,000 (estimated)
-

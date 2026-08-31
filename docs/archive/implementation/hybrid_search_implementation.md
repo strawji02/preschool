@@ -1,10 +1,12 @@
 # 하이브리드 검색 구현 완료
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## 📋 개요
 
 BM25 (키워드 매칭) + Vector (시맨틱 유사도) 조합 하이브리드 검색을 구현했습니다.
 
-**참고 문서**: `claudedocs/korean_search_production.md`
+**참고 문서**: `docs/archive/implementation/korean_search_production.md`
 
 ## 🎯 구현 내용
 
@@ -157,7 +159,7 @@ USING pgroonga (product_name pgroonga_text_full_text_search_ops_v2);
 
 ## 🎓 참고 자료
 
-- **리서치 문서**: `claudedocs/korean_search_production.md`
+- **리서치 문서**: `docs/archive/implementation/korean_search_production.md`
 - **Supabase Hybrid Search**: https://supabase.com/docs/guides/ai/hybrid-search
 - **pgvector 문서**: https://github.com/pgvector/pgvector
 - **RRF 알고리즘**: https://www.paradedb.com/blog/hybrid-search-in-postgresql-the-missing-manual

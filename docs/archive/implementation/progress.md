@@ -1,5 +1,7 @@
 # 식자재 단가 감사 시스템 - 진행 상황
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 > **최종 업데이트**: 2026-02-01
 > **참조 문서**: [spec.md](./spec.md), [db-schema-plan.md](./db-schema-plan.md)
 
@@ -216,7 +218,7 @@ preschool/
 │   └── lib/                     # ✅ 파싱 유틸리티
 ├── supabase/
 │   └── migrations/              # ✅ SQL 마이그레이션
-└── claudedocs/
+└── docs/archive/implementation/
     ├── spec.md                  # PRD 원본
     ├── db-schema-plan.md        # DB 설계 문서
     ├── phase-spec/              # 단계별 스펙

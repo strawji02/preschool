@@ -1,5 +1,7 @@
 # Phase 2: Semantic Embeddings 실행 플랜
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 > 작성일: 2026-02-07
 > 목표: 의미 기반 검색으로 오매칭 문제 해결
 

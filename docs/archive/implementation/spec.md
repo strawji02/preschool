@@ -1,5 +1,7 @@
 # Project: 식자재 단가 감사 시스템 (Food Audit SaaS)
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## 1. Project Goal
 
 개발자(Claude)는 아래 제공된 **데이터 Context**와 **요구사항**을 분석하여,

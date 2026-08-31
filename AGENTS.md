@@ -47,8 +47,8 @@ src/lib/                   범용 유틸 (format, cn, supabase)
 ## 개발 규칙 (공통)
 
 - **한국어로 대화, 간결하게.**
-- **커밋은 main·develop 양쪽에** 매번. 커밋 메시지 끝에:
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- 커밋·푸시·배포는 사용자가 명시적으로 요청한 경우에만 수행합니다. 요청받아 커밋할 때는
+  `main`·`develop` 동기화 여부를 확인하고, AI 모델 명의의 공동 작성자 표기는 추가하지 않습니다.
 - **산술·환산·합계·매칭 변경은 TDD** — 실패 테스트 먼저, 그다음 구현. (돈 계산은 예외 없음)
 - **Supabase는 CLI/Management API로만.** 대시보드 SQL Editor 안내 금지.
   실데이터 조회는 `.env.local`의 service_role + PostgREST.

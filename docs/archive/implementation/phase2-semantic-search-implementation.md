@@ -1,5 +1,7 @@
 # Phase 2: Semantic Search Implementation
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## Overview
 
 Integrated semantic vector search into the API using OpenAI embeddings and Supabase `search_products_vector` RPC function. This provides superior matching accuracy compared to trigram-based fuzzy search.

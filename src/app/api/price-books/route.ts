@@ -11,7 +11,7 @@ import { listPriceBooks } from '@/features/shared/price-book'
  *
  * ⚠️ **`/api/settlement/price-book`과 나눠 둔 이유** — 그쪽은 업로드(POST)까지
  * 하는 정산 전용 라우트다. 비교 화면이 정산 라우트를 부르면 두 시스템이
- * 라우트로 얽힌다 (CLAUDE.md 모듈 경계).
+ * 라우트로 얽힌다 (AGENTS.md 모듈 경계).
  */
 export async function GET() {
   const guard = await requireApiUser()

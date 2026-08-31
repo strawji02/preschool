@@ -1,5 +1,7 @@
 # PPU (Price Per Unit) Implementation
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## Overview
 Implemented standardized price per unit calculation for product comparison across different suppliers (CJ and Shinsegae).
 

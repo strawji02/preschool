@@ -4,7 +4,7 @@
 -- 방법: Reciprocal Rank Fusion (RRF) - 두 순위의 역수 합산
 -- 예상 효과: 15-30% 정확도 향상
 --
--- 참고: claudedocs/korean_search_production.md
+-- 참고: docs/archive/implementation/korean_search_production.md
 
 -- ========================================
 -- 1. Hybrid Search: BM25 + Vector
@@ -99,7 +99,7 @@ COMMENT ON FUNCTION search_products_hybrid_bm25_vector(TEXT, vector, INTEGER, TE
 'Hybrid Search: BM25 + Vector with Reciprocal Rank Fusion (RRF).
 Combines keyword matching (BM25) and semantic similarity (Vector) for balanced accuracy.
 
-Based on: claudedocs/korean_search_production.md
+Based on: docs/archive/implementation/korean_search_production.md
 Expected improvement: 15-30% accuracy increase
 
 Parameters:

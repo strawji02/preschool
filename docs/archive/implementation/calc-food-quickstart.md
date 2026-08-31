@@ -1,5 +1,7 @@
 # Calc-Food Feature Integration - Quick Start Guide
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## 🚀 Deployment Steps (5 minutes)
 
 ### Step 1: Apply Database Migrations (2 min)
@@ -82,7 +84,7 @@ After deployment, monitor:
 
 ## 📚 Documentation
 
-- Full summary: `claudedocs/calc-food-feature-integration-summary.md`
+- Full summary: `docs/archive/implementation/calc-food-feature-integration-summary.md`
 - Technical details: See individual file comments
 - Database schema: `supabase/migrations/024_unit_conversions.sql`
 
@@ -113,7 +115,7 @@ After deployment, monitor:
 ## 📞 Support
 
 For issues or questions:
-1. Check full documentation: `claudedocs/calc-food-feature-integration-summary.md`
+1. Check full documentation: `docs/archive/implementation/calc-food-feature-integration-summary.md`
 2. Review migration files: `supabase/migrations/025_*.sql` and `026_*.sql`
 3. Run verification: `npx tsx scripts/verify-integration.ts`
 4. Check build logs: `npm run build`

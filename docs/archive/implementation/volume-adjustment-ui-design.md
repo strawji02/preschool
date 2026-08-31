@@ -1,5 +1,7 @@
 # Volume Adjustment UI Design Document
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## Problem
 
 거래명세표 (transaction statement) items have specific volumes (e.g., 2KG), but 신세계/CJ 단가표 (supplier price lists) may list items with different unit volumes (e.g., 1KG). To compare prices fairly, we need a volume multiplier to normalize quantities.

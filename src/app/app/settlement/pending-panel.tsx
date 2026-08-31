@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-// ⚠️ 클라이언트 전용 배럴을 쓴다 (CLAUDE.md 모듈 경계 규칙 2).
+// ⚠️ 클라이언트 전용 배럴을 쓴다 (AGENTS.md 모듈 경계 규칙 2).
 import { formatBizRegNo, isValidBizRegNo } from '@/features/settlement/client'
 
 /**

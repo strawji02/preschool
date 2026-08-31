@@ -1,5 +1,7 @@
 # Phase 3: Frontend UI Implementation Spec
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 > **Goal**: Split-View 인터페이스 기반 "식자재 단가 감사" 페이지 구축
 > **Route**: `/calc-food`
 > **Stack**: Next.js 16 (App Router), Tailwind CSS v4, Lucide React, pdfjs-dist

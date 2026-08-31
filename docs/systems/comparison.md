@@ -160,7 +160,8 @@ search.naver.com/search.naver?where=shop&query=…   200 · 네이버 가격비�
 
 ## 8. 상세 이력
 
-과거 구현·조사 문서는 `claudedocs/` 참조 (matching_research, hybrid_search_implementation 등).
+과거 구현·조사 문서는 `docs/archive/implementation/` 참조
+(matching_research, hybrid_search_implementation 등).
 **평소에는 읽지 않는다** — 필요한 질문이 생겼을 때만 연다.
 매칭 오류 디버깅 절차는 프로젝트 메모리 `feedback_matching_debug_playbook` 참조.
 
@@ -243,7 +244,7 @@ NULL      → 지금까지처럼 products.standard_price   (기존 세션 18개)
 
 ```
 1. 단가표 코드를 features/shared/price-book으로 이동
-   (CLAUDE.md — settlement ↔ comparison 직접 import 금지)
+   (AGENTS.md — settlement ↔ comparison 직접 import 금지)
 2. migration 062: audit_sessions.price_book_period + products 신규 320개 upsert
 3. API 5곳 단가 치환 (NULL이면 기존 동작 그대로)
 4. 화면: 업로드 **앞에** 기준월 선택 + 세션 목록·리포트에 표시

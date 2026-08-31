@@ -8,7 +8,7 @@
  * 비교   세션 기준월의 신세계 단가로 절감액 계산   docs/systems/comparison.md §9
  * ```
  *
- * ★ **`features/shared`에 있는 이유** — CLAUDE.md 모듈 경계 규칙상
+ * ★ **`features/shared`에 있는 이유** — AGENTS.md 모듈 경계 규칙상
  * `features/settlement` ↔ `features/comparison` 직접 import가 금지다.
  * 2026-08-14에 양쪽이 쓰기로 정해져 settlement에서 여기로 옮겼다.
  *

@@ -1,5 +1,7 @@
 # Calc-Food Feature Integration Summary
 
+> 보관 문서: 현재 운영 규칙은 AGENTS.md와 docs/systems/를 우선합니다.
+
 ## Overview
 
 Successfully implemented VAT normalization and unified unit conversion system for the calc-food page.

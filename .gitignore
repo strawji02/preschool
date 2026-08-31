@@ -47,3 +47,23 @@ next-env.d.ts
 # 홈택스 업로드 원본 (사업자번호·대표자명·이메일 포함 — 커밋 금지)
 계산서 발행을 위한 엑셀 파일_*.xlsx
 (세금)계산서 발행을 위한 엑셀 파일_*.xlsx
+
+# Telegram 업로드 원본·업무 산출물 (기관명·거래금액 등 포함 — 커밋 금지)
+/*.xlsx
+/*.xls
+/*.pptx
+/*.pdf
+/*.docx
+/*.html
+/photo_*.jpg
+/photo_*.jpeg
+/image_*.png
+/generated/
+/사업설명회_자료/
+
+# 일회성 분석·문서 생성 도구와 로컬 캐시
+/test-data/
+/make_profit_ppt.py
+/scripts/build_partner_training_ppt.py
+**/__pycache__/
+*.pyc

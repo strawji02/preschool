@@ -1,5 +1,5 @@
 // ⚠️ **서버 전용.** service_role로 DB를 붙는다. 클라이언트에서 import하면 **빌드가 실패한다** —
-// 조용히 번들에 실리는 것보다 낫다 (CLAUDE.md 모듈 경계 규칙).
+// 조용히 번들에 실리는 것보다 낫다 (AGENTS.md 모듈 경계 규칙).
 import 'server-only'
 
 /**
