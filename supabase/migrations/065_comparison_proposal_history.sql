@@ -292,7 +292,7 @@ $$;
 
 REVOKE ALL ON FUNCTION public.record_comparison_proposal_version(
   uuid, text, text, text, text, text, text, jsonb, jsonb, text[], boolean, text, jsonb, uuid, timestamptz
-) FROM PUBLIC;
+) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.record_comparison_proposal_version(
   uuid, text, text, text, text, text, text, jsonb, jsonb, text[], boolean, text, jsonb, uuid, timestamptz
 ) TO service_role;

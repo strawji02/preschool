@@ -422,6 +422,8 @@ audit_sessions (유치원·비교 기준월)
 발행 시점별 불변 스냅샷이다. 발행 저장은 DB 함수에서 세션 단위 advisory lock을
 잡고 처리하므로 동시 클릭에서도 버전 번호가 중복되지 않는다. 각 클릭의
 `idempotency_key`가 같으면 기존 결과를 반환해 네트워크 재시도 중복도 막는다.
+함수는 `SECURITY DEFINER`이므로 `PUBLIC`뿐 아니라 Supabase의 `anon`과
+`authenticated` 실행 권한도 명시적으로 회수하고 `service_role`만 허용한다.
 
 거래명세표 변경은 서버가 `audit_items`와 `comparison_sources`에서 다시 만든다.
 클라이언트가 해시를 제출하지 않는다. 다음 필드를 정규화한 뒤 행 순서와 파일명은
