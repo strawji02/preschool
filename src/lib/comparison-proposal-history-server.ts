@@ -2,10 +2,13 @@ import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
+  buildOfficialProposalDashboard,
   buildStatementSnapshot,
   normalizeKindergartenKey,
   normalizeKindergartenName,
   type EstimateConfidence,
+  type OfficialProposalVersionInput,
+  type ProposalDashboardChangeType,
   type ProposalAmountSnapshot,
   type StatementItemInput,
 } from '@/lib/comparison-proposal-history'
@@ -63,10 +66,20 @@ export interface RecordProposalVersionInput {
 export interface RecordedProposalVersion {
   versionId: string
   proposalId: string
+  rawVersionNo: number
   versionNo: number
   statementChanged: boolean | null
   proposalAmountChanged: boolean | null
   duplicate: boolean
+}
+
+export interface ProposalDashboardQuery {
+  month: string
+  search?: string
+  changeType?: ProposalDashboardChangeType
+  issuerId?: string
+  page?: number
+  pageSize?: number
 }
 
 function sourceSupplier(source: AuditItemRow['source']): string {
@@ -167,10 +180,24 @@ export async function recordProposalVersion(
   if (error) throw error
   const row = Array.isArray(data) ? data[0] : data
   if (!row) throw new Error('제안서 발행 이력을 저장하지 못했습니다.')
+  const rawVersionNo = Number(row.version_no)
+  let officialVersionNo = rawVersionNo
+  if (!isEstimated) {
+    const officialStartAt = await getProposalDashboardOfficialStartAt()
+    const { count, error: countError } = await db
+      .from('comparison_proposal_versions')
+      .select('*', { count: 'exact', head: true })
+      .eq('proposal_id', String(row.proposal_id))
+      .eq('is_estimated', false)
+      .gte('issued_at', officialStartAt)
+    if (countError) throw countError
+    officialVersionNo = count ?? 1
+  }
   return {
     versionId: String(row.version_id),
     proposalId: String(row.proposal_id),
-    versionNo: Number(row.version_no),
+    rawVersionNo,
+    versionNo: officialVersionNo,
     statementChanged: row.statement_changed == null ? null : Boolean(row.statement_changed),
     proposalAmountChanged: row.proposal_amount_changed == null ? null : Boolean(row.proposal_amount_changed),
     duplicate: Boolean(row.duplicate),
@@ -179,13 +206,31 @@ export async function recordProposalVersion(
 
 export async function getProposalHistory(sessionId: string) {
   const db = createAdminClient()
+  const officialStartAt = await getProposalDashboardOfficialStartAt()
   const { data, error } = await db
     .from('comparison_proposal_versions')
-    .select('id, version_no, issue_format, statement_changed, proposal_amount_changed, statement_diff, amount_diff, change_reasons, is_estimated, estimate_confidence, estimate_basis, issued_at')
+    .select('id, version_no, issue_format, statement_changed, proposal_amount_changed, statement_diff, amount_diff, amount_snapshot, change_reasons, issued_by, issued_at')
     .eq('session_id', sessionId)
+    .eq('is_estimated', false)
+    .gte('issued_at', officialStartAt)
     .order('version_no', { ascending: false })
   if (error) throw error
-  return data ?? []
+  const ordered = [...(data ?? [])].sort((a, b) => Number(a.version_no) - Number(b.version_no))
+  const profiles = await loadIssuerProfiles(ordered.map((row) => row.issued_by as string | null))
+  return ordered.map((row, index) => ({
+    id: row.id,
+    rawVersionNo: Number(row.version_no),
+    versionNo: index + 1,
+    issueFormat: row.issue_format,
+    statementChanged: index === 0 ? null : row.statement_changed,
+    proposalAmountChanged: index === 0 ? null : row.proposal_amount_changed,
+    statementDiff: index === 0 ? {} : row.statement_diff,
+    amountDiff: index === 0 ? {} : row.amount_diff,
+    amountSnapshot: row.amount_snapshot,
+    changeReasons: row.change_reasons,
+    issuedAt: row.issued_at,
+    issuer: profiles.get(String(row.issued_by ?? '')) ?? null,
+  })).reverse()
 }
 
 export function monthBoundsKst(month: string): { start: string; end: string } {
@@ -196,15 +241,142 @@ export function monthBoundsKst(month: string): { start: string; end: string } {
   return { start: start.toISOString(), end: end.toISOString() }
 }
 
-export async function getMonthlyProposalVersions(month: string) {
-  const { start, end } = monthBoundsKst(month)
+interface IssuerProfile {
+  id: string
+  name: string
+  email: string
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) return asObject(value[0])
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function asNumberRecord(value: unknown): Record<string, number> {
+  const object = asObject(value)
+  return Object.fromEntries(Object.entries(object).map(([key, item]) => [key, Number(item ?? 0)]))
+}
+
+async function loadIssuerProfiles(ids: Array<string | null>): Promise<Map<string, IssuerProfile>> {
+  const wanted = new Set(ids.filter((id): id is string => !!id))
+  const result = new Map<string, IssuerProfile>()
+  if (wanted.size === 0) return result
+  const db = createAdminClient()
+  const { data, error } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (error) {
+    console.warn('[comparison-proposal-dashboard-users]', error.message)
+    return result
+  }
+  for (const user of data.users) {
+    if (!wanted.has(user.id)) continue
+    const metadata = user.user_metadata ?? {}
+    result.set(user.id, {
+      id: user.id,
+      name: String(metadata.full_name ?? metadata.name ?? user.email ?? '담당자'),
+      email: user.email ?? '',
+    })
+  }
+  return result
+}
+
+export async function getProposalDashboardOfficialStartAt(): Promise<string> {
   const db = createAdminClient()
   const { data, error } = await db
-    .from('comparison_proposal_versions')
-    .select('id, session_id, version_no, issue_format, statement_changed, proposal_amount_changed, statement_diff, amount_diff, amount_snapshot, change_reasons, is_estimated, estimate_confidence, estimate_basis, issued_at, proposal:comparison_proposals!proposal_id(kindergarten_id, kindergarten_name_snapshot, target_period)')
-    .gte('issued_at', start)
-    .lt('issued_at', end)
-    .order('issued_at', { ascending: true })
+    .from('comparison_proposal_dashboard_settings')
+    .select('official_start_at')
+    .eq('id', 1)
+    .maybeSingle()
   if (error) throw error
-  return data ?? []
+  if (!data?.official_start_at) throw new Error('제안서 웹 현황판 공식 시작일이 설정되지 않았습니다.')
+  return String(data.official_start_at)
+}
+
+async function loadOfficialProposalRows(end: string, officialStartAt: string) {
+  const db = createAdminClient()
+  const rows: unknown[] = []
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from('comparison_proposal_versions')
+      .select('id, proposal_id, session_id, version_no, issue_format, statement_changed, proposal_amount_changed, statement_diff, amount_diff, amount_snapshot, change_reasons, is_estimated, issued_by, issued_at, proposal:comparison_proposals!proposal_id(kindergarten_id, kindergarten_name_snapshot, target_period)')
+      .eq('is_estimated', false)
+      .gte('issued_at', officialStartAt)
+      .lt('issued_at', end)
+      .order('issued_at', { ascending: true })
+      .order('version_no', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if ((data?.length ?? 0) < pageSize) break
+  }
+  return rows
+}
+
+function normalizeDashboardRow(
+  raw: unknown,
+  profiles: Map<string, IssuerProfile>,
+): OfficialProposalVersionInput {
+  const row = asObject(raw)
+  const proposal = asObject(row.proposal)
+  const issuerId = row.issued_by == null ? null : String(row.issued_by)
+  const issuer = issuerId ? profiles.get(issuerId) : null
+  return {
+    id: String(row.id ?? ''),
+    proposalId: String(row.proposal_id ?? ''),
+    sessionId: String(row.session_id ?? ''),
+    kindergartenId: String(proposal.kindergarten_id ?? ''),
+    kindergartenName: String(proposal.kindergarten_name_snapshot ?? '미확인'),
+    targetPeriod: String(proposal.target_period ?? ''),
+    rawVersionNo: Number(row.version_no ?? 0),
+    issueFormat: String(row.issue_format ?? ''),
+    statementChanged: row.statement_changed == null ? null : Boolean(row.statement_changed),
+    proposalAmountChanged: row.proposal_amount_changed == null ? null : Boolean(row.proposal_amount_changed),
+    statementDiff: asNumberRecord(row.statement_diff),
+    amountDiff: asNumberRecord(row.amount_diff),
+    amountSnapshot: normalizeAmountSnapshot(row.amount_snapshot),
+    changeReasons: Array.isArray(row.change_reasons) ? row.change_reasons.map(String) : [],
+    isEstimated: Boolean(row.is_estimated),
+    issuedAt: String(row.issued_at ?? ''),
+    issuerId,
+    issuerName: issuer?.name ?? (issuerId ? '담당자' : '시스템'),
+    issuerEmail: issuer?.email ?? '',
+  }
+}
+
+export async function getProposalDashboard(query: ProposalDashboardQuery) {
+  const { start, end } = monthBoundsKst(query.month)
+  const officialStartAt = await getProposalDashboardOfficialStartAt()
+  const rawRows = await loadOfficialProposalRows(end, officialStartAt)
+  const ids = rawRows.map((raw) => {
+    const row = asObject(raw)
+    return row.issued_by == null ? null : String(row.issued_by)
+  })
+  const profiles = await loadIssuerProfiles(ids)
+  const rows = rawRows.map((row) => normalizeDashboardRow(row, profiles))
+  const result = buildOfficialProposalDashboard(rows, {
+    officialStartAt,
+    monthStart: start,
+    monthEnd: end,
+    search: query.search,
+    changeType: query.changeType,
+    issuerId: query.issuerId,
+    page: query.page,
+    pageSize: query.pageSize,
+  })
+  const issuerMap = new Map<string, IssuerProfile>()
+  for (const row of rows) {
+    const issuedAt = Date.parse(row.issuedAt)
+    if (issuedAt < Date.parse(start) || issuedAt >= Date.parse(end) || !row.issuerId) continue
+    issuerMap.set(row.issuerId, {
+      id: row.issuerId,
+      name: row.issuerName,
+      email: row.issuerEmail,
+    })
+  }
+  return {
+    ...result,
+    officialStartAt,
+    month: query.month,
+    issuers: [...issuerMap.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+  }
 }

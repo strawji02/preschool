@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   aggregateProposalMonth,
+  buildOfficialProposalDashboard,
   buildStatementSnapshot,
   classifyHistoricalProposal,
   compareProposalSnapshots,
   normalizeKindergartenName,
   type ProposalAmountSnapshot,
   type ProposalVersionForAggregation,
+  type OfficialProposalVersionInput,
 } from '../comparison-proposal-history'
 
 const amount = (monthlyProposedAmount: number): ProposalAmountSnapshot => ({
@@ -112,5 +114,105 @@ describe('비교 제안서 발행·변경 이력', () => {
     expect(normalizeKindergartenName('소망유치원-26년6월')).toBe('소망유치원')
     expect(normalizeKindergartenName('소망유) 푸드머스 주문내역서_26년 6월')).toBe('소망유치원')
     expect(normalizeKindergartenName('서호_7월_신세계_7월')).toBe('서호')
+  })
+})
+
+const dashboardRow = (
+  overrides: Partial<OfficialProposalVersionInput>,
+): OfficialProposalVersionInput => ({
+  id: 'v1',
+  proposalId: 'p1',
+  sessionId: 's1',
+  kindergartenId: 'k1',
+  kindergartenName: '소망유치원',
+  targetPeriod: '2026-09',
+  rawVersionNo: 1,
+  issueFormat: 'pptx',
+  statementChanged: null,
+  proposalAmountChanged: null,
+  statementDiff: {},
+  amountDiff: {},
+  amountSnapshot: amount(800_000),
+  changeReasons: [],
+  isEstimated: false,
+  issuedAt: '2026-09-02T00:00:00.000Z',
+  issuerId: 'u1',
+  issuerName: '김담당',
+  issuerEmail: 'kim@example.com',
+  ...overrides,
+})
+
+describe('공식 제안서 웹 대시보드 집계', () => {
+  const options = {
+    officialStartAt: '2026-09-01T00:00:00.000Z',
+    monthStart: '2026-09-01T00:00:00.000Z',
+    monthEnd: '2026-10-01T00:00:00.000Z',
+    page: 1,
+    pageSize: 20,
+  }
+
+  it('기존 추정본과 공식 시작일 전 자료를 완전히 제외하고 첫 실제 발행을 공식 v1로 만든다', () => {
+    const result = buildOfficialProposalDashboard([
+      dashboardRow({ id: 'estimated', rawVersionNo: 1, isEstimated: true, issuedAt: '2026-08-20T00:00:00.000Z' }),
+      dashboardRow({ id: 'old-real', rawVersionNo: 2, issuedAt: '2026-08-25T00:00:00.000Z' }),
+      dashboardRow({
+        id: 'first-official',
+        rawVersionNo: 3,
+        issuedAt: '2026-09-02T00:00:00.000Z',
+        statementChanged: true,
+        proposalAmountChanged: true,
+        statementDiff: { modifiedCount: 4 },
+        amountDiff: { monthlyProposedAmount: 50_000 },
+      }),
+    ], options)
+
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].id).toBe('first-official')
+    expect(result.rows[0].officialVersionNo).toBe(1)
+    expect(result.rows[0].statementChanged).toBeNull()
+    expect(result.rows[0].proposalAmountChanged).toBeNull()
+    expect(result.rows[0].statementDiff).toEqual({})
+    expect(result.rows[0].amountDiff).toEqual({})
+    expect(result.summary.newProposalCount).toBe(1)
+    expect(result.summary.reissueCount).toBe(0)
+  })
+
+  it('공식 재발행만 네 가지 변경 유형으로 분류하고 유치원 수를 중복 제거한다', () => {
+    const result = buildOfficialProposalDashboard([
+      dashboardRow({ id: 'p1-v1', rawVersionNo: 5, issuedAt: '2026-09-02T00:00:00.000Z' }),
+      dashboardRow({ id: 'p1-v2', rawVersionNo: 6, issuedAt: '2026-09-03T00:00:00.000Z', statementChanged: true, proposalAmountChanged: true }),
+      dashboardRow({ id: 'p1-v3', rawVersionNo: 7, issuedAt: '2026-09-04T00:00:00.000Z', statementChanged: false, proposalAmountChanged: false }),
+      dashboardRow({ id: 'p2-v1', proposalId: 'p2', sessionId: 's2', kindergartenId: 'k2', kindergartenName: '서호유치원', rawVersionNo: 2, issuedAt: '2026-09-05T00:00:00.000Z' }),
+      dashboardRow({ id: 'p2-v2', proposalId: 'p2', sessionId: 's2', kindergartenId: 'k2', kindergartenName: '서호유치원', rawVersionNo: 3, issuedAt: '2026-09-06T00:00:00.000Z', statementChanged: false, proposalAmountChanged: true }),
+    ], options)
+
+    expect(result.summary.totalVersions).toBe(5)
+    expect(result.summary.kindergartenCount).toBe(2)
+    expect(result.summary.newProposalCount).toBe(2)
+    expect(result.summary.reissueCount).toBe(3)
+    expect(result.summary.bothChangedCount).toBe(1)
+    expect(result.summary.amountOnlyChangedCount).toBe(1)
+    expect(result.summary.neitherChangedCount).toBe(1)
+    expect(result.summary.statementOnlyChangedCount).toBe(0)
+  })
+
+  it('유치원·변경유형·담당자 필터와 페이지 구간을 일관되게 적용한다', () => {
+    const rows = [
+      dashboardRow({ id: 'a1', rawVersionNo: 1 }),
+      dashboardRow({ id: 'a2', rawVersionNo: 2, issuedAt: '2026-09-03T00:00:00.000Z', statementChanged: true, proposalAmountChanged: false }),
+      dashboardRow({ id: 'b1', proposalId: 'p2', sessionId: 's2', kindergartenId: 'k2', kindergartenName: '서호유치원', rawVersionNo: 1, issuerId: 'u2', issuerName: '이담당' }),
+      dashboardRow({ id: 'b2', proposalId: 'p2', sessionId: 's2', kindergartenId: 'k2', kindergartenName: '서호유치원', rawVersionNo: 2, issuerId: 'u2', issuerName: '이담당', issuedAt: '2026-09-04T00:00:00.000Z', statementChanged: true, proposalAmountChanged: false }),
+    ]
+    const result = buildOfficialProposalDashboard(rows, {
+      ...options,
+      search: '서호',
+      changeType: 'statement_only',
+      issuerId: 'u2',
+      pageSize: 1,
+    })
+
+    expect(result.total).toBe(1)
+    expect(result.rows.map((row) => row.id)).toEqual(['b2'])
+    expect(result.summary.statementOnlyChangedCount).toBe(1)
   })
 })

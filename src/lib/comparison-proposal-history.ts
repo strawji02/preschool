@@ -89,6 +89,52 @@ export interface ProposalMonthSummary {
   kindergartenCount: number
 }
 
+export type ProposalDashboardChangeType =
+  | 'all'
+  | 'new'
+  | 'reissue'
+  | 'both'
+  | 'statement_only'
+  | 'amount_only'
+  | 'neither'
+
+export interface OfficialProposalVersionInput {
+  id: string
+  proposalId: string
+  sessionId: string
+  kindergartenId: string
+  kindergartenName: string
+  targetPeriod: string
+  rawVersionNo: number
+  issueFormat: string
+  statementChanged: boolean | null
+  proposalAmountChanged: boolean | null
+  statementDiff: Record<string, number>
+  amountDiff: Record<string, number>
+  amountSnapshot: ProposalAmountSnapshot
+  changeReasons: string[]
+  isEstimated: boolean
+  issuedAt: string
+  issuerId: string | null
+  issuerName: string
+  issuerEmail: string
+}
+
+export interface OfficialProposalDashboardRow extends OfficialProposalVersionInput {
+  officialVersionNo: number
+}
+
+export interface OfficialProposalDashboardOptions {
+  officialStartAt: string
+  monthStart: string
+  monthEnd: string
+  search?: string
+  changeType?: ProposalDashboardChangeType
+  issuerId?: string
+  page?: number
+  pageSize?: number
+}
+
 function textKey(value: unknown): string {
   return String(value ?? '')
     .normalize('NFKC')
@@ -250,6 +296,99 @@ export function aggregateProposalMonth(rows: ProposalVersionForAggregation[]): P
     neitherChangedCount: reissues.filter((row) => row.statementChanged === false && row.proposalAmountChanged === false).length,
     estimatedCount: rows.filter((row) => row.isEstimated).length,
     kindergartenCount: new Set(rows.map((row) => row.kindergartenId)).size,
+  }
+}
+
+function isDashboardChangeTypeMatch(
+  row: OfficialProposalDashboardRow,
+  changeType: ProposalDashboardChangeType,
+): boolean {
+  if (changeType === 'all') return true
+  if (changeType === 'new') return row.officialVersionNo === 1
+  if (changeType === 'reissue') return row.officialVersionNo > 1
+  if (row.officialVersionNo === 1) return false
+  if (changeType === 'both') return row.statementChanged === true && row.proposalAmountChanged === true
+  if (changeType === 'statement_only') return row.statementChanged === true && row.proposalAmountChanged === false
+  if (changeType === 'amount_only') return row.statementChanged === false && row.proposalAmountChanged === true
+  return row.statementChanged === false && row.proposalAmountChanged === false
+}
+
+/**
+ * 웹 현황판 공식 집계.
+ *
+ * 과거 추정 및 공식 시작일 이전 버전은 번호 계산에서도 제외한다. 따라서 과거
+ * 추정본 때문에 DB 원시 버전이 v2 이상이어도 첫 공식 발행은 공식 v1이 된다.
+ */
+export function buildOfficialProposalDashboard(
+  inputRows: OfficialProposalVersionInput[],
+  options: OfficialProposalDashboardOptions,
+) {
+  const officialStart = Date.parse(options.officialStartAt)
+  const monthStart = Date.parse(options.monthStart)
+  const monthEnd = Date.parse(options.monthEnd)
+  if (![officialStart, monthStart, monthEnd].every(Number.isFinite) || monthStart >= monthEnd) {
+    throw new Error('공식 집계일 또는 조회 월 범위가 올바르지 않습니다.')
+  }
+
+  const officialRows = inputRows
+    .filter((row) => {
+      const issuedAt = Date.parse(row.issuedAt)
+      return !row.isEstimated && Number.isFinite(issuedAt) && issuedAt >= officialStart && issuedAt < monthEnd
+    })
+    .sort((a, b) => {
+      const time = Date.parse(a.issuedAt) - Date.parse(b.issuedAt)
+      return time || a.rawVersionNo - b.rawVersionNo || a.id.localeCompare(b.id)
+    })
+
+  const sequenceByProposal = new Map<string, number>()
+  const sequenced: OfficialProposalDashboardRow[] = officialRows.map((row) => {
+    const officialVersionNo = (sequenceByProposal.get(row.proposalId) ?? 0) + 1
+    sequenceByProposal.set(row.proposalId, officialVersionNo)
+    if (officialVersionNo === 1) {
+      return {
+        ...row,
+        officialVersionNo,
+        statementChanged: null,
+        proposalAmountChanged: null,
+        statementDiff: {},
+        amountDiff: {},
+      }
+    }
+    return { ...row, officialVersionNo }
+  })
+
+  const search = textKey(options.search)
+  const changeType = options.changeType ?? 'all'
+  const issuerId = options.issuerId?.trim() ?? ''
+  const filtered = sequenced.filter((row) => {
+    const issuedAt = Date.parse(row.issuedAt)
+    if (issuedAt < monthStart || issuedAt >= monthEnd) return false
+    if (search && !textKey(row.kindergartenName).includes(search)) return false
+    if (issuerId && row.issuerId !== issuerId) return false
+    return isDashboardChangeTypeMatch(row, changeType)
+  })
+
+  const summary = aggregateProposalMonth(filtered.map((row) => ({
+    kindergartenId: row.kindergartenId,
+    versionNo: row.officialVersionNo,
+    isEstimated: false,
+    statementChanged: row.statementChanged,
+    proposalAmountChanged: row.proposalAmountChanged,
+  })))
+  const ordered = [...filtered].sort((a, b) => Date.parse(b.issuedAt) - Date.parse(a.issuedAt))
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)))
+  const requestedPage = Math.max(1, Math.trunc(options.page ?? 1))
+  const pageCount = Math.max(1, Math.ceil(ordered.length / pageSize))
+  const page = Math.min(requestedPage, pageCount)
+  const start = (page - 1) * pageSize
+
+  return {
+    summary,
+    rows: ordered.slice(start, start + pageSize),
+    total: ordered.length,
+    page,
+    pageSize,
+    pageCount,
   }
 }
 
