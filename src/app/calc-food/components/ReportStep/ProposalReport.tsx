@@ -236,6 +236,8 @@ export function ProposalReport({
   const [childrenCount, setChildrenCount] = useState<number>(initialExtras?.children_count ?? 100)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  const [issuedVersion, setIssuedVersion] = useState<number | null>(null)
+  const [issueStatus, setIssueStatus] = useState<string | null>(null)
 
   // initialExtras prop이 비동기로 늦게 도착한 경우 state 동기화 + 자동 저장 ready 플래그
   // (마운트 시점에 fetch가 안 끝났으면 useState initial은 DEFAULT_EXTRAS만 잡음 → 사용자가 본 저장값과 다름)
@@ -427,8 +429,46 @@ export function ProposalReport({
     }
   }, [])
 
-  // 인쇄 트리거
-  const handlePrint = () => {
+  const recordProposalIssue = async (issueFormat: 'pptx' | 'pdf_print') => {
+    if (!sessionId) throw new Error('저장된 비교 세션이 없어 발행 이력을 기록할 수 없습니다.')
+    const response = await fetch('/api/comparison/proposals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        kindergarten_name: proposedTo,
+        target_period: period,
+        issue_format: issueFormat,
+        idempotency_key: crypto.randomUUID(),
+        amount_snapshot: {
+          monthlyExistingAmount: monthlyOurCost,
+          monthlyProposedAmount: monthlySsgCost,
+          monthlySavings,
+          annualExistingAmount: annualOurCost,
+          annualProposedAmount: annualSsgCost,
+          annualSavings,
+          savingsPercent,
+          supplyRate,
+          totalExtrasAnnual,
+        },
+      }),
+    })
+    const result = await response.json()
+    if (!response.ok || !result.success) throw new Error(result.error || '발행 이력 기록 실패')
+    const versionNo = Number(result.version?.versionNo ?? 0)
+    setIssuedVersion(versionNo || null)
+    setIssueStatus(`${issueFormat === 'pptx' ? 'PPTX' : 'PDF/인쇄'} · v${versionNo} 기록됨`)
+    return versionNo
+  }
+
+  // 브라우저는 실제 PDF 저장 완료 여부를 알 수 없으므로 인쇄 대화상자 시작 시점을 발행으로 기록한다.
+  const handlePrint = async () => {
+    try {
+      await recordProposalIssue('pdf_print')
+    } catch (error) {
+      console.error('PDF/인쇄 발행 이력 기록 실패:', error)
+      alert('발행 이력 기록에 실패했지만 인쇄는 계속합니다. 관리자에게 알려주세요.')
+    }
     window.print()
   }
 
@@ -464,6 +504,12 @@ export function ProposalReport({
         childrenCount,
         ssgPeriod: ssgPeriod ?? undefined,
       })
+      try {
+        await recordProposalIssue('pptx')
+      } catch (historyError) {
+        console.error('PPT 발행 이력 기록 실패:', historyError)
+        alert('PPT는 다운로드됐지만 발행 이력 기록에 실패했습니다. 관리자에게 알려주세요.')
+      }
     } catch (e) {
       console.error('PPT 다운로드 실패:', e)
       alert('PPT 다운로드 실패: ' + (e instanceof Error ? e.message : 'Unknown'))
@@ -519,6 +565,11 @@ export function ProposalReport({
               ) : savedAt ? (
                 <span className="inline-flex items-center gap-1 text-green-700"><Save size={11} /> 자동 저장됨 · {savedAt.toLocaleTimeString('ko-KR')}</span>
               ) : null}
+            </span>
+          )}
+          {issuedVersion && issueStatus && (
+            <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
+              발행 이력 {issueStatus}
             </span>
           )}
         </div>

@@ -1,5 +1,5 @@
 -- ============================================================
--- 027: hybrid RPC의 BM25 검색을 plainto_tsquery(AND) → to_tsquery(OR)로 전환
+-- 034: hybrid RPC의 BM25 검색을 plainto_tsquery(AND) → to_tsquery(OR)로 전환
 -- ============================================================
 -- 근본 원인 (2026-07-04 검증):
 --   기존 search_products_hybrid는 `plainto_tsquery('simple', search_term_clean)`를

@@ -7,7 +7,7 @@
  * 매번 OCR을 새로 돌리지 않도록 DB에 저장된 세션을 그대로 불러옴.
  */
 import { useEffect, useState } from 'react'
-import { Folder, FileText, MoreVertical, Trash2, Edit3, Loader2, CheckSquare, Square } from 'lucide-react'
+import { Folder, FileText, MoreVertical, Trash2, Edit3, Loader2, CheckSquare, Square, Download } from 'lucide-react'
 import { formatNumber } from '@/lib/format'
 import { formatPeriodLabel } from './PriceBookPeriodPicker'
 
@@ -57,6 +57,9 @@ export function SessionList({ onSelect }: SessionListProps) {
   // 다중 선택 상태 (2026-04-26 추가)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [reportMonth, setReportMonth] = useState(() => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit',
+  }).format(new Date()))
 
   const fetchSessions = async () => {
     try {
@@ -189,13 +192,30 @@ export function SessionList({ onSelect }: SessionListProps) {
               </button>
             </>
           ) : (
-            <button
-              onClick={() => setSelectionMode(true)}
-              className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              <CheckSquare size={14} />
-              선택 모드
-            </button>
+            <>
+              <input
+                type="month"
+                value={reportMonth}
+                onChange={(event) => setReportMonth(event.target.value)}
+                aria-label="제안서 보고서 월"
+                className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
+              />
+              <a
+                href={`/api/comparison/proposals/monthly?month=${encodeURIComponent(reportMonth)}`}
+                className="flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-800 hover:bg-sky-100"
+                title="유치원별 제안서 발행·변경 이력 엑셀 다운로드"
+              >
+                <Download size={14} />
+                제안서 월간 보고서
+              </a>
+              <button
+                onClick={() => setSelectionMode(true)}
+                className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+              >
+                <CheckSquare size={14} />
+                선택 모드
+              </button>
+            </>
           )}
         </div>
       </div>
