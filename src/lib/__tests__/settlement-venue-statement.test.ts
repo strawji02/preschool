@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { buildAdjustmentSheet } from '@/features/settlement/report/adjustment-sheet'
 import {
   buildVenueStatement,
+  uniqueVenueStatementTargets,
+  venueStatementArchiveName,
+  venueStatementEntryName,
   type VenueStatementItem,
-} from '@/features/settlement/report/venue-statement'
+} from '@/features/settlement'
 import type { AdjustmentRecord } from '@/features/settlement/data/adjustment'
 
 /**
@@ -174,5 +177,30 @@ describe('buildAdjustmentSheet — 조정 내역', () => {
     const row = sheet.rows[1]
     expect(row).toContain('정산제외 요청(본인부담)')
     expect(row).toContain('김영수')
+  })
+})
+
+describe('유치원 거래명세표 ZIP', () => {
+  it('공급사·사업장코드 기준으로 중복을 제거하고 이름순으로 정렬한다', () => {
+    expect(uniqueVenueStatementTargets([
+      { source: 'cj', businessCode: '1016', businessName: '복자유치원' },
+      { source: 'shinsegae', businessCode: '89912', businessName: '나래유치원' },
+      { source: 'cj', businessCode: '1016', businessName: '복자유치원 중복' },
+    ])).toEqual([
+      { source: 'shinsegae', businessCode: '89912', businessName: '나래유치원' },
+      { source: 'cj', businessCode: '1016', businessName: '복자유치원' },
+    ])
+  })
+
+  it('정산월이 드러나는 전체 ZIP 파일명을 만든다', () => {
+    expect(venueStatementArchiveName('2026-08')).toBe(
+      '2026-08_유치원_거래명세표_전체.zip'
+    )
+  })
+
+  it('ZIP 안에서는 공급사·사업장코드로 동명이인 파일을 구분한다', () => {
+    expect(venueStatementEntryName('2026-08', {
+      source: 'cj', businessCode: '1016', businessName: '복자/유치원',
+    })).toBe('CJ_1016_복자_유치원_거래명세표_2026-08.xlsx')
   })
 })

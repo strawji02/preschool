@@ -658,6 +658,39 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  /** 대상 유치원의 독립 XLSX를 한 ZIP으로 받는다. 파일끼리 데이터는 섞이지 않는다. */
+  async function downloadAllVenueStatements() {
+    setBusy('vs:all')
+    setError(null)
+    try {
+      const form = buildFormData()
+      form.append('period', issueMonth)
+      form.append('all', 'true')
+      form.append('priceBookPeriod', priceBookPeriod || issueMonth)
+
+      const response = await fetch('/api/settlement/venue-statement', {
+        method: 'POST',
+        body: form,
+      })
+      if (!response.ok) {
+        const json = (await response.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error ?? '유치원 거래명세표 ZIP 생성에 실패했습니다.')
+        return
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${issueMonth}_유치원_거래명세표_전체.zip`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ZIP 다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   /**
    * 월 마감 저장 (docs §8).
    *
@@ -1568,7 +1601,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
             신세계는 원천 집계표·일자 명세를 재현하고 외부 사입을 별도 시트로 붙인다.
             CJ는 거래명세서 원천을 기준으로 집계표·거래명세서 2시트 파일을 만든다.
-            유치원마다 따로 받는다. 한 파일에 여러 곳을 담으면 다른 유치원 단가가 섞인다.
+            각 유치원의 독립 파일을 만들며, 전체 받기는 그 파일들을 ZIP 하나로 묶는다.
           */}
           {analysis.statementVenues.length > 0 && (
             <section className="rounded-2xl border border-gray-200 bg-white p-6">
@@ -1576,6 +1609,20 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
               <p className="mt-1 text-xs text-gray-500">
                 유치원에 보내는 문서입니다. 원천 거래 내역과 승인된 외부 사입을 함께
                 제공하며, 금액은 유치원 청구가(단가) 기준입니다.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => void downloadAllVenueStatements()}
+                disabled={busy !== null || analysis.statementVenues.length === 0}
+                className="mt-4 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'vs:all'
+                  ? '전체 ZIP 만드는 중…'
+                  : `유치원 거래명세표 ZIP (${analysis.statementVenues.length}곳)`}
+              </button>
+              <p className="mt-1 text-xs text-gray-400">
+                유치원별 엑셀은 각각 분리된 상태로 ZIP 파일 하나에 담깁니다.
               </p>
 
               {/*

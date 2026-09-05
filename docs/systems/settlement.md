@@ -245,7 +245,7 @@
 | CJ 거래명세서 파서 + 교차검증 | `parse/cj-statement.ts`, `calc/cj-cross-check.ts` | **프로덕션 반영** (§5-2) |
 | 품목 조정 | migration 059, `calc/adjustment.ts`, `app/app/settlement/adjustment-panel.tsx` | **프로덕션 반영** (§18) |
 | 조정 시트 (내역서) | `report/adjustment-sheet.ts` | **프로덕션 반영** (§18) |
-| 유치원 제공 거래명세표 | `report/venue-statement.ts`, `api/settlement/venue-statement` | **프로덕션 반영** (§19) |
+| 유치원 제공 거래명세표·전체 ZIP | `report/venue-statement.ts`, `api/settlement/venue-statement` | **구현 완료** (§19) |
 | 원천 서버 보관 | migration 060, `data/source-archive.ts`, `service/resolve-sources.ts` | **프로덕션 반영** (§20) |
 | 외부 사입·임의 청구 | migration 063, `calc/manual-item.ts`, `app/app/settlement/manual-item-panel.tsx` | **프로덕션 반영** (§22) |
 | 파트너별 독립 정산서·ZIP | `report/partner-workbook.ts`, `api/settlement/partner-report` | **프로덕션 반영** (§22) |

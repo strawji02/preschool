@@ -387,6 +387,13 @@ export {
 export { createZipArchive, type ZipEntry } from './report/zip'
 
 export {
+  uniqueVenueStatementTargets,
+  venueStatementArchiveName,
+  venueStatementEntryName,
+  type VenueStatementTarget,
+} from './report/venue-statement-batch'
+
+export {
   buildManualItemSheet,
   type ManualItemSheet,
 } from './report/manual-item-sheet'

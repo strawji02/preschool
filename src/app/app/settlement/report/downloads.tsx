@@ -19,7 +19,7 @@ type Venue = {
   businessCode: string
   businessName: string
 }
-type BusyKey = Kind | `venue:${'shinsegae' | 'cj'}:${string}`
+type BusyKey = Kind | 'venue-all' | `venue:${'shinsegae' | 'cj'}:${string}`
 
 const LABEL: Record<'taxable' | 'exempt' | 'report' | 'partner-all', string> = {
   taxable: '세금계산서 (과세)',
@@ -115,6 +115,36 @@ export default function ReportDownloads({
     }
   }
 
+  async function downloadAllVenues() {
+    setBusy('venue-all')
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('period', period)
+      form.append('all', 'true')
+      form.append('priceBookPeriod', period)
+      form.append('closingRevision', String(closingRevision))
+      const res = await fetch('/api/settlement/venue-statement', { method: 'POST', body: form })
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error ?? '유치원 거래명세표 ZIP을 만들지 못했습니다.')
+        return
+      }
+      const blob = await res.blob()
+      const href = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = href
+      a.download = fileNameOf(res.headers.get('Content-Disposition')) ??
+        `${period}_유치원_거래명세표_전체.zip`
+      a.click()
+      URL.revokeObjectURL(href)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '거래명세표 ZIP 다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <section className="rounded-2xl border border-gray-200 bg-white p-6">
       <h2 className="font-semibold text-gray-900">산출물 다시 받기</h2>
@@ -182,6 +212,19 @@ export default function ReportDownloads({
       {statementVenues.length > 0 && (
         <div className="mt-5 border-t border-gray-100 pt-4">
           <p className="text-xs font-medium text-gray-600">유치원 거래명세표</p>
+          <button
+            type="button"
+            onClick={() => void downloadAllVenues()}
+            disabled={busy !== null}
+            className="mt-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === 'venue-all'
+              ? 'ZIP 생성 중…'
+              : `유치원 거래명세표 ZIP (${statementVenues.length}곳)`}
+          </button>
+          <p className="mt-1 text-xs text-gray-500">
+            유치원별 엑셀은 각각 분리된 상태로 ZIP 파일 하나에 담깁니다.
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {statementVenues.map((venue) => {
               const key = `venue:${venue.source}:${venue.businessCode}` as const
@@ -209,7 +252,7 @@ export default function ReportDownloads({
         주민번호 칸은 비어 있습니다.
         <br />파트너 정산서는 요약·유치원별 상세·공제 근거만 담은 독립 파일입니다.
         <br />유치원 거래명세표는 마감 리비전과 보관 원천의 청구 합계가 일치할 때만
-        다시 생성됩니다.
+        다시 생성됩니다. 전체 ZIP과 유치원별 개별 파일을 모두 받을 수 있습니다.
       </p>
     </section>
   )
