@@ -112,6 +112,17 @@ export async function POST(request: NextRequest) {
           { status: 404 }
         )
       }
+      const blockedOverride = result.invoiceOverrides.some(
+        (override) => override.businessCode === businessCode && override.status === 'draft'
+      ) || result.invoiceProblems.some(
+        (problem) => problem.includes('원본 금액이 변경') || problem.includes('원단위 조정이 승인 대기')
+      )
+      if (blockedOverride) {
+        return NextResponse.json(
+          { success: false, error: 'CJ 1016 원단위 조정을 확인·승인한 뒤 청구서류를 만들어 주세요.' },
+          { status: 409 }
+        )
+      }
       const bytes = await writeCjVenueStatementXlsx({
         period,
         businessName: venue.invoice.companyName ?? venue.businessName,
