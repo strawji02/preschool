@@ -87,6 +87,17 @@ export {
   type SupplierPayableSummary,
 } from './calc/supplier-payable'
 
+export {
+  WORK_NOTE_TARGET_LABEL,
+  WORK_NOTE_STATUS_LABEL,
+  validateWorkNoteDraft,
+  pendingWorkNoteCount,
+  workNoteGateError,
+  type WorkNoteDraft,
+  type WorkNoteTargetType,
+  type WorkNoteStatus,
+} from './calc/work-note'
+
 // 보고서 집계도 순수 함수다 (docs §13-2)
 export {
   rollupByKindergarten,
@@ -240,6 +251,16 @@ export {
   approveInvoiceOverrides,
   cancelInvoiceOverride,
 } from './data/invoice-override'
+
+export {
+  WorkNoteError,
+  listWorkNotes,
+  getWorkNote,
+  createWorkNote,
+  setWorkNoteStatus,
+  deletePendingWorkNote,
+  type WorkNoteRecord,
+} from './data/work-note'
 
 export {
   SupplierPayableError,

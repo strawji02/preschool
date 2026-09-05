@@ -85,14 +85,17 @@ function when(iso: string | null): string {
 export default function ClosingPanel({
   period,
   canClose,
+  memoPendingCount,
   isAdmin,
   onSave,
   onStatusChange,
 }: {
   /** `YYYY-MM` */
   period: string
-  /** 4개 게이트를 모두 통과했는지. 서버도 다시 검사한다 */
+  /** 필수 게이트를 모두 통과했는지. 서버도 다시 검사한다 */
   canClose: boolean
+  /** 처리되지 않은 상시 정산 메모 수 */
+  memoPendingCount: number
   /** 마감 해제 권한 (docs §8 — admin만) */
   isAdmin: boolean
   /** 저장 실행 — 파일·공제·분할을 붙여 보내는 건 부모가 한다 */
@@ -388,7 +391,9 @@ export default function ClosingPanel({
               </button>
               {!canClose && (
                 <span className="text-xs text-red-600">
-                  위 4개 항목을 모두 해결해야 마감할 수 있습니다
+                  {memoPendingCount > 0
+                    ? `정산 메모 미확인 ${memoPendingCount}건을 처리해야 확정할 수 있습니다`
+                    : '위 필수 항목을 모두 해결해야 마감할 수 있습니다'}
                 </span>
               )}
               {canClose && reasonMissing && (

@@ -9,6 +9,7 @@ import AdjustmentPanel, {
 } from './adjustment-panel'
 import ManualItemPanel, { type ManualItemVenue } from './manual-item-panel'
 import InvoiceOverridePanel from './invoice-override-panel'
+import WorkNotePanel from './work-note-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
@@ -209,6 +210,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 서버가 저장을 거부하므로 화면만 잠그는 게 아니라 **입력 자체를 막아** 헛수고를 없앤다.
    */
   const [locked, setLocked] = useState(false)
+  const [pendingWorkNoteCount, setPendingWorkNoteCount] = useState(0)
   /**
    * 서버에 보관된 원천 (docs §20). 있으면 파일을 다시 올리지 않아도 된다 —
    * 말일 5시간 동안 창을 닫아도 이어서 할 수 있다.
@@ -794,6 +796,9 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
   /** 분할 합계 불일치는 마감 차단 사유다 (docs §4) */
   const splitBlocked = declaration.warnings.some((w) => w.includes('마감할 수 없습니다'))
+  const handlePendingWorkNoteChange = useCallback((count: number) => {
+    setPendingWorkNoteCount(count)
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -1000,6 +1005,12 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           {notice && <span className="text-xs text-gray-500">{notice}</span>}
         </div>
       </section>
+
+      <WorkNotePanel
+        period={issueMonth}
+        locked={locked}
+        onPendingChange={handlePendingWorkNoteChange}
+      />
 
       {error && (
         <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
@@ -1650,7 +1661,13 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
           */}
           <ClosingPanel
             period={issueMonth}
-            canClose={analysis.canClose && analysis.canIssueInvoices && !splitBlocked}
+            canClose={
+              analysis.canClose &&
+              analysis.canIssueInvoices &&
+              !splitBlocked &&
+              pendingWorkNoteCount === 0
+            }
+            memoPendingCount={pendingWorkNoteCount}
             isAdmin={isAdmin}
             onSave={saveClosing}
             onStatusChange={setLocked}

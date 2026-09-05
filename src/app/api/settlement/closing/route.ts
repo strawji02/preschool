@@ -7,6 +7,7 @@ import {
   isExcelUpload,
   isValidPeriod,
   listClosings,
+  listWorkNotes,
   loadClosing,
   loadClosingRevisions,
   loadClosingSnapshot,
@@ -17,6 +18,7 @@ import {
   runSettlement,
   saveClosing,
   sumDeductionItems,
+  workNoteGateError,
   type DeclarationSplit,
 } from '@/features/settlement'
 
@@ -31,7 +33,7 @@ import {
  */
 
 /**
- * ⚠️ **확정·마감 모두 4개 게이트를 서버에서 다시 검사한다.**
+ * ⚠️ **확정·마감 모두 필수 게이트를 서버에서 다시 검사한다.**
  *
  * 화면이 이미 막고 있지만, 깨진 상태를 스냅샷으로 굳히면 나중에 그게 "확정된 사실"이
  * 되어버린다. 클라이언트를 믿지 않는다 (docs §14-2·§14-7).
@@ -122,7 +124,12 @@ export async function POST(request: NextRequest) {
     )
     const splitProblems = declaration.warnings.filter((w) => w.includes('마감할 수 없습니다'))
 
-    const blocked = gateErrors(result, splitProblems)
+    const workNotes = await listWorkNotes(period)
+    const workNoteProblem = workNoteGateError(workNotes)
+    const blocked = gateErrors(
+      result,
+      workNoteProblem ? [...splitProblems, workNoteProblem] : splitProblems
+    )
     if (blocked.length > 0) {
       return NextResponse.json(
         { success: false, error: blocked.join(' / '), problems: blocked },
@@ -133,7 +140,7 @@ export async function POST(request: NextRequest) {
     // 스냅샷에는 **재현에 필요한 것을 전부** 담는다. 정규화하지 않는 이유는
     // 스키마가 바뀌어도 과거 리비전을 그대로 읽어야 하기 때문이다.
     const snapshot = {
-      version: 3,
+      version: 4,
       period,
       savedAt: new Date().toISOString(),
       sources: result.sources,
@@ -145,6 +152,9 @@ export async function POST(request: NextRequest) {
       declarationLines: declaration.lines,
       invoiceRows: result.invoiceRows,
       invoiceOverrides: result.invoiceOverrides,
+      // 그 달 메모가 모두 처리되었음을 마감 근거로 함께 굳힌다.
+      // 메모 자체는 금액에 자동 반영되지 않고 담당자의 확인 체크만 보존한다.
+      workNotes,
       issuer: result.issuer,
       closingVenues: result.closingVenues,
       closingPartners: result.closingPartners,

@@ -249,6 +249,7 @@
 | 원천 서버 보관 | migration 060, `data/source-archive.ts`, `service/resolve-sources.ts` | **프로덕션 반영** (§20) |
 | 외부 사입·임의 청구 | migration 063, `calc/manual-item.ts`, `app/app/settlement/manual-item-panel.tsx` | **프로덕션 반영** (§22) |
 | 파트너별 독립 정산서·ZIP | `report/partner-workbook.ts`, `api/settlement/partner-report` | **프로덕션 반영** (§22) |
+| 월별 상시 정산 메모 | migration 069, `app/app/settlement/work-note-panel.tsx` | **구현 완료** (§8-6) |
 
 ### 역검증 근거
 
