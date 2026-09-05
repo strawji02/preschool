@@ -1,8 +1,4 @@
 import type { SettlementSource, TaxBreakdown } from '../parse/types'
-import {
-  applyInvoiceRounding,
-  type InvoiceRoundingMode,
-} from '../calc/invoice-rounding'
 
 /**
  * 홈택스 전자(세금)계산서 일괄발행 엑셀 (docs/systems/settlement.md §6-1).
@@ -256,6 +252,10 @@ export interface InvoiceRow {
   vat: number
   /** 몇 개 식당이 합쳐졌는지. 1이면 단독 (해밀 사례는 2) */
   mergedFrom: number
+  /** 이 계산서 행의 원천 사업장. CJ 1016 예외 적용 대상을 코드로 검증한다. */
+  venueKeys?: string[]
+  /** 외부 사입 별도행은 CJ 1016 공급사 원본 조정 대상이 아니다. */
+  allowVenueOverride?: boolean
   /**
    * 원단위 절사로 깎인 금액 (docs §6-2). 절사 대상이 아니면 0.
    *
@@ -325,8 +325,8 @@ const KIND_LABEL: Record<InvoiceTaxKind, string> = {
  */
 export function collectInvoiceRows(
   lines: readonly InvoiceVenueLine[],
-  /** 차액을 어디서 뺄지. 기본 `vat` — 세무사 협의로 바뀔 수 있다 (docs §6-2) */
-  roundingMode: InvoiceRoundingMode = 'vat'
+  /** @deprecated 2026-09-05부터 10원 절사를 폐기했다. 이전 호출 호환용이다. */
+  _legacyRoundingMode?: 'vat' | 'supply'
 ): CollectInvoiceResult {
   const groups = new Map<string, InvoiceRow>()
   const problems: string[] = []
@@ -334,8 +334,6 @@ export function collectInvoiceRows(
   // 사업장 단위로 모은다 — 식당이 3개여도 고칠 대상은 사업장 1개다
   const pendingBuyers = new Map<string, PendingBuyer>()
   const pendingItemNames: PendingItemName[] = []
-  // 절사 대상 계산서. **합치기가 끝난 뒤에** 한 번만 깎아야 하므로 키를 모아 둔다.
-  const roundDownKeys = new Set<string>()
 
   for (const line of lines) {
     // 의도적 제외는 조용히 건너뛴다 (본사 = 마케팅비)
@@ -403,6 +401,9 @@ export function collectInvoiceRows(
         existing.supply += supply
         existing.vat += vat
         existing.mergedFrom += 1
+        const venueKey = `${line.source}:${line.businessCode}`
+        existing.venueKeys ??= []
+        if (!existing.venueKeys.includes(venueKey)) existing.venueKeys.push(venueKey)
       } else {
         groups.set(key, {
           taxKind: kind,
@@ -411,29 +412,18 @@ export function collectInvoiceRows(
           supply,
           vat,
           mergedFrom: 1,
+          venueKeys: [`${line.source}:${line.businessCode}`],
+          allowVenueOverride: !line.groupKey,
           roundingDiff: 0,
         })
-        if (line.roundDown) roundDownKeys.add(key)
       }
     }
   }
 
-  // ── 원단위 절사 (docs §6-2) ──
-  // 합치기가 끝난 **계산서 한 장**을 대상으로 한다. 위 루프 안에서 깎으면
-  // 식당마다 최대 9원씩 빠져 유치원이 요청한 금액과 달라진다.
-  let roundingTotal = 0
-  for (const [key, row] of groups) {
-    if (!roundDownKeys.has(key)) continue
-    const r = applyInvoiceRounding(row, roundingMode, true)
-    row.supply = r.supply
-    row.vat = r.vat
-    row.roundingDiff = r.diff
-    roundingTotal += r.diff
-  }
-
   return {
     rows: [...groups.values()],
-    roundingTotal,
+    // 2026-09-05 정책: 공급사 원단위 금액을 그대로 쓰며 10원 절사를 하지 않는다.
+    roundingTotal: 0,
     problems,
     pending: { buyers: [...pendingBuyers.values()], itemNames: pendingItemNames },
   }

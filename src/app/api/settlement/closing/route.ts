@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     // 스냅샷에는 **재현에 필요한 것을 전부** 담는다. 정규화하지 않는 이유는
     // 스키마가 바뀌어도 과거 리비전을 그대로 읽어야 하기 때문이다.
     const snapshot = {
-      version: 2,
+      version: 3,
       period,
       savedAt: new Date().toISOString(),
       sources: result.sources,
@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
       splits: splitsByPartner,
       declarationLines: declaration.lines,
       invoiceRows: result.invoiceRows,
+      invoiceOverrides: result.invoiceOverrides,
       issuer: result.issuer,
       closingVenues: result.closingVenues,
       closingPartners: result.closingPartners,

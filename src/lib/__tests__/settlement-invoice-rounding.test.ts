@@ -162,10 +162,8 @@ function line(over: Partial<InvoiceVenueLine> = {}): InvoiceVenueLine {
   }
 }
 
-describe('collectInvoiceRows — 절사는 계산서 한 장 단위다', () => {
-  it('식당 2개가 한 장으로 합쳐지면 합친 뒤 한 번만 깎는다', () => {
-    // 식당별로 깎으면 4 + 4 = 8원이 빠진다. 합치면 총액 200,008 → 200,000, 8원.
-    // 이 사례는 우연히 같지만, 아래 테스트가 차이를 드러낸다.
+describe('collectInvoiceRows — 2026-09-05부터 원본 금액을 유지한다', () => {
+  it('식당 2개가 한 장으로 합쳐져도 원단위 합계를 그대로 둔다', () => {
     const r = collectInvoiceRows([
       line({
         restaurantCode: '1000',
@@ -178,14 +176,12 @@ describe('collectInvoiceRows — 절사는 계산서 한 장 단위다', () => {
     ])
     expect(r.rows).toHaveLength(1)
     expect(r.rows[0].mergedFrom).toBe(2)
-    expect(r.rows[0].supply).toBe(200_000)
-    expect(r.rows[0].roundingDiff).toBe(8)
-    expect(r.roundingTotal).toBe(8)
+    expect(r.rows[0].supply).toBe(200_008)
+    expect(r.rows[0].roundingDiff).toBe(0)
+    expect(r.roundingTotal).toBe(0)
   })
 
-  it('식당별로 깎았다면 더 많이 빠졌을 경우 — 합계 기준이 맞다', () => {
-    // 식당별: 100,009 → 100,000 (9원), 100,009 → 100,000 (9원) = 18원
-    // 계산서 기준: 200,018 → 200,010 = 8원. **8원이 정답이다.**
+  it('기존 절사 대상이어도 합산 원본을 변경하지 않는다', () => {
     const r = collectInvoiceRows([
       line({
         restaurantCode: '1000',
@@ -196,8 +192,8 @@ describe('collectInvoiceRows — 절사는 계산서 한 장 단위다', () => {
         price: { taxableSupply: 100_009, vat: 0, exempt: 0, total: 100_009 },
       }),
     ])
-    expect(r.rows[0].supply).toBe(200_010)
-    expect(r.roundingTotal).toBe(8)
+    expect(r.rows[0].supply).toBe(200_018)
+    expect(r.roundingTotal).toBe(0)
   })
 
   it('절사 대상이 아닌 유치원은 원값 그대로다', () => {
@@ -213,7 +209,7 @@ describe('collectInvoiceRows — 절사는 계산서 한 장 단위다', () => {
     expect(r.roundingTotal).toBe(0)
   })
 
-  it('과세·면세는 각각 다른 계산서라 따로 절사한다', () => {
+  it('과세·면세 각각 공급사 원본 금액을 유지한다', () => {
     const r = collectInvoiceRows([
       line({
         price: { taxableSupply: 136_140, vat: 13_614, exempt: 386_692, total: 536_446 },
@@ -221,17 +217,17 @@ describe('collectInvoiceRows — 절사는 계산서 한 장 단위다', () => {
     ])
     const taxable = r.rows.find((x) => x.taxKind === 'taxable')!
     const exempt = r.rows.find((x) => x.taxKind === 'exempt')!
-    expect(taxable.supply + taxable.vat).toBe(149_750)
-    expect(exempt.supply).toBe(386_690)
-    expect(r.roundingTotal).toBe(4 + 2)
+    expect(taxable.supply + taxable.vat).toBe(149_754)
+    expect(exempt.supply).toBe(386_692)
+    expect(r.roundingTotal).toBe(0)
   })
 
-  it('설정을 supply로 바꾸면 공급가에서 뺀다 — 코드 변경 없이', () => {
+  it('과거 supply 설정값을 넘겨도 무시한다', () => {
     const r = collectInvoiceRows(
       [line({ price: { taxableSupply: 136_140, vat: 13_614, exempt: 0, total: 149_754 } })],
       'supply'
     )
-    expect(r.rows[0].supply).toBe(136_136)
+    expect(r.rows[0].supply).toBe(136_140)
     expect(r.rows[0].vat).toBe(13_614)
   })
 })

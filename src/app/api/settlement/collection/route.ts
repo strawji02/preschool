@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { requireApiUser } from '@/features/shared/auth'
+import { requireApiAdmin, requireApiUser } from '@/features/shared/auth'
 import {
   CollectionError,
   addPayout,
   addReceipt,
+  addReceiptWriteoff,
+  approveReceiptWriteoff,
+  cancelReceiptWriteoff,
   deletePayout,
   deleteReceipt,
   loadCollection,
@@ -19,9 +22,8 @@ import {
  * 계산할 근거가 없다. 그 검사는 데이터 계층이 한다.
  */
 export async function POST(request: NextRequest) {
-  const guard = await requireApiUser()
-  if ('response' in guard) return guard.response
-  const actor = guard.user.email
+  const preliminary = await requireApiUser()
+  if ('response' in preliminary) return preliminary.response
 
   let body: unknown
   try {
@@ -34,6 +36,10 @@ export async function POST(request: NextRequest) {
   }
   const req = (body ?? {}) as Record<string, unknown>
   const action = String(req.action ?? '')
+  const adminActions = ['approve-writeoff', 'cancel-writeoff']
+  const guard = adminActions.includes(action) ? await requireApiAdmin() : preliminary
+  if ('response' in guard) return guard.response
+  const actor = guard.user.email
 
   try {
     switch (action) {
@@ -68,8 +74,32 @@ export async function POST(request: NextRequest) {
         })
         break
 
+      case 'add-writeoff': {
+        const source = String(req.source ?? '')
+        if (source !== 'shinsegae' && source !== 'cj') {
+          return NextResponse.json({ success: false, error: '원천 구분이 올바르지 않습니다.' }, { status: 400 })
+        }
+        await addReceiptWriteoff({
+          period: String(req.period ?? ''),
+          source,
+          businessCode: String(req.businessCode ?? ''),
+          amount: Number(req.amount),
+          reason: String(req.reason ?? ''),
+          actor,
+        })
+        break
+      }
+
+      case 'approve-writeoff':
+        await approveReceiptWriteoff(String(req.id ?? ''), actor)
+        break
+
+      case 'cancel-writeoff':
+        await cancelReceiptWriteoff(String(req.id ?? ''), actor, String(req.reason ?? ''))
+        break
+
       case 'delete-receipt':
-        await deleteReceipt(String(req.id ?? ''))
+        await deleteReceipt(String(req.id ?? ''), actor)
         break
 
       case 'delete-payout':

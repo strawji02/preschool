@@ -39,6 +39,8 @@ import {
   type SourceDateRange,
 } from '../calc/period-guard'
 import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
+import { applyInvoiceOverrides, type InvoiceOverride } from '../calc/invoice-policy'
+import { listInvoiceOverrides } from '../data/invoice-override'
 
 /**
  * 업로드된 원천 파일 → 영업자별 정산 결과까지 한 번에 처리한다.
@@ -166,6 +168,10 @@ export interface SettlementRunResult {
    * 영업자에게 줄 돈은 그대로 두고 회사가 흡수하는 구조다.
    */
   invoiceRoundingTotal: number
+  /** CJ 1016 원단위 조정 원장. 마감 스냅샷에 근거와 함께 보존한다. */
+  invoiceOverrides: InvoiceOverride[]
+  /** 화면에서 조정할 수 있는 CJ 1016 계산서 원본 행. */
+  invoiceOverrideCandidates: InvoiceRow[]
   /**
    * 계산서를 만들 수 없는 항목 — 유치원 사업자 정보 미비, 식당 품목명 미지정.
    * 마감 차단 사유다 (docs §14-2). 정산 제외와 금액 0은 포함하지 않는다.
@@ -373,19 +379,26 @@ export async function runSettlement(
   // 홈택스 계산서 (docs §6-1). 매핑 누락 사업장은 계산서 대상에서도 빠지는데,
   // 그건 이미 `unmapped`로 잡히므로 여기서 중복 경고하지 않는다.
   // 절사 방식은 설정에서 온다 — 세무사 협의로 바뀔 수 있다 (docs §6-2)
-  const invoice = collectInvoiceRows(
+  const originalInvoice = collectInvoiceRows(
     [
       ...buildInvoiceLines(applied.venues, master),
       ...buildManualInvoiceLines(manual.invoiceItems, master),
-    ],
-    master.issuer?.roundingMode ?? 'vat'
+    ]
   )
+  const invoiceOverrides = req.period ? await listInvoiceOverrides(req.period) : []
+  const invoice = applyInvoiceOverrides(originalInvoice.rows, invoiceOverrides)
   const pending = {
-    buyers: invoice.pending.buyers,
-    itemNames: resolvePendingItemNames(invoice.pending.itemNames, master),
+    buyers: originalInvoice.pending.buyers,
+    itemNames: resolvePendingItemNames(originalInvoice.pending.itemNames, master),
   }
   const issuer = master.issuer
-  const invoiceProblems = [...invoice.problems]
+  const invoiceProblems = [
+    ...originalInvoice.problems,
+    ...invoice.problems,
+    ...invoiceOverrides
+      .filter((override) => override.status === 'draft')
+      .map((override) => `CJ 1016 ${override.itemName} 원단위 조정이 승인 대기 중입니다.`),
+  ]
   if (!issuer) {
     invoiceProblems.push(
       '계산서 공급자(본사) 정보가 설정되지 않아 계산서를 만들 수 없습니다.'
@@ -402,6 +415,21 @@ export async function runSettlement(
       const cur = map.get(key)
       if (cur) cur.itemCount += 1
       else map.set(key, { source: 'shinsegae', businessCode: it.businessCode, businessName: it.businessName, itemCount: 1 })
+    }
+    if (statement) {
+      const codeByBusinessName = new Map(
+        master.venues
+          .filter((venue) => venue.source === 'cj')
+          .map((venue) => [venue.businessName, venue.businessCode] as const)
+      )
+      for (const it of statement.items) {
+        const businessCode = codeByBusinessName.get(it.businessName)
+        if (!businessCode || excludedCodes.has(businessCode)) continue
+        const key = `cj:${businessCode}`
+        const cur = map.get(key)
+        if (cur) cur.itemCount += 1
+        else map.set(key, { source: 'cj', businessCode, businessName: it.businessName, itemCount: 1 })
+      }
     }
     for (const it of manual.invoiceItems) {
       const key = `${it.source}:${it.businessCode}`
@@ -449,7 +477,11 @@ export async function runSettlement(
     blocks,
     canClose: errors.length === 0 && unmapped.length === 0,
     invoiceRows: invoice.rows,
-    invoiceRoundingTotal: invoice.roundingTotal,
+    invoiceRoundingTotal: 0,
+    invoiceOverrides,
+    invoiceOverrideCandidates: originalInvoice.rows.filter((row) =>
+      row.allowVenueOverride !== false && row.venueKeys?.includes('cj:1016')
+    ),
     invoiceProblems,
     issuer,
     canIssueInvoices:
@@ -459,7 +491,12 @@ export async function runSettlement(
       .filter((p) => p.isActive)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((p) => ({ partnerId: p.id, partnerName: p.name })),
-    closingVenues: buildClosingVenues(venues, master),
+    closingVenues: withInvoiceOverrideDelta(
+      buildClosingVenues(venues, master),
+      originalInvoice.rows,
+      invoice.rows,
+      master
+    ),
     closingPartners: partners.map((p) => {
       const record = master.partners.get(p.partnerId)
       return {
@@ -530,6 +567,63 @@ function buildClosingVenues(
   })
 }
 
+/**
+ * CJ 1016 원단위 조정 차액은 파트너 정산 원금에 섞지 않고 본사 조정 행으로 굳힌다.
+ * 수금대장은 이 행을 포함한 최종 청구액을 사용하고, 공급자 원금은 cost=0이라 불변이다.
+ */
+function withInvoiceOverrideDelta(
+  venues: ClosingVenueRow[],
+  originalRows: readonly InvoiceRow[],
+  finalRows: readonly InvoiceRow[],
+  master: SettlementMaster
+): ClosingVenueRow[] {
+  const original = originalRows.filter(
+    (row) => row.venueKeys?.length === 1 && row.venueKeys[0] === 'cj:1016'
+  )
+  const finalByKey = new Map(
+    finalRows
+      .filter((row) => row.venueKeys?.length === 1 && row.venueKeys[0] === 'cj:1016')
+      .map((row) => [`${row.taxKind}\u0000${row.itemName}`, row] as const)
+  )
+  let taxableSupply = 0
+  let vat = 0
+  let exempt = 0
+  for (const row of original) {
+    const final = finalByKey.get(`${row.taxKind}\u0000${row.itemName}`)
+    if (!final) continue
+    if (row.taxKind === 'taxable') {
+      taxableSupply += final.supply - row.supply
+      vat += final.vat - row.vat
+    } else {
+      exempt += final.supply - row.supply
+    }
+  }
+  const total = taxableSupply + vat + exempt
+  if (total === 0 && taxableSupply === 0 && vat === 0 && exempt === 0) return venues
+
+  const venue = master.venues.find(
+    (candidate) => candidate.source === 'cj' && candidate.businessCode === '1016'
+  )
+  const businessName = venue?.businessName ?? 'CJ 1016 인천 복자유치원'
+  return [
+    ...venues,
+    {
+      source: 'cj',
+      businessCode: '1016',
+      businessName,
+      restaurantCode: 'invoice-override',
+      restaurantName: '계산서 원단위 조정',
+      companyName: venue?.invoice.companyName ?? null,
+      partnerId: null,
+      partnerName: null,
+      isExcluded: false,
+      exclusionReason: null,
+      cost: { taxableSupply: 0, vat: 0, exempt: 0, total: 0 },
+      price: { taxableSupply, vat, exempt, total },
+    },
+  ]
+}
+
 function resolvePendingItemNames(
   items: readonly PendingItemName[],
   master: SettlementMaster
@@ -596,8 +690,8 @@ function buildInvoiceLines(
       price: v.price,
       // 매핑 누락(사업장 미등록)도 계산서를 만들지 않는다. `unmapped`가 이미 알려준다.
       isExcluded: rec?.isExcluded ?? true,
-      // 유치원별 원단위 절사 (docs §6-2, migration 058)
-      roundDown: rec?.invoiceRoundDown ?? false,
+      // 과거 플래그는 DB 롤백 호환용으로만 남고 계산에서는 무시한다.
+      roundDown: false,
       buyer,
       itemNames: { taxable: itemName('taxable'), exempt: itemName('exempt') },
     }
@@ -637,7 +731,7 @@ function buildManualInvoiceLines(
       restaurantName: `외부사입 · ${item.productName}`,
       price: item.charge,
       isExcluded: rec?.isExcluded ?? true,
-      roundDown: rec?.invoiceRoundDown ?? false,
+      roundDown: false,
       buyer,
       itemNames: {
         taxable: item.chargeTaxKind === 'taxable' ? invoiceName : null,
@@ -670,6 +764,8 @@ function emptyResult(base: { warnings: string[]; errors: string[] }): Settlement
     canClose: false,
     invoiceRows: [],
     invoiceRoundingTotal: 0,
+    invoiceOverrides: [],
+    invoiceOverrideCandidates: [],
     invoiceProblems: [],
     issuer: null,
     canIssueInvoices: false,

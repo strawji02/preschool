@@ -4,6 +4,7 @@ import {
   type ClosingPartnerRow,
   type ClosingVenueRow,
   type PayoutRecord,
+  type ReceiptAdjustmentRecord,
   type ReceiptRecord,
 } from '@/features/settlement'
 
@@ -77,6 +78,19 @@ function receipt(over: Partial<ReceiptRecord> = {}): ReceiptRecord {
   }
 }
 
+function receiptAdjustment(
+  over: Partial<ReceiptAdjustmentRecord> = {}
+): ReceiptAdjustmentRecord {
+  return {
+    source: 'cj',
+    businessCode: '1005',
+    amount: 14,
+    reason: '원단위 입금 차이 승인',
+    status: 'approved',
+    ...over,
+  }
+}
+
 describe('buildCollectionSummary — 유치원별 수금', () => {
   it('청구액은 사업장의 식당을 합친 값이다', () => {
     const s = buildCollectionSummary({
@@ -86,10 +100,40 @@ describe('buildCollectionSummary — 유치원별 수금', () => {
       ],
       partners: [],
       receipts: [],
+      receiptAdjustments: [],
       payouts: [],
     })
     expect(s.venues).toHaveLength(1)
     expect(s.venues[0]).toMatchObject({ billed: 2_900, received: 0, outstanding: 2_900 })
+  })
+
+  it('관리자가 승인한 원단위 조정은 청구액을 바꾸지 않고 완납 처리한다', () => {
+    const s = buildCollectionSummary({
+      venues: [venue({ price: { ...zero, total: 1_014 } })],
+      partners: [],
+      receipts: [receipt({ amount: 1_000 })],
+      receiptAdjustments: [receiptAdjustment()],
+      payouts: [],
+    })
+
+    expect(s.venues[0]).toMatchObject({
+      billed: 1_014,
+      received: 1_000,
+      adjusted: 14,
+      outstanding: 0,
+      isFullyReceived: true,
+    })
+  })
+
+  it('작성중 조정은 잔액에 반영하지 않는다', () => {
+    const s = buildCollectionSummary({
+      venues: [venue({ price: { ...zero, total: 1_014 } })],
+      partners: [],
+      receipts: [receipt({ amount: 1_000 })],
+      receiptAdjustments: [receiptAdjustment({ status: 'draft' })],
+      payouts: [],
+    })
+    expect(s.venues[0]).toMatchObject({ adjusted: 0, outstanding: 14 })
   })
 
   it('입금 기록이 있으면 수금액에 반영한다', () => {
@@ -335,6 +379,7 @@ describe('buildCollectionSummary — 합계', () => {
     expect(e.totals).toEqual({
       billed: 0,
       received: 0,
+      adjusted: 0,
       outstanding: 0,
       netPay: 0,
       paid: 0,

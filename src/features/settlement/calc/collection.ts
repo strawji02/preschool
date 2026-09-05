@@ -31,6 +31,15 @@ export interface ReceiptRecord {
   note: string | null
 }
 
+export interface ReceiptAdjustmentRecord {
+  source: SettlementSource
+  businessCode: string
+  /** 양수면 미수금을 줄이고, 음수면 다시 받을 금액을 늘린다. */
+  amount: number
+  reason: string
+  status: 'draft' | 'approved' | 'cancelled'
+}
+
 /** 영업자 지급 기록 */
 export interface PayoutRecord {
   partnerId: string
@@ -50,6 +59,8 @@ export interface CollectionRow {
   /** 청구액 (마감 스냅샷의 단가합계) */
   billed: number
   received: number
+  /** 승인된 수금 차이 조정. 청구 원금과 실제 입금액은 바꾸지 않는다. */
+  adjusted: number
   /** 청구 − 수금. **음수를 0으로 만들지 않는다** — 초과 입금을 못 찾게 된다 */
   outstanding: number
   /** 마지막 입금일. 완납 시점이 궁금한 값이다 */
@@ -80,6 +91,7 @@ export interface PartnerCollection {
 export interface CollectionTotals {
   billed: number
   received: number
+  adjusted: number
   outstanding: number
   netPay: number
   paid: number
@@ -103,6 +115,7 @@ export interface CollectionInput {
   /** 마감 스냅샷의 영업자 행 */
   partners: readonly ClosingPartnerRow[]
   receipts: readonly ReceiptRecord[]
+  receiptAdjustments?: readonly ReceiptAdjustmentRecord[]
   payouts: readonly PayoutRecord[]
 }
 
@@ -125,6 +138,7 @@ export function buildCollectionSummary(input: CollectionInput): CollectionSummar
         partnerName: v.partnerName,
         billed: 0,
         received: 0,
+        adjusted: 0,
         outstanding: 0,
         receivedDate: null,
         isFullyReceived: false,
@@ -133,6 +147,13 @@ export function buildCollectionSummary(input: CollectionInput): CollectionSummar
       rows.set(key, row)
     }
     row.billed += v.price.total
+  }
+
+  for (const adjustment of input.receiptAdjustments ?? []) {
+    if (adjustment.status !== 'approved') continue
+    const row = rows.get(`${adjustment.source}:${adjustment.businessCode}`)
+    if (!row) continue
+    row.adjusted += adjustment.amount
   }
 
   for (const r of input.receipts) {
@@ -150,8 +171,8 @@ export function buildCollectionSummary(input: CollectionInput): CollectionSummar
 
   const venues = [...rows.values()]
   for (const row of venues) {
-    row.outstanding = row.billed - row.received
-    row.isFullyReceived = row.received >= row.billed && row.billed > 0
+    row.outstanding = row.billed - row.received - row.adjusted
+    row.isFullyReceived = row.outstanding <= 0 && row.billed > 0
   }
   // 받아야 할 것부터 본다
   venues.sort((a, b) => b.outstanding - a.outstanding)
@@ -180,7 +201,7 @@ export function buildCollectionSummary(input: CollectionInput): CollectionSummar
       receivedCount,
       billed,
       received,
-      outstanding: billed - received,
+      outstanding: mine.reduce((sum, row) => sum + row.outstanding, 0),
       // 담당이 0곳이면 false — 빈 조건을 "전원 완료"로 보면 매달 헛 알림이 뜬다
       allReceived: mine.length > 0 && receivedCount === mine.length,
       netPay: p.netPay,
@@ -193,12 +214,13 @@ export function buildCollectionSummary(input: CollectionInput): CollectionSummar
   const totals: CollectionTotals = {
     billed: venues.reduce((s, v) => s + v.billed, 0),
     received: venues.reduce((s, v) => s + v.received, 0),
+    adjusted: venues.reduce((s, v) => s + v.adjusted, 0),
     outstanding: 0,
     netPay: partners.reduce((s, p) => s + p.netPay, 0),
     paid: partners.reduce((s, p) => s + p.paid, 0),
     unpaid: 0,
   }
-  totals.outstanding = totals.billed - totals.received
+  totals.outstanding = totals.billed - totals.received - totals.adjusted
   totals.unpaid = totals.netPay - totals.paid
 
   return {

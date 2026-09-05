@@ -59,10 +59,18 @@ export {
   type RoundedInvoice,
 } from './calc/invoice-rounding'
 
+export {
+  applyInvoiceOverrides,
+  type InvoiceOverride,
+  type InvoiceOverrideStatus,
+  type ApplyInvoiceOverridesResult,
+} from './calc/invoice-policy'
+
 // 수금·지급도 순수 산식이다 (docs §9)
 export {
   buildCollectionSummary,
   type ReceiptRecord,
+  type ReceiptAdjustmentRecord,
   type PayoutRecord,
   type CollectionRow,
   type PartnerCollection,
@@ -70,6 +78,16 @@ export {
   type CollectionSummary,
   type CollectionInput,
 } from './calc/collection'
+
+export {
+  buildSupplierPayableSummary,
+  calculateSupplierPrincipals,
+  type SupplierPrincipal,
+  type SupplierAdjustmentRecord,
+  type SupplierPaymentRecord,
+  type SupplierPayableRow,
+  type SupplierPayableSummary,
+} from './calc/supplier-payable'
 
 // 보고서 집계도 순수 함수다 (docs §13-2)
 export {

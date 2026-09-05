@@ -5,6 +5,7 @@ import {
   buildCollectionSummary,
   type CollectionSummary,
   type PayoutRecord,
+  type ReceiptAdjustmentRecord,
   type ReceiptRecord,
 } from '../calc/collection'
 import { isValidPeriod } from '../calc/closing'
@@ -26,7 +27,14 @@ export class CollectionError extends Error {}
 /** 화면이 보여줄 항목 — id가 있어야 개별 삭제가 된다 */
 export interface ReceiptEntry extends ReceiptRecord {
   id: string
+  closingRevision: number | null
   createdBy: string | null
+}
+
+export interface ReceiptWriteoffEntry extends ReceiptAdjustmentRecord {
+  id: string
+  closingRevision: number
+  createdBy: string
 }
 
 export interface PayoutEntry extends PayoutRecord {
@@ -38,7 +46,10 @@ export interface CollectionView {
   period: string
   summary: CollectionSummary
   receipts: ReceiptEntry[]
+  writeoffs: ReceiptWriteoffEntry[]
   payouts: PayoutEntry[]
+  /** 청구 재확정 뒤 과거 리비전의 현금 기록이 남아 있으면 true */
+  needsReview: boolean
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -57,23 +68,17 @@ function requireAmount(value: number, label: string): number {
   return Math.trunc(value)
 }
 
-async function requireClosedPeriod(period: string): Promise<void> {
+async function requireConfirmedPeriod(period: string) {
   if (!isValidPeriod(period)) {
     throw new CollectionError(`기간이 올바르지 않습니다: ${period}. YYYY-MM 형식으로 주세요.`)
   }
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('settlement_closings')
-    .select('period')
-    .eq('period', period)
-    .maybeSingle()
-  if (error) throw new CollectionError(`마감 조회 실패: ${error.message}`)
-  if (!data) {
-    // 마감 전에는 청구액이 없으므로 미수금을 계산할 수 없다
+  const detail = await loadClosingDetail(period)
+  if (!detail || !['confirmed', 'closed'].includes(detail.closing.status)) {
     throw new CollectionError(
-      `${period}은 아직 확정·마감되지 않았습니다. 정산을 확정한 뒤 입금을 기록해 주세요.`
+      `${period}은 아직 청구 확정되지 않았습니다. 정산을 확정한 뒤 입금을 기록해 주세요.`
     )
   }
+  return detail
 }
 
 /** 유치원 입금 기록 추가 */
@@ -86,7 +91,14 @@ export async function addReceipt(input: {
   note?: string | null
   actor: string
 }): Promise<void> {
-  await requireClosedPeriod(input.period)
+  const detail = await requireConfirmedPeriod(input.period)
+  const venueExists = detail.venues.some(
+    (venue) =>
+      venue.source === input.source &&
+      venue.businessCode === input.businessCode &&
+      !venue.isExcluded
+  )
+  if (!venueExists) throw new CollectionError('확정 청구 대상 유치원을 찾지 못했습니다.')
   const supabase = createAdminClient()
   const { error } = await supabase.from('settlement_receipts').insert({
     period: input.period,
@@ -94,6 +106,7 @@ export async function addReceipt(input: {
     business_code: input.businessCode,
     received_date: requireDate(input.receivedDate, '입금일자'),
     amount: requireAmount(input.amount, '입금액'),
+    closing_revision: detail.closing.revision,
     note: input.note?.trim() || null,
     created_by: input.actor,
   })
@@ -109,7 +122,7 @@ export async function addPayout(input: {
   note?: string | null
   actor: string
 }): Promise<void> {
-  await requireClosedPeriod(input.period)
+  await requireConfirmedPeriod(input.period)
   const supabase = createAdminClient()
   const { error } = await supabase.from('settlement_payouts').insert({
     period: input.period,
@@ -128,16 +141,102 @@ export async function addPayout(input: {
  * 수정 대신 **삭제 후 재입력**으로 처리한다. 입금 기록은 여러 행이 모여 합계를
  * 이루므로, 부분 수정을 허용하면 어느 행이 어느 입금인지 추적이 어려워진다.
  */
-export async function deleteReceipt(id: string): Promise<void> {
+export async function deleteReceipt(id: string, actor = 'system'): Promise<void> {
   const supabase = createAdminClient()
-  const { error } = await supabase.from('settlement_receipts').delete().eq('id', id)
-  if (error) throw new CollectionError(`입금 기록 삭제 실패: ${error.message}`)
+  const { error } = await supabase
+    .from('settlement_receipts')
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: actor,
+      cancellation_reason: '입력 취소',
+    })
+    .eq('id', id)
+    .eq('status', 'active')
+  if (error) throw new CollectionError(`입금 기록 취소 실패: ${error.message}`)
 }
 
 export async function deletePayout(id: string): Promise<void> {
   const supabase = createAdminClient()
   const { error } = await supabase.from('settlement_payouts').delete().eq('id', id)
   if (error) throw new CollectionError(`지급 기록 삭제 실패: ${error.message}`)
+}
+
+export async function addReceiptWriteoff(input: {
+  period: string
+  source: SettlementSource
+  businessCode: string
+  amount: number
+  reason: string
+  actor: string
+}): Promise<void> {
+  const detail = await requireConfirmedPeriod(input.period)
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0 || !input.reason.trim()) {
+    throw new CollectionError('0보다 큰 원 단위 조정액과 사유를 입력해 주세요.')
+  }
+  const venueExists = detail.venues.some(
+    (venue) =>
+      venue.source === input.source &&
+      venue.businessCode === input.businessCode &&
+      !venue.isExcluded
+  )
+  if (!venueExists) throw new CollectionError('확정 청구 대상 유치원을 찾지 못했습니다.')
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('settlement_receipt_writeoffs').insert({
+    period: input.period,
+    source: input.source,
+    business_code: input.businessCode,
+    closing_revision: detail.closing.revision,
+    amount: input.amount,
+    reason: input.reason.trim(),
+    created_by: input.actor,
+  })
+  if (error) throw new CollectionError(`수금 조정 저장 실패: ${error.message}`)
+}
+
+export async function approveReceiptWriteoff(id: string, actor: string): Promise<void> {
+  const supabase = createAdminClient()
+  const { data, error: readError } = await supabase
+    .from('settlement_receipt_writeoffs')
+    .select('period, source, business_code, closing_revision, amount, status')
+    .eq('id', id)
+    .maybeSingle()
+  if (readError || !data || data.status !== 'draft') {
+    throw new CollectionError('승인할 수금 조정을 찾지 못했습니다.')
+  }
+  const detail = await requireConfirmedPeriod(data.period)
+  if (Number(data.closing_revision) !== detail.closing.revision) {
+    throw new CollectionError('청구 금액이 변경되었습니다. 조정을 취소하고 다시 등록해 주세요.')
+  }
+  const view = await loadCollection(data.period)
+  const venue = view?.summary.venues.find(
+    (row) => row.source === data.source && row.businessCode === data.business_code
+  )
+  if (!venue || venue.outstanding <= 0 || Number(data.amount) > venue.outstanding) {
+    throw new CollectionError('조정액이 현재 미수금보다 큽니다. 입금 내역을 다시 확인해 주세요.')
+  }
+  const { error } = await supabase
+    .from('settlement_receipt_writeoffs')
+    .update({ status: 'approved', approved_at: new Date().toISOString(), approved_by: actor })
+    .eq('id', id)
+    .eq('status', 'draft')
+  if (error) throw new CollectionError(`수금 조정 승인 실패: ${error.message}`)
+}
+
+export async function cancelReceiptWriteoff(id: string, actor: string, reason: string): Promise<void> {
+  if (!reason.trim()) throw new CollectionError('취소 사유를 입력해 주세요.')
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('settlement_receipt_writeoffs')
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: actor,
+      cancellation_reason: reason.trim(),
+    })
+    .eq('id', id)
+    .in('status', ['draft', 'approved'])
+  if (error) throw new CollectionError(`수금 조정 취소 실패: ${error.message}`)
 }
 
 /**
@@ -152,12 +251,18 @@ export async function loadCollection(period: string): Promise<CollectionView | n
   if (!detail) return null
 
   const supabase = createAdminClient()
-  const [receiptsRes, payoutsRes] = await Promise.all([
+  const [receiptsRes, writeoffsRes, payoutsRes] = await Promise.all([
     supabase
       .from('settlement_receipts')
-      .select('id, source, business_code, received_date, amount, note, created_by')
+      .select('id, source, business_code, received_date, amount, note, closing_revision, created_by')
       .eq('period', period)
+      .eq('status', 'active')
       .order('received_date', { ascending: true }),
+    supabase
+      .from('settlement_receipt_writeoffs')
+      .select('id, source, business_code, amount, reason, status, closing_revision, created_by')
+      .eq('period', period)
+      .order('created_at', { ascending: true }),
     supabase
       .from('settlement_payouts')
       .select('id, partner_id, paid_date, amount, note, created_by')
@@ -166,6 +271,9 @@ export async function loadCollection(period: string): Promise<CollectionView | n
   ])
   if (receiptsRes.error) {
     throw new CollectionError(`입금 기록 조회 실패: ${receiptsRes.error.message}`)
+  }
+  if (writeoffsRes.error) {
+    throw new CollectionError(`수금 조정 조회 실패: ${writeoffsRes.error.message}`)
   }
   if (payoutsRes.error) {
     throw new CollectionError(`지급 기록 조회 실패: ${payoutsRes.error.message}`)
@@ -177,8 +285,19 @@ export async function loadCollection(period: string): Promise<CollectionView | n
     businessCode: String(r.business_code),
     receivedDate: r.received_date,
     amount: Number(r.amount),
+    closingRevision: r.closing_revision === null ? null : Number(r.closing_revision),
     note: r.note,
     createdBy: r.created_by,
+  }))
+  const writeoffs: ReceiptWriteoffEntry[] = (writeoffsRes.data ?? []).map((row) => ({
+    id: row.id,
+    source: row.source as SettlementSource,
+    businessCode: String(row.business_code),
+    amount: Number(row.amount),
+    reason: row.reason,
+    status: row.status as ReceiptAdjustmentRecord['status'],
+    closingRevision: Number(row.closing_revision),
+    createdBy: row.created_by,
   }))
   const payouts: PayoutEntry[] = (payoutsRes.data ?? []).map((p) => ({
     id: p.id,
@@ -195,9 +314,16 @@ export async function loadCollection(period: string): Promise<CollectionView | n
       venues: detail.venues,
       partners: detail.partners,
       receipts,
+      receiptAdjustments: writeoffs,
       payouts,
     }),
     receipts,
+    writeoffs,
     payouts,
+    needsReview:
+      receipts.some((row) => row.closingRevision !== detail.closing.revision) ||
+      writeoffs.some(
+        (row) => row.status !== 'cancelled' && row.closingRevision !== detail.closing.revision
+      ),
   }
 }

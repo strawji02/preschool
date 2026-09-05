@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import SupplierPayablePanel from './supplier-payable-panel'
 
 /**
  * 수금·지급 관리 (docs §9).
@@ -19,6 +20,7 @@ interface CollectionRowView {
   partnerName: string | null
   billed: number
   received: number
+  adjusted: number
   outstanding: number
   receivedDate: string | null
   isFullyReceived: boolean
@@ -65,6 +67,7 @@ interface CollectionResponse {
     totals: {
       billed: number
       received: number
+      adjusted: number
       outstanding: number
       netPay: number
       paid: number
@@ -73,7 +76,16 @@ interface CollectionResponse {
     readyToPay: PartnerCollectionView[]
   }
   receipts: ReceiptEntryView[]
+  writeoffs: {
+    id: string
+    source: string
+    businessCode: string
+    amount: number
+    reason: string
+    status: 'draft' | 'approved' | 'cancelled'
+  }[]
   payouts: PayoutEntryView[]
+  needsReview: boolean
 }
 
 const won = (n: number) => n.toLocaleString('ko-KR')
@@ -90,10 +102,12 @@ function today(): string {
 export default function CollectionWorkspace({
   periods,
   initialPeriod,
+  isAdmin,
 }: {
   /** 마감된 달 목록 (최신순) */
   periods: string[]
   initialPeriod: string | null
+  isAdmin: boolean
 }) {
   const [period, setPeriod] = useState(initialPeriod ?? '')
   const [data, setData] = useState<CollectionResponse | null>(null)
@@ -202,6 +216,13 @@ export default function CollectionWorkspace({
 
       {s && (
         <>
+          <SupplierPayablePanel period={period} isAdmin={isAdmin} />
+
+          {data?.needsReview && (
+            <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              청구 확정 금액이 변경되어 이전 수금 기록을 재검토해야 합니다.
+            </p>
+          )}
           {/* ── 지급 요청 알림 (docs §9) ── */}
           {s.readyToPay.length > 0 && (
             <section className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6">
@@ -231,6 +252,7 @@ export default function CollectionWorkspace({
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Fact label="청구 합계" value={s.totals.billed} />
               <Fact label="수금" value={s.totals.received} />
+              <Fact label="승인 수금조정" value={s.totals.adjusted} />
               <Fact
                 label="미수금"
                 value={s.totals.outstanding}
@@ -272,7 +294,7 @@ export default function CollectionWorkspace({
                         )}
                         <span className="ml-2 text-xs text-gray-400">
                           {SOURCE_LABEL[v.source] ?? v.source} · {v.partnerName ?? '담당없음'} ·
-                          청구 {won(v.billed)}
+                          청구 {won(v.billed)} · 수금조정 {won(v.adjusted)}
                         </span>
                       </div>
                       <button
@@ -325,6 +347,17 @@ export default function CollectionWorkspace({
                             key
                           )
                         }
+                      />
+                    )}
+
+                    {(v.outstanding > 0 || (data?.writeoffs ?? []).some((item) => item.source === v.source && item.businessCode === v.businessCode && item.status !== 'cancelled')) && (
+                      <WriteoffArea
+                        period={period}
+                        row={v}
+                        writeoffs={(data?.writeoffs ?? []).filter((item) => item.source === v.source && item.businessCode === v.businessCode)}
+                        isAdmin={isAdmin}
+                        busy={busy}
+                        send={send}
                       />
                     )}
                   </li>
@@ -425,6 +458,50 @@ export default function CollectionWorkspace({
           </section>
         </>
       )}
+    </div>
+  )
+}
+
+function WriteoffArea({ period, row, writeoffs, isAdmin, busy, send }: {
+  period: string
+  row: CollectionRowView
+  writeoffs: { id: string; amount: number; reason: string; status: 'draft' | 'approved' | 'cancelled' }[]
+  isAdmin: boolean
+  busy: string | null
+  send: (payload: Record<string, unknown>, key: string) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState(String(Math.max(row.outstanding, 0)))
+  const [reason, setReason] = useState('원단위 입금 차이 승인')
+  const parsed = Number(amount.replace(/,/g, ''))
+  const active = writeoffs.filter((item) => item.status !== 'cancelled')
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-3 text-xs">
+      <button type="button" onClick={() => setOpen((value) => !value)} className="text-slate-600 underline underline-offset-2">
+        소액 차이 수금조정
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label><span className="mb-1 block text-gray-500">조정액</span><input value={amount} onChange={(event) => setAmount(event.target.value)} className="w-24 rounded border border-gray-300 px-2 py-1 text-right" /></label>
+          <label><span className="mb-1 block text-gray-500">사유</span><input value={reason} onChange={(event) => setReason(event.target.value)} className="w-52 rounded border border-gray-300 px-2 py-1" /></label>
+          <button
+            type="button"
+            disabled={busy === `w:${row.source}:${row.businessCode}` || !Number.isSafeInteger(parsed) || parsed <= 0 || !reason.trim()}
+            onClick={() => void send({ action: 'add-writeoff', period, source: row.source, businessCode: row.businessCode, amount: parsed, reason }, `w:${row.source}:${row.businessCode}`)}
+            className="rounded bg-slate-700 px-3 py-1 text-white disabled:opacity-40"
+          >
+            승인 요청
+          </button>
+        </div>
+      )}
+      {active.map((item) => (
+        <p key={item.id} className="mt-2 flex flex-wrap items-center gap-2 text-gray-600">
+          <span>{won(item.amount)}원 · {item.reason} · {item.status === 'approved' ? '승인' : '승인대기'}</span>
+          {isAdmin && item.status === 'draft' && (
+            <button type="button" disabled={busy === item.id} onClick={() => void send({ action: 'approve-writeoff', id: item.id }, item.id)} className="font-medium text-emerald-700">승인</button>
+          )}
+        </p>
+      ))}
     </div>
   )
 }

@@ -8,6 +8,7 @@ import AdjustmentPanel, {
   type StatementItem,
 } from './adjustment-panel'
 import ManualItemPanel, { type ManualItemVenue } from './manual-item-panel'
+import InvoiceOverridePanel from './invoice-override-panel'
 // ⚠️ 클라이언트 전용 배럴을 쓴다. 메인 배럴은 Supabase service_role 접근 코드를
 // 함께 내보내므로 브라우저 번들에 서버 코드가 끌려 들어간다.
 import {
@@ -112,6 +113,23 @@ interface AnalyzeResponse {
   canClose: boolean
   /** 계산서를 만들 수 없는 항목 — 사업자 정보 미비, 품목명 미지정 (docs §14-2) */
   invoiceProblems: string[]
+  invoiceOverrides: {
+    id: string
+    taxKind: 'taxable' | 'exempt'
+    itemName: string
+    originalSupply: number
+    originalVat: number
+    finalSupply: number
+    finalVat: number
+    reason: string
+    status: 'draft' | 'approved' | 'cancelled'
+  }[]
+  invoiceOverrideCandidates: {
+    taxKind: 'taxable' | 'exempt'
+    itemName: string
+    supply: number
+    vat: number
+  }[]
   canIssueInvoices: boolean
   /** 인라인 해결용 구조화 정보 (docs §14-3) */
   pending: {
@@ -1122,6 +1140,15 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             onChanged={() => void analyze({ keepInputs: true })}
           />
 
+          <InvoiceOverridePanel
+            period={issueMonth}
+            candidates={analysis.invoiceOverrideCandidates}
+            overrides={analysis.invoiceOverrides}
+            locked={locked}
+            isAdmin={isAdmin}
+            onChanged={() => void analyze({ keepInputs: true })}
+          />
+
           {/* 5. 사업자공제 */}
           <section className="rounded-2xl border border-gray-200 bg-white p-6">
             <h2 className="font-semibold text-gray-900">5. 사업자공제 입력</h2>
@@ -1467,17 +1494,8 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
                       <br />
                     </>
                   )}
-                  {analysis.invoiceSummary.roundedCount > 0 && (
-                    <>
-                      원단위 절사{' '}
-                      <span className="font-medium text-gray-600">
-                        {analysis.invoiceSummary.roundedCount}장 · −
-                        {won(analysis.invoiceSummary.roundingTotal)}원
-                      </span>{' '}
-                      — 정산은 원값을 쓰므로 이 금액은 본사 몫에서 빠집니다
-                      <br />
-                    </>
-                  )}
+                  일반 거래처는 공급사의 공급가·부가세·면세 금액을 원단위 그대로 사용하며 10원 절사를 하지 않습니다.
+                  <br />
                   ⚠️ 정산제외 사업장(본사 등)은 계산서를 발행하지 않습니다. 위 4번 표의
                   단가합계와 이 금액은 그만큼 차이가 납니다.
                 </p>

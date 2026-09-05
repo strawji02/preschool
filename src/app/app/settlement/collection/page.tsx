@@ -12,7 +12,7 @@ import CollectionWorkspace from './collection-workspace'
 export const dynamic = 'force-dynamic'
 
 export default async function CollectionPage() {
-  await requireUser('/app/settlement/collection')
+  const user = await requireUser('/app/settlement/collection')
   const closings = await listClosings()
   const periods = closings.map((c) => c.period)
 
@@ -30,7 +30,7 @@ export default async function CollectionPage() {
         }
       />
 
-      <CollectionWorkspace periods={periods} initialPeriod={periods[0] ?? null} />
+      <CollectionWorkspace periods={periods} initialPeriod={periods[0] ?? null} isAdmin={user.role === 'admin'} />
     </div>
   )
 }
