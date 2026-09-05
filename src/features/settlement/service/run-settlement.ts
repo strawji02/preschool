@@ -39,7 +39,11 @@ import {
   type SourceDateRange,
 } from '../calc/period-guard'
 import { pickSourceSheets, type UploadedWorkbook } from './pick-sheets'
-import { applyInvoiceOverrides, type InvoiceOverride } from '../calc/invoice-policy'
+import {
+  applyInvoiceOverrides,
+  applyInvoiceOverrideDeltaToClosingVenues,
+  type InvoiceOverride,
+} from '../calc/invoice-policy'
 import { listInvoiceOverrides } from '../data/invoice-override'
 
 /**
@@ -440,6 +444,31 @@ export async function runSettlement(
     return [...map.values()].sort((a, b) => a.businessName.localeCompare(b.businessName))
   })()
 
+  const closingVenues = withInvoiceOverrideDelta(
+    buildClosingVenues(venues, master),
+    originalInvoice.rows,
+    invoice.rows,
+    master
+  )
+  const overrideDelta = closingVenues.find(
+    (venue) => venue.source === 'cj' &&
+      venue.businessCode === '1016' &&
+      venue.restaurantCode === 'invoice-override'
+  )
+  if (overrideDelta) {
+    const line = {
+      venueName: overrideDelta.restaurantName,
+      cost: overrideDelta.cost,
+      price: overrideDelta.price,
+    }
+    const direct = blocks.find((block) => block.partnerName === '본사 직접')
+    if (direct) direct.lines.push(line)
+    else {
+      const index = blocks[0]?.partnerName === '본사' ? 1 : 0
+      blocks.splice(index, 0, { partnerName: '본사 직접', lines: [line], settlement: null })
+    }
+  }
+
   return {
     partners,
     excluded: agg.excluded.map((v) => ({
@@ -491,12 +520,7 @@ export async function runSettlement(
       .filter((p) => p.isActive)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((p) => ({ partnerId: p.id, partnerName: p.name })),
-    closingVenues: withInvoiceOverrideDelta(
-      buildClosingVenues(venues, master),
-      originalInvoice.rows,
-      invoice.rows,
-      master
-    ),
+    closingVenues,
     closingPartners: partners.map((p) => {
       const record = master.partners.get(p.partnerId)
       return {
@@ -577,51 +601,13 @@ function withInvoiceOverrideDelta(
   finalRows: readonly InvoiceRow[],
   master: SettlementMaster
 ): ClosingVenueRow[] {
-  const original = originalRows.filter(
-    (row) => row.venueKeys?.length === 1 && row.venueKeys[0] === 'cj:1016'
-  )
-  const finalByKey = new Map(
-    finalRows
-      .filter((row) => row.venueKeys?.length === 1 && row.venueKeys[0] === 'cj:1016')
-      .map((row) => [`${row.taxKind}\u0000${row.itemName}`, row] as const)
-  )
-  let taxableSupply = 0
-  let vat = 0
-  let exempt = 0
-  for (const row of original) {
-    const final = finalByKey.get(`${row.taxKind}\u0000${row.itemName}`)
-    if (!final) continue
-    if (row.taxKind === 'taxable') {
-      taxableSupply += final.supply - row.supply
-      vat += final.vat - row.vat
-    } else {
-      exempt += final.supply - row.supply
-    }
-  }
-  const total = taxableSupply + vat + exempt
-  if (total === 0 && taxableSupply === 0 && vat === 0 && exempt === 0) return venues
-
   const venue = master.venues.find(
     (candidate) => candidate.source === 'cj' && candidate.businessCode === '1016'
   )
-  const businessName = venue?.businessName ?? 'CJ 1016 인천 복자유치원'
-  return [
-    ...venues,
-    {
-      source: 'cj',
-      businessCode: '1016',
-      businessName,
-      restaurantCode: 'invoice-override',
-      restaurantName: '계산서 원단위 조정',
-      companyName: venue?.invoice.companyName ?? null,
-      partnerId: null,
-      partnerName: null,
-      isExcluded: false,
-      exclusionReason: null,
-      cost: { taxableSupply: 0, vat: 0, exempt: 0, total: 0 },
-      price: { taxableSupply, vat, exempt, total },
-    },
-  ]
+  return applyInvoiceOverrideDeltaToClosingVenues(venues, originalRows, finalRows, {
+    businessName: venue?.businessName ?? 'CJ 1016 인천 복자유치원',
+    companyName: venue?.invoice.companyName ?? null,
+  })
 }
 
 function resolvePendingItemNames(

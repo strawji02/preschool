@@ -1156,7 +1156,6 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             candidates={analysis.invoiceOverrideCandidates}
             overrides={analysis.invoiceOverrides}
             locked={locked}
-            isAdmin={isAdmin}
             onChanged={() => void analyze({ keepInputs: true })}
           />
 

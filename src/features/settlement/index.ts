@@ -51,6 +51,7 @@ export {
 export {
   DEFAULT_INVOICE_OVERRIDE_REASON,
   applyInvoiceOverrides,
+  applyInvoiceOverrideDeltaToClosingVenues,
   validateInvoiceOverrideDraft,
   type InvoiceOverride,
   type InvoiceOverrideDraft,
@@ -247,6 +248,7 @@ export {
   listInvoiceOverrides,
   createInvoiceOverride,
   createInvoiceOverrides,
+  saveInvoiceOverrides,
   approveInvoiceOverride,
   approveInvoiceOverrides,
   cancelInvoiceOverride,

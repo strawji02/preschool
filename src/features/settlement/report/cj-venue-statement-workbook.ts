@@ -34,7 +34,7 @@ export async function writeCjVenueStatementXlsx(input: {
   detail.getCell('A2').value = '정산월'
   detail.getCell('B2').value = input.period
   detail.getCell('D2').value = '금액 기준'
-  detail.getCell('E2').value = 'CJ 공급사 원본(원단위)'
+  detail.getCell('E2').value = 'CJ 공급사 원본(최종 조정은 집계표에 표시)'
   const headers = [
     '납품일', '식당명', '상품코드', '상품명', '원산지', '단위', '수량', '단가',
     '과세 공급가', '면세', '공급가 합계', '부가세', '총액',
@@ -129,7 +129,22 @@ export async function writeCjVenueStatementXlsx(input: {
   summary.getRow(finalTotalRow).font = { bold: true, color: { argb: NAVY } }
   summary.getRow(finalTotalRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE } }
 
-  summary.pageSetup.printArea = `A1:O${Math.max(totalRow.number, finalTotalRow)}`
+  const deltaRow = finalTotalRow + 1
+  summary.getRow(deltaRow).getCell(10).value = '조정 증감'
+  summary.getRow(deltaRow).getCell(12).value = {
+    formula: `L${finalTotalRow}-(B${totalRow.number}+C${totalRow.number})`,
+  }
+  summary.getRow(deltaRow).getCell(13).value = {
+    formula: `M${finalTotalRow}-E${totalRow.number}`,
+  }
+  summary.getRow(deltaRow).getCell(14).value = {
+    formula: `N${finalTotalRow}-F${totalRow.number}`,
+  }
+  summary.getRow(deltaRow).getCell(15).value = '최종 청구 − CJ 공급사 원본'
+  summary.getRow(deltaRow).font = { bold: true, color: { argb: '9A3412' } }
+  summary.getRow(deltaRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDD5' } }
+
+  summary.pageSetup.printArea = `A1:O${Math.max(totalRow.number, deltaRow)}`
   summary.pageSetup.printTitlesRow = '1:4'
   summary.views = [{ state: 'frozen', ySplit: 4 }]
 

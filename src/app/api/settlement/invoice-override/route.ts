@@ -5,10 +5,10 @@ import {
   approveInvoiceOverride,
   approveInvoiceOverrides,
   cancelInvoiceOverride,
-  createInvoiceOverride,
-  createInvoiceOverrides,
   isValidPeriod,
   listInvoiceOverrides,
+  loadClosing,
+  saveInvoiceOverrides,
 } from '@/features/settlement'
 
 export async function GET(request: NextRequest) {
@@ -33,41 +33,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 })
   }
   const action = String(body.action ?? '')
-  const guard = action === 'create' || action === 'create-batch'
+  const guard = action === 'create' || action === 'create-batch' || action === 'save-batch'
     ? await requireApiUser()
     : await requireApiAdmin()
   if ('response' in guard) return guard.response
 
   try {
-    if (action === 'create') {
+    if (action === 'create' || action === 'create-batch' || action === 'save-batch') {
       const period = String(body.period ?? '')
-      const taxKind = String(body.taxKind ?? '')
-      if (!isValidPeriod(period) || (taxKind !== 'taxable' && taxKind !== 'exempt')) {
-        return NextResponse.json({ success: false, error: '정산월 또는 과세구분이 올바르지 않습니다.' }, { status: 400 })
-      }
-      const override = await createInvoiceOverride({
-        period,
-        taxKind,
-        itemName: String(body.itemName ?? ''),
-        originalSupply: Number(body.originalSupply),
-        originalVat: Number(body.originalVat),
-        finalSupply: Number(body.finalSupply),
-        finalVat: Number(body.finalVat),
-        reason: String(body.reason ?? ''),
-        actor: guard.user.email,
-      })
-      return NextResponse.json({ success: true, override })
-    }
-    if (action === 'create-batch') {
-      const period = String(body.period ?? '')
-      const items = Array.isArray(body.items) ? body.items : []
+      const items = action === 'create'
+        ? [body]
+        : Array.isArray(body.items) ? body.items : []
       if (!isValidPeriod(period) || items.length === 0 || items.length > 100) {
         return NextResponse.json(
-          { success: false, error: '정산월과 승인 요청 항목을 확인해 주세요.' },
+          { success: false, error: '정산월과 원단위 조정 항목을 확인해 주세요.' },
           { status: 400 }
         )
       }
-      const overrides = await createInvoiceOverrides({
+      const closing = await loadClosing(period)
+      if (closing?.status === 'closed') {
+        return NextResponse.json(
+          { success: false, error: '마감된 달은 수정할 수 없습니다. 먼저 마감을 해제해 주세요.' },
+          { status: 409 }
+        )
+      }
+      const overrides = await saveInvoiceOverrides({
         period,
         actor: guard.user.email,
         items: items.map((raw) => {
@@ -87,7 +77,11 @@ export async function POST(request: NextRequest) {
           }
         }),
       })
-      return NextResponse.json({ success: true, overrides })
+      return NextResponse.json({
+        success: true,
+        overrides,
+        requiresReconfirm: closing?.status === 'confirmed',
+      })
     }
     if (action === 'approve') {
       await approveInvoiceOverride(String(body.id ?? ''), guard.user.email)

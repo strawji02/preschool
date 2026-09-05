@@ -43,6 +43,8 @@ describe('CJ 유치원 청구 파일', () => {
     expect(wb.worksheets.map((sheet) => sheet.name)).toEqual(['거래명세서', '집계표'])
     expect(String(wb.getWorksheet('집계표')!.getCell('C5').formula)).toContain("'거래명세서'!")
     expect(wb.getWorksheet('집계표')!.getCell('L5').value).toBe(99_999)
+    expect(wb.getWorksheet('집계표')!.getCell('J7').value).toBe('조정 증감')
+    expect(wb.getWorksheet('집계표')!.getCell('N7').formula).toBe('N6-F6')
     expect(wb.getWorksheet('거래명세서')!.pageSetup.fitToWidth).toBe(1)
     expect(wb.getWorksheet('집계표')!.pageSetup.fitToWidth).toBe(1)
   })

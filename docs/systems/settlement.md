@@ -237,7 +237,7 @@
 | 인라인 해결·마감 체크리스트 | `app/app/settlement/pending-panel.tsx`, `api/settlement/master` | **프로덕션 반영** (§14-3) |
 | 월 마감 + 스냅샷 | migration 053, `data/closing.ts`, `api/settlement/closing` | **프로덕션 반영** (§8, §14-1) |
 | 마감 잠금 + 해제 (admin) | migration 057, `calc/closing.ts` `closingTransition` | **프로덕션 반영** (§8-1) |
-| 공급사 원본 금액 + CJ 1016 예외 | migration 068, `calc/invoice-policy.ts` | **프로덕션 반영** (§6-2) |
+| 공급사 원본 금액 + CJ 1016 예외 | migration 068/070, `calc/invoice-policy.ts` | **구현 완료** (§6-2) |
 | 산출물 다시 받기 | `report/rebuild-blocks.ts`, `GET /api/settlement/{invoice,report}` | **프로덕션 반영** (§8-2) |
 | 경영 보고서 | `app/app/settlement/report`, `calc/report-rollup.ts` | **프로덕션 반영** (§13) |
 | 수금·공급자 대금 관리 | migration 055/068, `app/app/settlement/collection` | **프로덕션 반영** (§9) |

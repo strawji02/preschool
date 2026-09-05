@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_INVOICE_OVERRIDE_REASON,
   applyInvoiceOverrides,
+  applyInvoiceOverrideDeltaToClosingVenues,
+  closingTotals,
   collectInvoiceRows,
+  rollupByKindergarten,
   validateInvoiceOverrideDraft,
   type InvoiceOverride,
   type InvoiceParty,
@@ -88,6 +91,18 @@ describe('CJ 1016 원단위 예외', () => {
     })).toContain('면세')
   })
 
+  it('유치원 요청에 따라 공급가·부가세와 총 청구액을 함께 바꿀 수 있다', () => {
+    expect(validateInvoiceOverrideDraft({
+      taxKind: 'taxable',
+      itemName: '급식재료',
+      originalSupply: 100,
+      originalVat: 10,
+      finalSupply: 105,
+      finalVat: 11,
+      reason: '유치원 요청',
+    })).toBeNull()
+  })
+
   it('승인된 CJ 1016 조정만 계산서 행에 반영한다', () => {
     const rows = collectInvoiceRows([
       line({ businessCode: '1016', businessName: '인천 복자유치원' }),
@@ -124,5 +139,61 @@ describe('CJ 1016 원단위 예외', () => {
       vat: 13_614,
     })
     expect(result.problems[0]).toContain('원본 금액이 변경')
+  })
+
+  it('조정 차액은 파트너 원본을 바꾸지 않고 본사 부담 행으로 분리한다', () => {
+    const source = [{
+      source: 'cj' as const,
+      businessCode: '1016',
+      businessName: '키즈웰에듀푸드(복자유치원)',
+      restaurantCode: 'restaurant-1',
+      restaurantName: '급식재료',
+      companyName: '인천 복자유치원',
+      partnerId: 'partner-1',
+      partnerName: '이동현',
+      isExcluded: false,
+      exclusionReason: null,
+      cost: { taxableSupply: 80, vat: 8, exempt: 0, total: 88 },
+      price: { taxableSupply: 100, vat: 10, exempt: 0, total: 110 },
+    }]
+    const originalRows = collectInvoiceRows([
+      line({
+        businessCode: '1016',
+        businessName: '키즈웰에듀푸드(복자유치원)',
+        price: { taxableSupply: 100, vat: 10, exempt: 0, total: 110 },
+      }),
+    ]).rows
+    const finalRows = applyInvoiceOverrides(originalRows, [{
+      ...approved,
+      originalSupply: 100,
+      originalVat: 10,
+      finalSupply: 105,
+      finalVat: 11,
+    }]).rows
+
+    const result = applyInvoiceOverrideDeltaToClosingVenues(
+      source,
+      originalRows,
+      finalRows,
+      { businessName: source[0].businessName, companyName: source[0].companyName }
+    )
+
+    expect(result[0]).toEqual(source[0])
+    expect(result[1]).toMatchObject({
+      restaurantCode: 'invoice-override',
+      partnerId: null,
+      cost: { total: 0 },
+      price: { taxableSupply: 5, vat: 1, exempt: 0, total: 6 },
+    })
+
+    const partner = {
+      partnerId: 'partner-1', partnerName: '이동현', partnerType: 'partner' as const,
+      commissionPercent: 5, costTotal: 88, costVat: 8, priceTotal: 110, priceVat: 10,
+      margin: 22, platformFee: 0, vatDiff: 2, businessDeduction: 0,
+      preTax: 20, declared: 20, incomeTax: 0, localTax: 0, netPay: 20,
+    }
+    const totals = closingTotals(result, [partner])
+    expect(totals).toMatchObject({ revenue: 116, grossMargin: 28, partnerPreTax: 20, hqShare: 8 })
+    expect(rollupByKindergarten(result)[0].priceTotal).toBe(116)
   })
 })

@@ -115,6 +115,48 @@ export async function createInvoiceOverrides(input: {
   return (data ?? []).map((row) => toRecord(row as unknown as Row))
 }
 
+/**
+ * 담당자가 저장한 값을 즉시 승인 상태로 반영한다.
+ * DB 함수가 이전 활성 행 취소와 새 승인 행 생성을 한 트랜잭션으로 처리한다.
+ */
+export async function saveInvoiceOverrides(input: {
+  period: string
+  actor: string
+  items: readonly InvoiceOverrideDraft[]
+}): Promise<InvoiceOverride[]> {
+  if (input.items.length === 0 || input.items.length > 100) {
+    throw new InvoiceOverrideError('원단위 조정은 한 번에 1~100건까지 저장할 수 있습니다.')
+  }
+  const keys = new Set<string>()
+  for (const item of input.items) {
+    const problem = validateInvoiceOverrideDraft(item)
+    if (problem) throw new InvoiceOverrideError(problem)
+    const key = `${item.taxKind}:${item.itemName.trim()}`
+    if (keys.has(key)) throw new InvoiceOverrideError(`중복된 조정 품목입니다: ${item.itemName}`)
+    keys.add(key)
+  }
+
+  const db = createAdminClient()
+  const { error } = await db.rpc('settlement_save_invoice_overrides', {
+    p_period: input.period,
+    p_items: input.items.map((item) => ({
+      ...item,
+      itemName: item.itemName.trim(),
+      reason: item.reason.trim(),
+    })),
+    p_actor: input.actor,
+  })
+  if (error) throw new InvoiceOverrideError(`원단위 조정 저장 실패: ${error.message}`)
+
+  const active = (await listInvoiceOverrides(input.period)).filter(
+    (item) => item.status === 'approved' && keys.has(`${item.taxKind}:${item.itemName}`)
+  )
+  if (active.length !== keys.size) {
+    throw new InvoiceOverrideError('저장된 원단위 조정 확인에 실패했습니다.')
+  }
+  return active
+}
+
 export async function approveInvoiceOverride(id: string, actor: string): Promise<void> {
   await approveInvoiceOverrides([id], actor)
 }

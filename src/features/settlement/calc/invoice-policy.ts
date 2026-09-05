@@ -1,5 +1,6 @@
 import type { InvoiceRow, InvoiceTaxKind } from '../report/invoice-sheet'
 import type { SettlementSource } from '../parse/types'
+import type { ClosingVenueRow } from './closing'
 
 export type InvoiceOverrideStatus = 'draft' | 'approved' | 'cancelled'
 
@@ -50,6 +51,59 @@ export interface ApplyInvoiceOverridesResult {
   rows: InvoiceRow[]
   applied: string[]
   problems: string[]
+}
+
+/**
+ * 승인된 CJ 1016 조정 차액을 본사 부담 행으로 분리한다.
+ * 기존 식당 행과 파트너 산식 입력은 복사조차 하지 않고 그대로 보존한다.
+ */
+export function applyInvoiceOverrideDeltaToClosingVenues(
+  venues: readonly ClosingVenueRow[],
+  originalRows: readonly InvoiceRow[],
+  finalRows: readonly InvoiceRow[],
+  venue: { businessName: string; companyName: string | null }
+): ClosingVenueRow[] {
+  const original = originalRows.filter(
+    (row) => row.venueKeys?.length === 1 && row.venueKeys[0] === ALLOWED_VENUE_KEY
+  )
+  const finalByKey = new Map(
+    finalRows
+      .filter((row) => row.venueKeys?.length === 1 && row.venueKeys[0] === ALLOWED_VENUE_KEY)
+      .map((row) => [`${row.taxKind}\u0000${row.itemName}`, row] as const)
+  )
+  let taxableSupply = 0
+  let vat = 0
+  let exempt = 0
+  for (const row of original) {
+    const final = finalByKey.get(`${row.taxKind}\u0000${row.itemName}`)
+    if (!final) continue
+    if (row.taxKind === 'taxable') {
+      taxableSupply += final.supply - row.supply
+      vat += final.vat - row.vat
+    } else {
+      exempt += final.supply - row.supply
+    }
+  }
+  const total = taxableSupply + vat + exempt
+  if (total === 0 && taxableSupply === 0 && vat === 0 && exempt === 0) return [...venues]
+
+  return [
+    ...venues,
+    {
+      source: 'cj',
+      businessCode: '1016',
+      businessName: venue.businessName,
+      restaurantCode: 'invoice-override',
+      restaurantName: '복자유치원 원단위 조정(본사 부담)',
+      companyName: venue.companyName,
+      partnerId: null,
+      partnerName: null,
+      isExcluded: false,
+      exclusionReason: null,
+      cost: { taxableSupply: 0, vat: 0, exempt: 0, total: 0 },
+      price: { taxableSupply, vat, exempt, total },
+    },
+  ]
 }
 
 const ALLOWED_VENUE_KEY = 'cj:1016'
