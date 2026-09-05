@@ -116,7 +116,11 @@ export function applyInvoiceOverrides(
   sourceRows: readonly InvoiceRow[],
   overrides: readonly InvoiceOverride[]
 ): ApplyInvoiceOverridesResult {
-  const rows = sourceRows.map((row) => ({ ...row, venueKeys: [...(row.venueKeys ?? [])] }))
+  const rows = sourceRows.map((row) => ({
+    ...row,
+    venueKeys: [...(row.venueKeys ?? [])],
+    restaurantNames: [...(row.restaurantNames ?? [])],
+  }))
   const applied: string[] = []
   const problems: string[] = []
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import ClosingPanel from './closing-panel'
+import ClosingPanel, { type ClosingStatusValue } from './closing-panel'
 import PendingPanel from './pending-panel'
 import AdjustmentPanel, {
   type AdjustmentRow,
@@ -130,6 +130,7 @@ interface AnalyzeResponse {
     itemName: string
     supply: number
     vat: number
+    restaurantNames?: string[]
   }[]
   canIssueInvoices: boolean
   /** 인라인 해결용 구조화 정보 (docs §14-3) */
@@ -210,6 +211,11 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 서버가 저장을 거부하므로 화면만 잠그는 게 아니라 **입력 자체를 막아** 헛수고를 없앤다.
    */
   const [locked, setLocked] = useState(false)
+  const [closingStatus, setClosingStatus] = useState<ClosingStatusValue>('draft')
+  const handleClosingStatusChange = useCallback((status: ClosingStatusValue) => {
+    setClosingStatus(status)
+    setLocked(status === 'closed')
+  }, [])
   const [pendingWorkNoteCount, setPendingWorkNoteCount] = useState(0)
   /**
    * 서버에 보관된 원천 (docs §20). 있으면 파일을 다시 올리지 않아도 된다 —
@@ -1156,6 +1162,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             candidates={analysis.invoiceOverrideCandidates}
             overrides={analysis.invoiceOverrides}
             locked={locked}
+            closingStatus={closingStatus}
             onChanged={() => void analyze({ keepInputs: true })}
           />
 
@@ -1669,7 +1676,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             memoPendingCount={pendingWorkNoteCount}
             isAdmin={isAdmin}
             onSave={saveClosing}
-            onStatusChange={setLocked}
+            onStatusChange={handleClosingStatusChange}
           />
         </>
       )}

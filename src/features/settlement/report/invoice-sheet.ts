@@ -252,6 +252,8 @@ export interface InvoiceRow {
   vat: number
   /** 몇 개 식당이 합쳐졌는지. 1이면 단독 (해밀 사례는 2) */
   mergedFrom: number
+  /** 이 계산서 행을 만든 원천 식당명. 화면에서 유치원 요청서와 대조할 때 쓴다. */
+  restaurantNames?: string[]
   /** 이 계산서 행의 원천 사업장. CJ 1016 예외 적용 대상을 코드로 검증한다. */
   venueKeys?: string[]
   /** 외부 사입 별도행은 CJ 1016 공급사 원본 조정 대상이 아니다. */
@@ -401,6 +403,10 @@ export function collectInvoiceRows(
         existing.supply += supply
         existing.vat += vat
         existing.mergedFrom += 1
+        existing.restaurantNames ??= []
+        if (!existing.restaurantNames.includes(line.restaurantName)) {
+          existing.restaurantNames.push(line.restaurantName)
+        }
         const venueKey = `${line.source}:${line.businessCode}`
         existing.venueKeys ??= []
         if (!existing.venueKeys.includes(venueKey)) existing.venueKeys.push(venueKey)
@@ -412,6 +418,7 @@ export function collectInvoiceRows(
           supply,
           vat,
           mergedFrom: 1,
+          restaurantNames: [line.restaurantName],
           venueKeys: [`${line.source}:${line.businessCode}`],
           allowVenueOverride: !line.groupKey,
           roundingDiff: 0,

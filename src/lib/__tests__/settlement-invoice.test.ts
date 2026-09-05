@@ -143,6 +143,10 @@ describe('collectInvoiceRows — 발행 단위 (유치원 × 품목 × 과세구
       supply: 136_140,
       vat: 13_614,
       mergedFrom: 2,
+      restaurantNames: [
+        '키즈웰에듀푸드(해밀유치원)',
+        '키즈웰에듀푸드(해밀유치원_급식재료)',
+      ],
     })
   })
 

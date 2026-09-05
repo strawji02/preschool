@@ -100,8 +100,8 @@ export default function ClosingPanel({
   isAdmin: boolean
   /** 저장 실행 — 파일·공제·분할을 붙여 보내는 건 부모가 한다 */
   onSave: (action: 'confirm' | 'close', reason: string | null) => Promise<boolean>
-  /** 마감 여부를 부모에게 알린다 — 입력 잠금에 쓴다 */
-  onStatusChange: (locked: boolean) => void
+  /** 현재 상태를 부모에게 알린다 — 입력 잠금과 재확정 안내에 쓴다 */
+  onStatusChange: (status: ClosingStatusValue) => void
 }) {
   const [closing, setClosing] = useState<ClosingView | null>(null)
   const [revisions, setRevisions] = useState<ClosingRevisionView[]>([])
@@ -122,7 +122,7 @@ export default function ClosingPanel({
       if (json?.success) {
         setClosing(json.closing ?? null)
         setRevisions(json.revisions ?? [])
-        onStatusChange(json.closing?.status === 'closed')
+        onStatusChange(json.closing?.status ?? 'draft')
       }
     } finally {
       setLoading(false)
@@ -181,7 +181,7 @@ export default function ClosingPanel({
   const reasonMissing = needsReason && reason.trim() === ''
 
   return (
-    <section className="rounded-2xl border border-gray-200 bg-white p-6">
+    <section id="settlement-closing" className="scroll-mt-6 rounded-2xl border border-gray-200 bg-white p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold text-gray-900">
           8. 월 마감
