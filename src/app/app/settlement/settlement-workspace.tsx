@@ -613,7 +613,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
    * 유치원 제공 거래명세표 (docs §19).
    *
    * 유치원마다 **따로** 받는다 — 한 파일에 여러 곳을 담으면 다른 유치원 단가가
-   * 섞인다. 신세계 유치원만 만들 수 있다 (CJ 집계표에는 품목이 없다).
+   * 섞인다. 신세계는 기존 템플릿, CJ는 집계표·거래명세서 2시트 형식으로 만든다.
    */
   async function downloadVenueStatement(
     source: 'shinsegae' | 'cj',
@@ -1550,7 +1550,7 @@ export default function SettlementWorkspace({ isAdmin }: { isAdmin: boolean }) {
             9. 유치원 제공 거래명세표 (docs §19).
 
             신세계는 원천 집계표·일자 명세를 재현하고 외부 사입을 별도 시트로 붙인다.
-            CJ는 원천 품목 상세가 없어 승인된 외부 사입이 있을 때만 외부 사입 명세를 만든다.
+            CJ는 거래명세서 원천을 기준으로 집계표·거래명세서 2시트 파일을 만든다.
             유치원마다 따로 받는다. 한 파일에 여러 곳을 담으면 다른 유치원 단가가 섞인다.
           */}
           {analysis.statementVenues.length > 0 && (

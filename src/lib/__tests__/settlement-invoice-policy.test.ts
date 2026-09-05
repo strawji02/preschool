@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_INVOICE_OVERRIDE_REASON,
   applyInvoiceOverrides,
   collectInvoiceRows,
+  validateInvoiceOverrideDraft,
   type InvoiceOverride,
   type InvoiceParty,
   type InvoiceVenueLine,
@@ -60,6 +62,31 @@ describe('CJ 1016 원단위 예외', () => {
     reason: '유치원 회계 요청에 따른 원단위 조정',
     status: 'approved',
   }
+
+  it('승인 요청 사유의 기본값은 유치원 요청이다', () => {
+    expect(DEFAULT_INVOICE_OVERRIDE_REASON).toBe('유치원 요청')
+  })
+
+  it('일괄 요청도 각 행의 원단위·면세 규칙을 먼저 검증한다', () => {
+    expect(validateInvoiceOverrideDraft({
+      taxKind: 'taxable',
+      itemName: '급식재료',
+      originalSupply: 100,
+      originalVat: 10,
+      finalSupply: 99,
+      finalVat: 11,
+      reason: DEFAULT_INVOICE_OVERRIDE_REASON,
+    })).toBeNull()
+    expect(validateInvoiceOverrideDraft({
+      taxKind: 'exempt',
+      itemName: '급식재료',
+      originalSupply: 100,
+      originalVat: 0,
+      finalSupply: 99,
+      finalVat: 1,
+      reason: DEFAULT_INVOICE_OVERRIDE_REASON,
+    })).toContain('면세')
+  })
 
   it('승인된 CJ 1016 조정만 계산서 행에 반영한다', () => {
     const rows = collectInvoiceRows([

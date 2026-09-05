@@ -2,8 +2,10 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type {
   InvoiceOverride,
+  InvoiceOverrideDraft,
   InvoiceOverrideStatus,
 } from '../calc/invoice-policy'
+import { validateInvoiceOverrideDraft } from '../calc/invoice-policy'
 import type { InvoiceTaxKind } from '../report/invoice-sheet'
 
 export class InvoiceOverrideError extends Error {}
@@ -65,48 +67,86 @@ export async function createInvoiceOverride(input: {
   reason: string
   actor: string
 }): Promise<InvoiceOverride> {
-  const values = [input.originalSupply, input.originalVat, input.finalSupply, input.finalVat]
-  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
-    throw new InvoiceOverrideError('공급가·부가세는 0 이상의 원 단위 정수로 입력해 주세요.')
+  const [created] = await createInvoiceOverrides({
+    period: input.period,
+    actor: input.actor,
+    items: [input],
+  })
+  return created
+}
+
+/** 여러 조정행을 한 SQL insert로 저장해 부분 승인요청을 만들지 않는다. */
+export async function createInvoiceOverrides(input: {
+  period: string
+  actor: string
+  items: readonly InvoiceOverrideDraft[]
+}): Promise<InvoiceOverride[]> {
+  if (input.items.length === 0 || input.items.length > 100) {
+    throw new InvoiceOverrideError('승인 요청은 한 번에 1~100건까지 처리할 수 있습니다.')
   }
-  if (input.taxKind === 'exempt' && (input.originalVat !== 0 || input.finalVat !== 0)) {
-    throw new InvoiceOverrideError('면세 계산서에는 부가세를 입력할 수 없습니다.')
-  }
-  if (!input.itemName.trim() || !input.reason.trim()) {
-    throw new InvoiceOverrideError('품목명과 조정 사유를 입력해 주세요.')
+  const keys = new Set<string>()
+  for (const item of input.items) {
+    const problem = validateInvoiceOverrideDraft(item)
+    if (problem) throw new InvoiceOverrideError(problem)
+    const key = `${item.taxKind}:${item.itemName.trim()}`
+    if (keys.has(key)) throw new InvoiceOverrideError(`중복된 조정 품목입니다: ${item.itemName}`)
+    keys.add(key)
   }
 
   const db = createAdminClient()
   const { data, error } = await db
     .from('settlement_invoice_overrides')
-    .insert({
+    .insert(input.items.map((item) => ({
       period: input.period,
-      source: 'cj',
-      business_code: '1016',
-      tax_kind: input.taxKind,
-      item_name: input.itemName.trim(),
-      original_supply: input.originalSupply,
-      original_vat: input.originalVat,
-      final_supply: input.finalSupply,
-      final_vat: input.finalVat,
-      reason: input.reason.trim(),
-      status: 'draft',
+      source: 'cj' as const,
+      business_code: '1016' as const,
+      tax_kind: item.taxKind,
+      item_name: item.itemName.trim(),
+      original_supply: item.originalSupply,
+      original_vat: item.originalVat,
+      final_supply: item.finalSupply,
+      final_vat: item.finalVat,
+      reason: item.reason.trim(),
+      status: 'draft' as const,
       created_by: input.actor,
-    })
+    })))
     .select(COLUMNS)
-    .single()
   if (error) throw new InvoiceOverrideError(`원단위 조정 저장 실패: ${error.message}`)
-  return toRecord(data as unknown as Row)
+  return (data ?? []).map((row) => toRecord(row as unknown as Row))
 }
 
 export async function approveInvoiceOverride(id: string, actor: string): Promise<void> {
+  await approveInvoiceOverrides([id], actor)
+}
+
+/** 여러 승인대기 건을 한 SQL update로 승인한다. */
+export async function approveInvoiceOverrides(ids: readonly string[], actor: string): Promise<void> {
+  const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+  if (uniqueIds.length === 0 || uniqueIds.length > 100) {
+    throw new InvoiceOverrideError('승인은 한 번에 1~100건까지 처리할 수 있습니다.')
+  }
   const db = createAdminClient()
-  const { error } = await db
+  const existing = await db
+    .from('settlement_invoice_overrides')
+    .select('id, status')
+    .in('id', uniqueIds)
+  if (existing.error) {
+    throw new InvoiceOverrideError(`원단위 조정 승인 전 확인 실패: ${existing.error.message}`)
+  }
+  if ((existing.data ?? []).length !== uniqueIds.length ||
+    (existing.data ?? []).some((row) => row.status !== 'draft')) {
+    throw new InvoiceOverrideError('이미 처리됐거나 찾을 수 없는 승인 요청이 포함되어 있습니다.')
+  }
+  const { data, error } = await db
     .from('settlement_invoice_overrides')
     .update({ status: 'approved', approved_at: new Date().toISOString(), approved_by: actor })
-    .eq('id', id)
+    .in('id', uniqueIds)
     .eq('status', 'draft')
+    .select('id')
   if (error) throw new InvoiceOverrideError(`원단위 조정 승인 실패: ${error.message}`)
+  if ((data ?? []).length !== uniqueIds.length) {
+    throw new InvoiceOverrideError('이미 처리됐거나 찾을 수 없는 승인 요청이 포함되어 있습니다.')
+  }
 }
 
 export async function cancelInvoiceOverride(

@@ -1,6 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  DEFAULT_INVOICE_OVERRIDE_REASON,
+  validateInvoiceOverrideDraft,
+} from '@/features/settlement/client'
 
 interface Candidate {
   taxKind: 'taxable' | 'exempt'
@@ -21,6 +25,17 @@ interface Override {
   status: 'draft' | 'approved' | 'cancelled'
 }
 
+interface DraftEdit {
+  originalSupply: number
+  originalVat: number
+  supply: string
+  vat: string
+  reason: string
+}
+
+const candidateKey = (candidate: Pick<Candidate, 'taxKind' | 'itemName'>) =>
+  `${candidate.taxKind}:${candidate.itemName}`
+
 export default function InvoiceOverridePanel({ period, candidates, overrides, locked, isAdmin, onChanged }: {
   period: string
   candidates: Candidate[]
@@ -31,6 +46,59 @@ export default function InvoiceOverridePanel({ period, candidates, overrides, lo
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [edits, setEdits] = useState<Record<string, DraftEdit>>({})
+
+  useEffect(() => {
+    setEdits((previous) => {
+      const next: Record<string, DraftEdit> = {}
+      for (const candidate of candidates) {
+        const key = candidateKey(candidate)
+        const existing = previous[key]
+        next[key] = existing &&
+          existing.originalSupply === candidate.supply &&
+          existing.originalVat === candidate.vat
+          ? existing
+          : {
+              originalSupply: candidate.supply,
+              originalVat: candidate.vat,
+              supply: String(candidate.supply),
+              vat: String(candidate.vat),
+              reason: DEFAULT_INVOICE_OVERRIDE_REASON,
+            }
+      }
+      return next
+    })
+  }, [candidates])
+
+  const activeKeys = useMemo(
+    () => new Set(overrides.filter((item) => item.status !== 'cancelled').map(candidateKey)),
+    [overrides]
+  )
+  const pendingIds = overrides
+    .filter((item) => item.status === 'draft')
+    .map((item) => item.id)
+
+  const batchItems = candidates.flatMap((candidate) => {
+    const key = candidateKey(candidate)
+    if (activeKeys.has(key)) return []
+    const edit = edits[key]
+    if (!edit) return []
+    const finalSupply = Number(edit.supply.replace(/,/g, ''))
+    const finalVat = Number(edit.vat.replace(/,/g, ''))
+    if (finalSupply === candidate.supply && finalVat === candidate.vat) return []
+    return [{
+      taxKind: candidate.taxKind,
+      itemName: candidate.itemName,
+      originalSupply: candidate.supply,
+      originalVat: candidate.vat,
+      finalSupply,
+      finalVat,
+      reason: edit.reason.trim(),
+    }]
+  })
+  const batchProblem = batchItems
+    .map(validateInvoiceOverrideDraft)
+    .find((problem): problem is string => problem !== null) ?? null
 
   async function send(payload: Record<string, unknown>, key: string) {
     setBusy(key)
@@ -55,6 +123,16 @@ export default function InvoiceOverridePanel({ period, candidates, overrides, lo
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
         일반 거래처는 공급사 공급가·부가세·면세 금액을 그대로 사용합니다. 이 화면은 CJ 사업장코드 1016만 예외이며 원본·최종값·사유·승인이 모두 기록됩니다.
       </p>
+      {isAdmin && pendingIds.length > 0 && !locked && (
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void send({ action: 'approve-batch', ids: pendingIds }, 'approve-batch')}
+          className="mt-3 rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+        >
+          {busy === 'approve-batch' ? '일괄 승인 중…' : `승인대기 ${pendingIds.length}건 일괄 승인`}
+        </button>
+      )}
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {candidates.length === 0 ? (
         <p className="mt-4 text-sm text-slate-400">이번 달 CJ 1016 계산서 품목이 없습니다.</p>
@@ -76,35 +154,62 @@ export default function InvoiceOverridePanel({ period, candidates, overrides, lo
                 )}
               </div>
             ) : (
-              <OverrideForm key={`${candidate.taxKind}:${candidate.itemName}`} candidate={candidate} disabled={locked || busy !== null} onSubmit={(finalSupply, finalVat, reason) => void send({ action: 'create', period, taxKind: candidate.taxKind, itemName: candidate.itemName, originalSupply: candidate.supply, originalVat: candidate.vat, finalSupply, finalVat, reason }, `${candidate.taxKind}:${candidate.itemName}`)} />
+              <OverrideForm
+                key={candidateKey(candidate)}
+                candidate={candidate}
+                edit={edits[candidateKey(candidate)]}
+                disabled={locked || busy !== null}
+                onChange={(next) => setEdits((previous) => ({
+                  ...previous,
+                  [candidateKey(candidate)]: next,
+                }))}
+              />
             )
           })}
+        </div>
+      )}
+      {batchItems.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+          <button
+            type="button"
+            disabled={locked || busy !== null || batchProblem !== null}
+            onClick={() => void send(
+              { action: 'create-batch', period, items: batchItems },
+              'create-batch'
+            )}
+            className="rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+          >
+            {busy === 'create-batch' ? '요청 중…' : `변경 ${batchItems.length}건 한 번에 승인 요청`}
+          </button>
+          {batchProblem && <span className="text-xs text-red-600">{batchProblem}</span>}
         </div>
       )}
     </section>
   )
 }
 
-function OverrideForm({ candidate, disabled, onSubmit }: {
+function OverrideForm({ candidate, edit, disabled, onChange }: {
   candidate: Candidate
+  edit?: DraftEdit
   disabled: boolean
-  onSubmit: (supply: number, vat: number, reason: string) => void
+  onChange: (edit: DraftEdit) => void
 }) {
-  const [supply, setSupply] = useState(String(candidate.supply))
-  const [vat, setVat] = useState(String(candidate.vat))
-  const [reason, setReason] = useState('')
-  const supplyValue = Number(supply.replace(/,/g, ''))
-  const vatValue = Number(vat.replace(/,/g, ''))
-  const valid = Number.isSafeInteger(supplyValue) && supplyValue >= 0 && Number.isSafeInteger(vatValue) && vatValue >= 0 && reason.trim().length > 0
+  const value = edit ?? {
+    originalSupply: candidate.supply,
+    originalVat: candidate.vat,
+    supply: String(candidate.supply),
+    vat: String(candidate.vat),
+    reason: DEFAULT_INVOICE_OVERRIDE_REASON,
+  }
   return (
     <div className="rounded-xl border border-slate-200 px-4 py-3">
       <p className="text-sm font-medium text-slate-900">{candidate.itemName} · {candidate.taxKind === 'taxable' ? '과세' : '면세'}</p>
       <p className="mt-1 text-xs text-slate-500">원본 공급가 {candidate.supply.toLocaleString()}원 · 부가세 {candidate.vat.toLocaleString()}원</p>
       <div className="mt-3 flex flex-wrap items-end gap-2 text-xs">
-        <label><span className="mb-1 block text-slate-500">최종 공급가</span><input value={supply} onChange={(event) => setSupply(event.target.value)} className="w-28 rounded border border-slate-300 px-2 py-1 text-right" /></label>
-        <label><span className="mb-1 block text-slate-500">최종 부가세</span><input value={vat} disabled={candidate.taxKind === 'exempt'} onChange={(event) => setVat(event.target.value)} className="w-28 rounded border border-slate-300 px-2 py-1 text-right disabled:bg-slate-100" /></label>
-        <label><span className="mb-1 block text-slate-500">조정 사유</span><input value={reason} onChange={(event) => setReason(event.target.value)} className="w-64 rounded border border-slate-300 px-2 py-1" /></label>
-        <button type="button" disabled={disabled || !valid} onClick={() => onSubmit(supplyValue, vatValue, reason.trim())} className="rounded bg-slate-800 px-3 py-1 text-white disabled:opacity-40">승인 요청</button>
+        <label><span className="mb-1 block text-slate-500">최종 공급가</span><input disabled={disabled} value={value.supply} onChange={(event) => onChange({ ...value, supply: event.target.value })} className="w-28 rounded border border-slate-300 px-2 py-1 text-right disabled:bg-slate-100" /></label>
+        <label><span className="mb-1 block text-slate-500">최종 부가세</span><input value={value.vat} disabled={disabled || candidate.taxKind === 'exempt'} onChange={(event) => onChange({ ...value, vat: event.target.value })} className="w-28 rounded border border-slate-300 px-2 py-1 text-right disabled:bg-slate-100" /></label>
+        <label><span className="mb-1 block text-slate-500">조정 사유</span><input disabled={disabled} value={value.reason} onChange={(event) => onChange({ ...value, reason: event.target.value })} className="w-64 rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100" /></label>
+        <span className="pb-1 text-slate-400">변경한 행은 아래에서 한 번에 요청합니다.</span>
       </div>
     </div>
   )

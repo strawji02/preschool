@@ -14,6 +14,12 @@ import { useState } from 'react'
  */
 
 type Kind = 'taxable' | 'exempt' | 'report' | 'partner-all' | `partner:${string}`
+type Venue = {
+  source: 'shinsegae' | 'cj'
+  businessCode: string
+  businessName: string
+}
+type BusyKey = Kind | `venue:${'shinsegae' | 'cj'}:${string}`
 
 const LABEL: Record<'taxable' | 'exempt' | 'report' | 'partner-all', string> = {
   taxable: '세금계산서 (과세)',
@@ -27,14 +33,18 @@ export default function ReportDownloads({
   taxableCount,
   exemptCount,
   partners,
+  closingRevision,
+  statementVenues,
 }: {
   /** `YYYY-MM` */
   period: string
   taxableCount: number
   exemptCount: number
   partners: { partnerId: string; partnerName: string }[]
+  closingRevision: number
+  statementVenues: Venue[]
 }) {
-  const [busy, setBusy] = useState<Kind | null>(null)
+  const [busy, setBusy] = useState<BusyKey | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function download(kind: Kind) {
@@ -68,6 +78,38 @@ export default function ReportDownloads({
       URL.revokeObjectURL(href)
     } catch (e) {
       setError(e instanceof Error ? e.message : '다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function downloadVenue(venue: Venue) {
+    const key = `venue:${venue.source}:${venue.businessCode}` as const
+    setBusy(key)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('period', period)
+      form.append('source', venue.source)
+      form.append('businessCode', venue.businessCode)
+      form.append('priceBookPeriod', period)
+      form.append('closingRevision', String(closingRevision))
+      const res = await fetch('/api/settlement/venue-statement', { method: 'POST', body: form })
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error ?? `${venue.businessName} 거래명세표를 만들지 못했습니다.`)
+        return
+      }
+      const blob = await res.blob()
+      const href = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = href
+      a.download = fileNameOf(res.headers.get('Content-Disposition')) ??
+        `거래명세표_${venue.businessName}_${period}.xlsx`
+      a.click()
+      URL.revokeObjectURL(href)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '거래명세표 다운로드 중 오류가 발생했습니다.')
     } finally {
       setBusy(null)
     }
@@ -137,6 +179,28 @@ export default function ReportDownloads({
         </div>
       )}
 
+      {statementVenues.length > 0 && (
+        <div className="mt-5 border-t border-gray-100 pt-4">
+          <p className="text-xs font-medium text-gray-600">유치원 거래명세표</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {statementVenues.map((venue) => {
+              const key = `venue:${venue.source}:${venue.businessCode}` as const
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => void downloadVenue(venue)}
+                  disabled={busy !== null}
+                  className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-800 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {busy === key ? '생성 중…' : `${venue.businessName} (${venue.source === 'cj' ? 'CJ' : '신세계'})`}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <p className="mt-3 text-xs text-gray-400">
         관리자 내역서에는 <span className="font-medium text-gray-600">집계표_정산용</span> ·{' '}
         <span className="font-medium text-gray-600">사업자공제 상세</span> ·{' '}
@@ -144,6 +208,8 @@ export default function ReportDownloads({
         들어 있고, 해당 데이터가 있으면 조정·외부 사입 상세가 추가됩니다. 지급명세서의
         주민번호 칸은 비어 있습니다.
         <br />파트너 정산서는 요약·유치원별 상세·공제 근거만 담은 독립 파일입니다.
+        <br />유치원 거래명세표는 마감 리비전과 보관 원천의 청구 합계가 일치할 때만
+        다시 생성됩니다.
       </p>
     </section>
   )

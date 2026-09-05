@@ -4,6 +4,7 @@ import {
   buildShinsegaeStatement,
   isExcelUpload,
   loadPriceLookup,
+  loadClosingSnapshot,
   loadSettlementMaster,
   NO_SOURCE_MESSAGE,
   resolveSources,
@@ -11,6 +12,8 @@ import {
   writeShinsegaeStatementXlsx,
   writeManualItemStatementXlsx,
   writeCjVenueStatementXlsx,
+  type InvoiceRow,
+  type ManualItemRecord,
 } from '@/features/settlement'
 
 /**
@@ -54,6 +57,8 @@ export async function POST(request: NextRequest) {
     )
   }
   const source = sourceRaw
+  const closingRevisionRaw = String(form.get('closingRevision') ?? '')
+  const closingRevision = closingRevisionRaw ? Number(closingRevisionRaw) : null
   if (!/^\d{4}-\d{2}$/.test(period) || !businessCode) {
     return NextResponse.json(
       { success: false, error: '정산월과 유치원을 지정해 주세요.' },
@@ -77,6 +82,40 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const frozen = closingRevision === null ? null : await loadClosingSnapshot(period)
+    if (closingRevision !== null &&
+      (!Number.isSafeInteger(closingRevision) || !frozen || frozen.closing.revision !== closingRevision)) {
+      return NextResponse.json(
+        { success: false, error: '선택한 마감 리비전을 찾지 못했습니다. 보고서를 새로고침해 주세요.' },
+        { status: 409 }
+      )
+    }
+
+    const frozenVenues = (frozen?.snapshot.closingVenues ?? []) as Array<{
+      source?: string
+      businessCode?: string
+      businessName?: string
+      companyName?: string | null
+      price?: { total?: number }
+    }>
+    if (frozen) {
+      const frozenTotal = frozenVenues
+        .filter((item) => item.source === source && item.businessCode === businessCode)
+        .reduce((sum, item) => sum + Number(item.price?.total ?? 0), 0)
+      const currentTotal = result.closingVenues
+        .filter((item) => item.source === source && item.businessCode === businessCode)
+        .reduce((sum, item) => sum + item.price.total, 0)
+      if (frozenTotal !== currentTotal) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `마감 당시 청구액(${frozenTotal.toLocaleString()}원)과 보관 원천(${currentTotal.toLocaleString()}원)이 달라 거래명세표 재생성을 차단했습니다.`,
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     const master = await loadSettlementMaster()
     const venue = master.venues.find(
       (v) => v.source === source && v.businessCode === businessCode
@@ -87,11 +126,21 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       )
     }
+    const frozenVenue = frozenVenues.find(
+      (item) => item.source === source && item.businessCode === businessCode
+    )
+    const sourceBusinessName = frozenVenue?.businessName ?? venue.businessName
     const shinsegaeItems = result.shinsegaeItems.filter((i) => i.businessCode === businessCode)
-    const cjItems = result.statementItems.filter((i) => i.businessName === venue.businessName)
-    const manualItems = result.manualItems.filter(
+    const cjItems = result.statementItems.filter((i) => i.businessName === sourceBusinessName)
+    const allManualItems = frozen
+      ? (frozen.snapshot.manualItems ?? []) as ManualItemRecord[]
+      : result.manualItems
+    const manualItems = allManualItems.filter(
       (i) => i.status === 'approved' && i.burden === 'venue' && i.source === source && i.businessCode === businessCode
     )
+    const frozenInvoiceRows = frozen
+      ? (frozen.snapshot.invoiceRows ?? []) as InvoiceRow[]
+      : result.invoiceRows
     if ((source === 'cj' ? cjItems.length : shinsegaeItems.length) === 0 && manualItems.length === 0) {
       return NextResponse.json(
         { success: false, error: '이 유치원의 품목을 찾지 못했습니다.' },
@@ -112,11 +161,11 @@ export async function POST(request: NextRequest) {
           { status: 404 }
         )
       }
-      const blockedOverride = result.invoiceOverrides.some(
+      const blockedOverride = !frozen && (result.invoiceOverrides.some(
         (override) => override.businessCode === businessCode && override.status === 'draft'
       ) || result.invoiceProblems.some(
         (problem) => problem.includes('원본 금액이 변경') || problem.includes('원단위 조정이 승인 대기')
-      )
+      ))
       if (blockedOverride) {
         return NextResponse.json(
           { success: false, error: 'CJ 1016 원단위 조정을 확인·승인한 뒤 청구서류를 만들어 주세요.' },
@@ -125,13 +174,13 @@ export async function POST(request: NextRequest) {
       }
       const bytes = await writeCjVenueStatementXlsx({
         period,
-        businessName: venue.invoice.companyName ?? venue.businessName,
+        businessName: frozenVenue?.companyName ?? venue.invoice.companyName ?? sourceBusinessName,
         items: cjItems,
-        finalInvoiceRows: result.invoiceRows.filter((row) =>
+        finalInvoiceRows: frozenInvoiceRows.filter((row) =>
           row.venueKeys?.includes(`cj:${businessCode}`)
         ),
       })
-      const name = `청구서류_CJ_${venue.invoice.companyName ?? venue.businessName}_${period}.xlsx`
+      const name = `청구서류_CJ_${frozenVenue?.companyName ?? venue.invoice.companyName ?? sourceBusinessName}_${period}.xlsx`
       return new NextResponse(bytes as unknown as BodyInit, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -145,7 +194,10 @@ export async function POST(request: NextRequest) {
       ★ **공급받는자는 유치원**이다. 마스터의 계산서 정보를 그대로 쓴다.
       공급자((주)신세계푸드)와 직인은 템플릿에 박혀 있어 여기서 넣지 않는다 (docs §19-2).
     */
-    const inv = venue?.invoice
+    const frozenBuyer = frozenInvoiceRows.find((row) =>
+      row.venueKeys?.includes(`${source}:${businessCode}`)
+    )?.buyer
+    const inv = frozenBuyer ?? venue.invoice
     if (!inv?.companyName || !inv.bizRegNo) {
       return NextResponse.json(
         {

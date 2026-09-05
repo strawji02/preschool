@@ -60,8 +60,11 @@ export {
 } from './calc/invoice-rounding'
 
 export {
+  DEFAULT_INVOICE_OVERRIDE_REASON,
   applyInvoiceOverrides,
+  validateInvoiceOverrideDraft,
   type InvoiceOverride,
+  type InvoiceOverrideDraft,
   type InvoiceOverrideStatus,
   type ApplyInvoiceOverridesResult,
 } from './calc/invoice-policy'

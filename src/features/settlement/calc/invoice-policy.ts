@@ -3,6 +3,33 @@ import type { SettlementSource } from '../parse/types'
 
 export type InvoiceOverrideStatus = 'draft' | 'approved' | 'cancelled'
 
+export const DEFAULT_INVOICE_OVERRIDE_REASON = '유치원 요청'
+
+export interface InvoiceOverrideDraft {
+  taxKind: InvoiceTaxKind
+  itemName: string
+  originalSupply: number
+  originalVat: number
+  finalSupply: number
+  finalVat: number
+  reason: string
+}
+
+/** 단건·일괄 승인 요청이 똑같은 금액 검증을 사용한다. */
+export function validateInvoiceOverrideDraft(input: InvoiceOverrideDraft): string | null {
+  const values = [input.originalSupply, input.originalVat, input.finalSupply, input.finalVat]
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return '공급가·부가세는 0 이상의 원 단위 정수로 입력해 주세요.'
+  }
+  if (input.taxKind === 'exempt' && (input.originalVat !== 0 || input.finalVat !== 0)) {
+    return '면세 계산서에는 부가세를 입력할 수 없습니다.'
+  }
+  if (!input.itemName.trim() || !input.reason.trim()) {
+    return '품목명과 조정 사유를 입력해 주세요.'
+  }
+  return null
+}
+
 /** CJ 1016 인천 복자유치원에만 허용하는 계산서 원단위 조정. */
 export interface InvoiceOverride {
   id: string

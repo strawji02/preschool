@@ -4,6 +4,7 @@ import SettlementHeader from '../settlement-header'
 import ReportDownloads from './downloads'
 import {
   listClosings,
+  loadActiveSources,
   loadClosingDetail,
   loadClosingSnapshot,
   loadCollection,
@@ -53,19 +54,38 @@ export default async function ReportPage({
   const closings = await listClosings()
   // 요청한 달이 없으면 가장 최근 마감을 보여준다
   const period = requested ?? closings[0]?.period ?? null
-  const [detail, collection, snapshot] = period
+  const [detail, collection, snapshot, sourceFiles] = period
     ? await Promise.all([
         loadClosingDetail(period),
         loadCollection(period),
         // 산출물 다시 받기용 — 계산서 장수만 쓴다 (docs §8-2)
         loadClosingSnapshot(period),
+        loadActiveSources(period),
       ])
-    : [null, null, null]
+    : [null, null, null, []]
 
   const invoiceRows = (snapshot?.snapshot as { invoiceRows?: { taxKind: string }[] })
     ?.invoiceRows
   const taxableCount = invoiceRows?.filter((r) => r.taxKind === 'taxable').length ?? 0
   const exemptCount = invoiceRows?.filter((r) => r.taxKind === 'exempt').length ?? 0
+  const sourceKinds = new Set(sourceFiles.map((file) => file.kind))
+  const statementVenues = detail
+    ? [...new Map(
+        detail.venues
+          .filter((venue) => !venue.isExcluded)
+          .filter((venue) => venue.source === 'shinsegae'
+            ? sourceKinds.has('shinsegae')
+            : sourceKinds.has('cj') && sourceKinds.has('cj_statement'))
+          .map((venue) => [
+            `${venue.source}:${venue.businessCode}`,
+            {
+              source: venue.source,
+              businessCode: venue.businessCode,
+              businessName: venue.companyName ?? venue.businessName,
+            },
+          ])
+      ).values()].sort((a, b) => a.businessName.localeCompare(b.businessName, 'ko'))
+    : []
 
   return (
     <div>
@@ -145,6 +165,8 @@ export default async function ReportPage({
                     partnerId: p.partnerId,
                     partnerName: p.partnerName,
                   }))}
+                  closingRevision={detail.closing.revision}
+                  statementVenues={statementVenues}
                 />
               )}
               <ReportBody detail={detail} collection={collection} />

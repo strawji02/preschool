@@ -3,8 +3,10 @@ import { requireApiAdmin, requireApiUser } from '@/features/shared/auth'
 import {
   InvoiceOverrideError,
   approveInvoiceOverride,
+  approveInvoiceOverrides,
   cancelInvoiceOverride,
   createInvoiceOverride,
+  createInvoiceOverrides,
   isValidPeriod,
   listInvoiceOverrides,
 } from '@/features/settlement'
@@ -31,7 +33,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 })
   }
   const action = String(body.action ?? '')
-  const guard = action === 'create' ? await requireApiUser() : await requireApiAdmin()
+  const guard = action === 'create' || action === 'create-batch'
+    ? await requireApiUser()
+    : await requireApiAdmin()
   if ('response' in guard) return guard.response
 
   try {
@@ -54,8 +58,42 @@ export async function POST(request: NextRequest) {
       })
       return NextResponse.json({ success: true, override })
     }
+    if (action === 'create-batch') {
+      const period = String(body.period ?? '')
+      const items = Array.isArray(body.items) ? body.items : []
+      if (!isValidPeriod(period) || items.length === 0 || items.length > 100) {
+        return NextResponse.json(
+          { success: false, error: '정산월과 승인 요청 항목을 확인해 주세요.' },
+          { status: 400 }
+        )
+      }
+      const overrides = await createInvoiceOverrides({
+        period,
+        actor: guard.user.email,
+        items: items.map((raw) => {
+          const item = (raw ?? {}) as Record<string, unknown>
+          const taxKind = String(item.taxKind ?? '')
+          if (taxKind !== 'taxable' && taxKind !== 'exempt') {
+            throw new InvoiceOverrideError('과세구분이 올바르지 않습니다.')
+          }
+          return {
+            taxKind,
+            itemName: String(item.itemName ?? ''),
+            originalSupply: Number(item.originalSupply),
+            originalVat: Number(item.originalVat),
+            finalSupply: Number(item.finalSupply),
+            finalVat: Number(item.finalVat),
+            reason: String(item.reason ?? ''),
+          }
+        }),
+      })
+      return NextResponse.json({ success: true, overrides })
+    }
     if (action === 'approve') {
       await approveInvoiceOverride(String(body.id ?? ''), guard.user.email)
+    } else if (action === 'approve-batch') {
+      const ids = Array.isArray(body.ids) ? body.ids.map(String) : []
+      await approveInvoiceOverrides(ids, guard.user.email)
     } else if (action === 'cancel') {
       await cancelInvoiceOverride(
         String(body.id ?? ''),
